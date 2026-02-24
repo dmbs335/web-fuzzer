@@ -323,10 +323,22 @@ class FuzzEngine:
         return result
 
     def _execute_references(self, inp: Input) -> list[ExecutionResult] | None:
-        """Execute input against all reference targets (parallel)."""
+        """Execute input against all reference targets (parallel).
+
+        Fast path: Rust parallel_pipe_execute (GIL-free native threads).
+        Slow path: Python ThreadPoolExecutor (fallback).
+        """
         if not self.reference_targets:
             return None
 
+        # --- Fast path: Rust parallel pipe I/O ---
+        if self._can_use_rust_pipes():
+            try:
+                return self._execute_references_rust(inp)
+            except Exception as e:
+                logger.debug("Rust pipe execute failed, falling back: %s", e)
+
+        # --- Slow path: Python ThreadPoolExecutor ---
         def _run(target: Target) -> ExecutionResult:
             try:
                 return target.execute(inp)
@@ -344,6 +356,66 @@ class FuzzEngine:
                 max_workers=len(self.reference_targets),
             )
         return list(self._ref_pool.map(_run, self.reference_targets))
+
+    def _can_use_rust_pipes(self) -> bool:
+        """Check if Rust parallel pipe execution is available and applicable."""
+        if not hasattr(self, '_rust_pipes_checked'):
+            from webfuzzer.native import RUST_EXTENSION
+            from .targets.persistent_target import PersistentTarget
+            self._rust_pipes_ok = (
+                RUST_EXTENSION
+                and len(self.reference_targets) > 1
+                and all(isinstance(t, PersistentTarget)
+                        for t in self.reference_targets)
+            )
+            self._rust_pipes_checked = True
+            if self._rust_pipes_ok:
+                logger.info("Using Rust parallel_pipe_execute for %d targets",
+                            len(self.reference_targets))
+        return self._rust_pipes_ok
+
+    def _execute_references_rust(self, inp: Input) -> list[ExecutionResult]:
+        """Execute all reference targets via Rust parallel_pipe_execute."""
+        from webfuzzer.native import parallel_pipe_execute
+        from .targets.persistent_target import PersistentTarget
+
+        # Collect handles, restarting dead processes
+        handles: list[tuple[int, int]] = []
+        for target in self.reference_targets:
+            assert isinstance(target, PersistentTarget)
+            if not target.is_alive():
+                target.setup()
+            ph = target.pipe_handles
+            if ph is None:
+                raise RuntimeError("Could not obtain pipe handles")
+            handles.append(ph)
+
+        timeout_ms = int(self.reference_targets[0].timeout_seconds * 1000)
+
+        # Call Rust — GIL released during I/O
+        raw_results = parallel_pipe_execute(handles, inp.data, timeout_ms)
+
+        # Convert to ExecutionResult objects
+        results: list[ExecutionResult] = []
+        for i, (output, exit_code, duration_ms, error) in enumerate(raw_results):
+            if error is not None:
+                target = self.reference_targets[i]
+                assert isinstance(target, PersistentTarget)
+                target.teardown()
+                results.append(ExecutionResult(
+                    exit_code=-1,
+                    stderr=error.encode("utf-8", errors="replace"),
+                    duration_ms=duration_ms,
+                    metadata={"error": "persistent_target_error"},
+                ))
+            else:
+                results.append(ExecutionResult(
+                    exit_code=exit_code,
+                    stdout=output,
+                    duration_ms=duration_ms,
+                ))
+
+        return results
 
     def _check_oracles(self, inp: Input, result: ExecutionResult,
                        mutator_name: str = "",

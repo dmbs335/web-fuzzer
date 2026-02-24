@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import struct
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -71,6 +72,26 @@ class PersistentTarget:
     def reset(self) -> None:
         self.teardown()
         self.setup()
+
+    @property
+    def pipe_handles(self) -> tuple[int, int] | None:
+        """Return (stdin_handle, stdout_handle) as raw OS integers.
+
+        On Windows: returns OS HANDLEs via msvcrt.get_osfhandle().
+        On Unix: returns file descriptors via fileno().
+        Returns None if process is not alive.
+        """
+        if self._proc is None or not self.is_alive():
+            return None
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                return (msvcrt.get_osfhandle(self._proc.stdin.fileno()),
+                        msvcrt.get_osfhandle(self._proc.stdout.fileno()))
+            else:
+                return (self._proc.stdin.fileno(), self._proc.stdout.fileno())
+        except (OSError, ValueError):
+            return None
 
     def execute(self, inp: Input) -> ExecutionResult:
         if self._proc is None or not self.is_alive():

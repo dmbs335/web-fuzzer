@@ -34,6 +34,7 @@ try:
         feature_set_bitmap,
         entropic_compute,
         havoc_mutate,
+        parallel_pipe_execute,
     )
     AVAILABLE = True
     RUST_EXTENSION = True
@@ -234,5 +235,16 @@ if not AVAILABLE:
                 if ln + bl <= max_len:
                     buf[dst:dst] = bytes(buf[src:src + bl])
         return buf
+
+    def parallel_pipe_execute(  # type: ignore[misc]
+        handles: list[tuple[int, int]],
+        input_data: bytes,
+        timeout_ms: int,
+    ) -> list[tuple[bytes, int, float, str | None]]:
+        """Fallback stub — engine uses ThreadPoolExecutor when Rust unavailable."""
+        raise NotImplementedError(
+            "parallel_pipe_execute requires the Rust extension. "
+            "Build with: cd webfuzzer/native && maturin develop --release"
+        )
 
     AVAILABLE = True
