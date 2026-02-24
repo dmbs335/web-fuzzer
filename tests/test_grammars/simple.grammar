@@ -1,0 +1,9 @@
+# Simple test grammar
+!root <greeting>
+!max_depth 5
+
+<greeting> = hello <name>
+<greeting> = hi <name>
+
+<name> = world
+<name> = <string min=3 max=8>

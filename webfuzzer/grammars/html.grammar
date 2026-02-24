@@ -1,0 +1,1715 @@
+# =============================================================================
+# HTML Grammar — WHATWG HTML Living Standard based
+# Covers: all element categories, deprecated/obsolete elements,
+#         void elements, raw text elements, SVG/MathML integration,
+#         all global & element-specific attributes, ARIA, event handlers
+# =============================================================================
+
+!root <document>
+!max_depth 14
+!import ecmascript
+
+# =============================================================================
+# Document structure
+# =============================================================================
+<document> = <doctype><nl><html_elem>
+<document> = <html_elem>
+<document> = <bom><doctype><nl><html_elem>
+
+<bom> = \xEF\xBB\xBF
+
+<doctype> = <lt>!DOCTYPE html<gt>
+<doctype> = <lt>!doctype html<gt>
+<doctype> = <lt>!DOCTYPE html SYSTEM "about:legacy-compat"<gt>
+<doctype> = <lt>!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"<gt>
+<doctype> = <lt>!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"<gt>
+<doctype> = <lt>!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Frameset//EN"<gt>
+<doctype> = <lt>!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"<gt>
+<doctype> = <lt>!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"<gt>
+
+<html_elem> = <lt>html<gt><nl><head_elem><nl><body_elem><nl><lt>/html<gt>
+<html_elem> = <lt>html <html_attrs><gt><nl><head_elem><nl><body_elem><nl><lt>/html<gt>
+
+<html_attrs> = lang=<quot><lang_tag><quot>
+<html_attrs> = lang=<quot><lang_tag><quot> dir=<quot><dir_val><quot>
+<html_attrs> = xmlns=<quot>http://www.w3.org/1999/xhtml<quot>
+<html_attrs> = manifest=<quot><url><quot>
+<html_attrs> = <global_attrs>
+
+<lang_tag> = en
+<lang_tag> = en-US
+<lang_tag> = ko
+<lang_tag> = ko-KR
+<lang_tag> = ja
+<lang_tag> = zh-CN
+<lang_tag> = zh-TW
+<lang_tag> = de
+<lang_tag> = fr
+<lang_tag> = ar
+<lang_tag> = he
+<lang_tag> = <string min=2 max=5 charset=lower>
+<lang_tag> = <string min=2 max=3 charset=lower>-<string min=2 max=3 charset=upper>
+
+<dir_val> = ltr
+<dir_val> = rtl
+<dir_val> = auto
+
+# =============================================================================
+# Head element — metadata content
+# =============================================================================
+<head_elem> = <lt>head<gt><nl><head_children><nl><lt>/head<gt>
+
+<head_children> = <meta_charset><nl><title_elem>
+<head_children> = <meta_charset><nl><title_elem><nl><head_rest>
+<head_children> = <title_elem><nl><head_rest>
+
+<head_rest> = <head_child>
+<head_rest> = <head_child><nl><head_rest>
+
+<head_child> = <meta_elem>
+<head_child> = <link_elem>
+<head_child> = <style_elem>
+<head_child> = <script_elem>
+<head_child> = <noscript_head>
+<head_child> = <base_elem>
+<head_child> = <template_elem>
+<head_child> = <html_comment>
+
+<title_elem> = <lt>title<gt><text><lt>/title<gt>
+
+# --- base ---
+<base_elem> = <lt>base href=<quot><url><quot><gt>
+<base_elem> = <lt>base target=<quot><target_val><quot><gt>
+<base_elem> = <lt>base href=<quot><url><quot> target=<quot><target_val><quot><gt>
+
+<target_val> = _self
+<target_val> = _blank
+<target_val> = _parent
+<target_val> = _top
+<target_val> = <identifier>
+
+# --- meta (comprehensive) ---
+<meta_charset> = <lt>meta charset=<quot><charset_val><quot><gt>
+<meta_charset> = <lt>meta http-equiv=<quot>Content-Type<quot> content=<quot>text/html; charset=<charset_val><quot><gt>
+
+<charset_val> = UTF-8
+<charset_val> = utf-8
+<charset_val> = ISO-8859-1
+<charset_val> = windows-1252
+<charset_val> = Shift_JIS
+<charset_val> = EUC-KR
+<charset_val> = GB2312
+<charset_val> = Big5
+<charset_val> = <string min=3 max=15>
+
+<meta_elem> = <lt>meta name=<quot><meta_name_val><quot> content=<quot><text><quot><gt>
+<meta_elem> = <lt>meta http-equiv=<quot><http_equiv_val><quot> content=<quot><meta_content><quot><gt>
+<meta_elem> = <lt>meta property=<quot><meta_property_val><quot> content=<quot><text><quot><gt>
+<meta_elem> = <lt>meta name=<quot>referrer<quot> content=<quot><referrer_policy><quot><gt>
+<meta_elem> = <lt>meta name=<quot>color-scheme<quot> content=<quot><color_scheme><quot><gt>
+<meta_elem> = <lt>meta name=<quot>theme-color<quot> content=<quot><css_color><quot><gt>
+<meta_elem> = <lt>meta name=<quot>viewport<quot> content=<quot><viewport_content><quot><gt>
+
+<meta_name_val> = description
+<meta_name_val> = keywords
+<meta_name_val> = author
+<meta_name_val> = generator
+<meta_name_val> = robots
+<meta_name_val> = googlebot
+<meta_name_val> = application-name
+<meta_name_val> = creator
+<meta_name_val> = publisher
+<meta_name_val> = rating
+<meta_name_val> = format-detection
+<meta_name_val> = <string min=3 max=25>
+
+<http_equiv_val> = Content-Type
+<http_equiv_val> = Content-Security-Policy
+<http_equiv_val> = X-UA-Compatible
+<http_equiv_val> = refresh
+<http_equiv_val> = default-style
+<http_equiv_val> = content-language
+<http_equiv_val> = X-Content-Type-Options
+<http_equiv_val> = X-Frame-Options
+<http_equiv_val> = X-XSS-Protection
+<http_equiv_val> = X-DNS-Prefetch-Control
+<http_equiv_val> = Set-Cookie
+<http_equiv_val> = <string min=5 max=25>
+
+<meta_content> = <text>
+<meta_content> = <int min=0 max=3600>;url=<url>
+<meta_content> = text/html; charset=<charset_val>
+<meta_content> = IE=edge
+
+<meta_property_val> = og:title
+<meta_property_val> = og:type
+<meta_property_val> = og:url
+<meta_property_val> = og:image
+<meta_property_val> = og:description
+<meta_property_val> = og:site_name
+<meta_property_val> = og:locale
+<meta_property_val> = twitter:card
+<meta_property_val> = twitter:site
+<meta_property_val> = twitter:creator
+<meta_property_val> = fb:app_id
+<meta_property_val> = article:published_time
+
+<referrer_policy> = no-referrer
+<referrer_policy> = no-referrer-when-downgrade
+<referrer_policy> = origin
+<referrer_policy> = origin-when-cross-origin
+<referrer_policy> = same-origin
+<referrer_policy> = strict-origin
+<referrer_policy> = strict-origin-when-cross-origin
+<referrer_policy> = unsafe-url
+
+<color_scheme> = light
+<color_scheme> = dark
+<color_scheme> = light dark
+<color_scheme> = only light
+
+<viewport_content> = width=device-width, initial-scale=1
+<viewport_content> = width=device-width, initial-scale=1, maximum-scale=1
+<viewport_content> = width=<int min=200 max=2000>, initial-scale=<float min=0.1 max=10.0 precision=1>
+<viewport_content> = width=device-width, initial-scale=1, user-scalable=no
+<viewport_content> = width=device-width, shrink-to-fit=no
+
+# --- link (comprehensive) ---
+<link_elem> = <lt>link rel=<quot><link_rel_val><quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>stylesheet<quot> href=<quot><url><quot> media=<quot><media_query><quot><gt>
+<link_elem> = <lt>link rel=<quot>stylesheet<quot> href=<quot><url><quot> integrity=<quot><sri_hash><quot> crossorigin=<quot><crossorigin_val><quot><gt>
+<link_elem> = <lt>link rel=<quot>preload<quot> as=<quot><preload_as><quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>preconnect<quot> href=<quot><url><quot> crossorigin<gt>
+<link_elem> = <lt>link rel=<quot>modulepreload<quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>icon<quot> type=<quot><mime_type><quot> sizes=<quot><icon_sizes><quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>apple-touch-icon<quot> sizes=<quot><icon_sizes><quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>manifest<quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>alternate<quot> type=<quot>application/rss+xml<quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>alternate<quot> hreflang=<quot><lang_tag><quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>canonical<quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>dns-prefetch<quot> href=<quot><url><quot><gt>
+<link_elem> = <lt>link rel=<quot>pingback<quot> href=<quot><url><quot><gt>
+
+<link_rel_val> = stylesheet
+<link_rel_val> = icon
+<link_rel_val> = shortcut icon
+<link_rel_val> = preload
+<link_rel_val> = preconnect
+<link_rel_val> = prefetch
+<link_rel_val> = prerender
+<link_rel_val> = modulepreload
+<link_rel_val> = canonical
+<link_rel_val> = alternate
+<link_rel_val> = author
+<link_rel_val> = help
+<link_rel_val> = license
+<link_rel_val> = next
+<link_rel_val> = prev
+<link_rel_val> = search
+<link_rel_val> = dns-prefetch
+<link_rel_val> = manifest
+<link_rel_val> = apple-touch-icon
+<link_rel_val> = import
+<link_rel_val> = pingback
+<link_rel_val> = <string min=3 max=20 charset=lower>
+
+<preload_as> = script
+<preload_as> = style
+<preload_as> = image
+<preload_as> = font
+<preload_as> = fetch
+<preload_as> = document
+<preload_as> = audio
+<preload_as> = video
+<preload_as> = track
+<preload_as> = worker
+
+<crossorigin_val> = anonymous
+<crossorigin_val> = use-credentials
+<crossorigin_val> =
+
+<sri_hash> = sha256-<string min=44 max=44 charset=alphanumeric>
+<sri_hash> = sha384-<string min=64 max=64 charset=alphanumeric>
+<sri_hash> = sha512-<string min=88 max=88 charset=alphanumeric>
+
+<icon_sizes> = 16x16
+<icon_sizes> = 32x32
+<icon_sizes> = 48x48
+<icon_sizes> = 64x64
+<icon_sizes> = 128x128
+<icon_sizes> = 180x180
+<icon_sizes> = 192x192
+<icon_sizes> = 512x512
+<icon_sizes> = any
+
+<media_query> = all
+<media_query> = screen
+<media_query> = print
+<media_query> = (prefers-color-scheme: dark)
+<media_query> = (max-width: <int min=200 max=2000>px)
+<media_query> = screen and (min-width: <int min=200 max=2000>px)
+<media_query> = not print
+
+# --- style ---
+<style_elem> = <lt>style<gt><nl><css_content><nl><lt>/style<gt>
+<style_elem> = <lt>style media=<quot><media_query><quot><gt><nl><css_content><nl><lt>/style<gt>
+<style_elem> = <lt>style nonce=<quot><nonce_val><quot><gt><nl><css_content><nl><lt>/style<gt>
+<style_elem> = <lt>style type=<quot>text/css<quot><gt><nl><css_content><nl><lt>/style<gt>
+
+<nonce_val> = <string min=16 max=32 charset=alphanumeric>
+
+# --- noscript ---
+<noscript_head> = <lt>noscript<gt><meta_elem><lt>/noscript<gt>
+<noscript_head> = <lt>noscript<gt><link_elem><lt>/noscript<gt>
+<noscript_head> = <lt>noscript<gt><style_elem><lt>/noscript<gt>
+
+# =============================================================================
+# Body element
+# =============================================================================
+<body_elem> = <lt>body<gt><nl><flow_content><nl><lt>/body<gt>
+<body_elem> = <lt>body <body_attrs><gt><nl><flow_content><nl><lt>/body<gt>
+
+<body_attrs> = <global_attrs>
+<body_attrs> = <event_handler_attr>
+<body_attrs> = <body_event_attr>
+<body_attrs> = <global_attrs> <body_event_attr>
+
+# body-specific event handlers (Window events)
+<body_event_attr> = onbeforeunload=<quot><js_expr><quot>
+<body_event_attr> = onhashchange=<quot><js_expr><quot>
+<body_event_attr> = onlanguagechange=<quot><js_expr><quot>
+<body_event_attr> = onmessage=<quot><js_expr><quot>
+<body_event_attr> = onmessageerror=<quot><js_expr><quot>
+<body_event_attr> = onoffline=<quot><js_expr><quot>
+<body_event_attr> = ononline=<quot><js_expr><quot>
+<body_event_attr> = onpagehide=<quot><js_expr><quot>
+<body_event_attr> = onpageshow=<quot><js_expr><quot>
+<body_event_attr> = onpopstate=<quot><js_expr><quot>
+<body_event_attr> = onrejectionhandled=<quot><js_expr><quot>
+<body_event_attr> = onstorage=<quot><js_expr><quot>
+<body_event_attr> = onunhandledrejection=<quot><js_expr><quot>
+<body_event_attr> = onunload=<quot><js_expr><quot>
+
+# =============================================================================
+# Flow content — all element categories
+# =============================================================================
+<flow_content> = <element>
+<flow_content> = <element><nl><flow_content>
+<flow_content> = <text>
+<flow_content> = <html_comment>
+
+<element> = <sectioning_elem>
+<element> = <heading_content>
+<element> = <phrasing_elem>
+<element> = <embedded_elem>
+<element> = <interactive_elem>
+<element> = <grouping_elem>
+<element> = <tabular_elem>
+<element> = <form_elem>
+<element> = <scripting_elem>
+<element> = <deprecated_elem>
+<element> = <svg_elem>
+<element> = <mathml_elem>
+<element> = <custom_elem>
+<element> = <web_component_elem>
+
+# =============================================================================
+# Sectioning content
+# =============================================================================
+<sectioning_elem> = <article_elem>
+<sectioning_elem> = <aside_elem>
+<sectioning_elem> = <nav_elem>
+<sectioning_elem> = <section_elem>
+<sectioning_elem> = <header_elem>
+<sectioning_elem> = <footer_elem>
+<sectioning_elem> = <main_elem>
+<sectioning_elem> = <address_elem>
+
+<article_elem> = <lt>article <global_attrs><gt><nl><flow_content><nl><lt>/article<gt>
+<article_elem> = <lt>article<gt><nl><flow_content><nl><lt>/article<gt>
+
+<aside_elem> = <lt>aside <global_attrs><gt><nl><flow_content><nl><lt>/aside<gt>
+<aside_elem> = <lt>aside<gt><nl><flow_content><nl><lt>/aside<gt>
+
+<nav_elem> = <lt>nav <global_attrs><gt><nl><flow_content><nl><lt>/nav<gt>
+<nav_elem> = <lt>nav<gt><nl><flow_content><nl><lt>/nav<gt>
+
+<section_elem> = <lt>section <global_attrs><gt><nl><flow_content><nl><lt>/section<gt>
+<section_elem> = <lt>section<gt><nl><flow_content><nl><lt>/section<gt>
+
+<header_elem> = <lt>header <global_attrs><gt><nl><flow_content><nl><lt>/header<gt>
+<footer_elem> = <lt>footer <global_attrs><gt><nl><flow_content><nl><lt>/footer<gt>
+<main_elem> = <lt>main <global_attrs><gt><nl><flow_content><nl><lt>/main<gt>
+<main_elem> = <lt>main<gt><nl><flow_content><nl><lt>/main<gt>
+<address_elem> = <lt>address<gt><phrasing_content><lt>/address<gt>
+
+# =============================================================================
+# Heading content
+# =============================================================================
+<heading_content> = <lt><heading_tag> <global_attrs><gt><phrasing_content><lt>/<heading_tag><gt>
+<heading_content> = <lt><heading_tag><gt><phrasing_content><lt>/<heading_tag><gt>
+<heading_content> = <hgroup_elem>
+
+<heading_tag> = h1
+<heading_tag> = h2
+<heading_tag> = h3
+<heading_tag> = h4
+<heading_tag> = h5
+<heading_tag> = h6
+
+<hgroup_elem> = <lt>hgroup<gt><nl><heading_content><nl><lt>/hgroup<gt>
+
+# =============================================================================
+# Grouping content
+# =============================================================================
+<grouping_elem> = <p_elem>
+<grouping_elem> = <div_elem>
+<grouping_elem> = <pre_elem>
+<grouping_elem> = <blockquote_elem>
+<grouping_elem> = <hr_elem>
+<grouping_elem> = <ol_elem>
+<grouping_elem> = <ul_elem>
+<grouping_elem> = <menu_elem>
+<grouping_elem> = <dl_elem>
+<grouping_elem> = <figure_elem>
+<grouping_elem> = <details_elem>
+<grouping_elem> = <dialog_elem>
+<grouping_elem> = <search_elem>
+
+<p_elem> = <lt>p <global_attrs><gt><phrasing_content><lt>/p<gt>
+<p_elem> = <lt>p<gt><phrasing_content><lt>/p<gt>
+
+<div_elem> = <lt>div <global_attrs><gt><nl><flow_content><nl><lt>/div<gt>
+<div_elem> = <lt>div<gt><nl><flow_content><nl><lt>/div<gt>
+
+<pre_elem> = <lt>pre<gt><text><lt>/pre<gt>
+<pre_elem> = <lt>pre <global_attrs><gt><lt>code<gt><text><lt>/code<gt><lt>/pre<gt>
+
+<blockquote_elem> = <lt>blockquote cite=<quot><url><quot><gt><nl><flow_content><nl><lt>/blockquote<gt>
+<blockquote_elem> = <lt>blockquote<gt><nl><flow_content><nl><lt>/blockquote<gt>
+
+<hr_elem> = <lt>hr<gt>
+<hr_elem> = <lt>hr <global_attrs><gt>
+<hr_elem> = <lt>hr/<gt>
+
+<ol_elem> = <lt>ol <ol_attrs><gt><nl><li_items><nl><lt>/ol<gt>
+<ol_elem> = <lt>ol<gt><nl><li_items><nl><lt>/ol<gt>
+
+<ol_attrs> = start=<quot><int min=-100 max=100><quot>
+<ol_attrs> = reversed
+<ol_attrs> = type=<quot><ol_type_val><quot>
+<ol_attrs> = start=<quot><int min=0 max=100><quot> reversed type=<quot><ol_type_val><quot>
+
+<ol_type_val> = 1
+<ol_type_val> = a
+<ol_type_val> = A
+<ol_type_val> = i
+<ol_type_val> = I
+
+<ul_elem> = <lt>ul <global_attrs><gt><nl><li_items><nl><lt>/ul<gt>
+<ul_elem> = <lt>ul<gt><nl><li_items><nl><lt>/ul<gt>
+
+<menu_elem> = <lt>menu<gt><nl><li_items><nl><lt>/menu<gt>
+
+<li_items> = <li_item>
+<li_items> = <li_item><nl><li_items>
+
+<li_item> = <lt>li<gt><phrasing_content><lt>/li<gt>
+<li_item> = <lt>li <global_attrs><gt><flow_content><lt>/li<gt>
+<li_item> = <lt>li value=<quot><int min=-100 max=100><quot><gt><phrasing_content><lt>/li<gt>
+
+<dl_elem> = <lt>dl<gt><nl><dl_items><nl><lt>/dl<gt>
+<dl_items> = <lt>dt<gt><phrasing_content><lt>/dt<gt><nl><lt>dd<gt><flow_content><lt>/dd<gt>
+<dl_items> = <lt>dt<gt><phrasing_content><lt>/dt<gt><nl><lt>dd<gt><flow_content><lt>/dd<gt><nl><dl_items>
+<dl_items> = <lt>div<gt><nl><lt>dt<gt><phrasing_content><lt>/dt<gt><nl><lt>dd<gt><flow_content><lt>/dd<gt><nl><lt>/div<gt>
+
+<figure_elem> = <lt>figure<gt><nl><element><nl><lt>figcaption<gt><phrasing_content><lt>/figcaption<gt><nl><lt>/figure<gt>
+<figure_elem> = <lt>figure<gt><nl><lt>figcaption<gt><phrasing_content><lt>/figcaption<gt><nl><element><nl><lt>/figure<gt>
+
+<details_elem> = <lt>details <details_attrs><gt><nl><lt>summary<gt><phrasing_content><lt>/summary<gt><nl><flow_content><nl><lt>/details<gt>
+<details_elem> = <lt>details open<gt><nl><lt>summary<gt><phrasing_content><lt>/summary<gt><nl><flow_content><nl><lt>/details<gt>
+
+<details_attrs> = open
+<details_attrs> = name=<quot><identifier><quot>
+<details_attrs> = open name=<quot><identifier><quot>
+
+<dialog_elem> = <lt>dialog <dialog_attrs><gt><nl><flow_content><nl><lt>/dialog<gt>
+<dialog_attrs> = open
+<dialog_attrs> = <global_attrs>
+
+<search_elem> = <lt>search<gt><nl><flow_content><nl><lt>/search<gt>
+
+# =============================================================================
+# Phrasing content — inline elements
+# =============================================================================
+<phrasing_content> = <phrasing_elem>
+<phrasing_content> = <text>
+<phrasing_content> = <phrasing_elem><phrasing_content>
+
+<phrasing_elem> = <span_elem>
+<phrasing_elem> = <a_elem>
+<phrasing_elem> = <strong_elem>
+<phrasing_elem> = <em_elem>
+<phrasing_elem> = <code_elem>
+<phrasing_elem> = <br_elem>
+<phrasing_elem> = <wbr_elem>
+<phrasing_elem> = <text_level_elem>
+<phrasing_elem> = <data_elem>
+<phrasing_elem> = <time_elem>
+<phrasing_elem> = <abbr_elem>
+<phrasing_elem> = <bdi_elem>
+<phrasing_elem> = <bdo_elem>
+<phrasing_elem> = <ruby_elem>
+<phrasing_elem> = <output_elem>
+<phrasing_elem> = <slot_elem>
+
+<span_elem> = <lt>span <global_attrs><gt><phrasing_content><lt>/span<gt>
+<span_elem> = <lt>span<gt><text><lt>/span<gt>
+
+<a_elem> = <lt>a href=<quot><url><quot> <a_attrs><gt><phrasing_content><lt>/a<gt>
+<a_elem> = <lt>a href=<quot><url><quot><gt><phrasing_content><lt>/a<gt>
+<a_elem> = <lt>a href=<quot>javascript:<js_expr><quot><gt><text><lt>/a<gt>
+<a_elem> = <lt>a href=<quot><url><quot> download=<quot><text><quot><gt><text><lt>/a<gt>
+<a_elem> = <lt>a href=<quot>mailto:<text>@<text>.<tld><quot><gt><text><lt>/a<gt>
+<a_elem> = <lt>a href=<quot>tel:+<int min=1 max=99><int min=1000000 max=9999999><quot><gt><text><lt>/a<gt>
+<a_elem> = <lt>a href=<quot>#<identifier><quot><gt><text><lt>/a<gt>
+<a_elem> = <lt>a name=<quot><identifier><quot><gt><text><lt>/a<gt>
+
+<a_attrs> = target=<quot><target_val><quot>
+<a_attrs> = target=<quot><target_val><quot> rel=<quot><rel_val><quot>
+<a_attrs> = rel=<quot><rel_val><quot>
+<a_attrs> = hreflang=<quot><lang_tag><quot>
+<a_attrs> = type=<quot><mime_type><quot>
+<a_attrs> = referrerpolicy=<quot><referrer_policy><quot>
+<a_attrs> = ping=<quot><url><quot>
+<a_attrs> = download
+<a_attrs> = <global_attrs>
+
+<rel_val> = noopener
+<rel_val> = noreferrer
+<rel_val> = nofollow
+<rel_val> = noopener noreferrer
+<rel_val> = opener
+<rel_val> = external
+<rel_val> = bookmark
+<rel_val> = tag
+<rel_val> = ugc
+<rel_val> = sponsored
+<rel_val> = <string min=3 max=15 charset=lower>
+
+<strong_elem> = <lt>strong<gt><phrasing_content><lt>/strong<gt>
+<em_elem> = <lt>em<gt><phrasing_content><lt>/em<gt>
+<code_elem> = <lt>code<gt><text><lt>/code<gt>
+<br_elem> = <lt>br<gt>
+<br_elem> = <lt>br/<gt>
+<wbr_elem> = <lt>wbr<gt>
+
+<text_level_elem> = <lt>b<gt><text><lt>/b<gt>
+<text_level_elem> = <lt>i<gt><text><lt>/i<gt>
+<text_level_elem> = <lt>u<gt><text><lt>/u<gt>
+<text_level_elem> = <lt>s<gt><text><lt>/s<gt>
+<text_level_elem> = <lt>small<gt><text><lt>/small<gt>
+<text_level_elem> = <lt>sub<gt><text><lt>/sub<gt>
+<text_level_elem> = <lt>sup<gt><text><lt>/sup<gt>
+<text_level_elem> = <lt>mark<gt><text><lt>/mark<gt>
+<text_level_elem> = <lt>q cite=<quot><url><quot><gt><text><lt>/q<gt>
+<text_level_elem> = <lt>q<gt><text><lt>/q<gt>
+<text_level_elem> = <lt>cite<gt><text><lt>/cite<gt>
+<text_level_elem> = <lt>dfn<gt><text><lt>/dfn<gt>
+<text_level_elem> = <lt>var<gt><text><lt>/var<gt>
+<text_level_elem> = <lt>samp<gt><text><lt>/samp<gt>
+<text_level_elem> = <lt>kbd<gt><text><lt>/kbd<gt>
+<text_level_elem> = <lt>ins<gt><text><lt>/ins<gt>
+<text_level_elem> = <lt>del<gt><text><lt>/del<gt>
+
+<data_elem> = <lt>data value=<quot><text><quot><gt><text><lt>/data<gt>
+
+<time_elem> = <lt>time datetime=<quot><datetime_val><quot><gt><text><lt>/time<gt>
+<datetime_val> = 2024-01-15
+<datetime_val> = 2024-01-15T12:30:00Z
+<datetime_val> = 2024-01-15T12:30:00+09:00
+<datetime_val> = PT2H30M
+<datetime_val> = <int min=1970 max=2030>-<int min=1 max=12>-<int min=1 max=28>
+
+<abbr_elem> = <lt>abbr title=<quot><text><quot><gt><text><lt>/abbr<gt>
+<bdi_elem> = <lt>bdi<gt><text><lt>/bdi<gt>
+<bdo_elem> = <lt>bdo dir=<quot><dir_val><quot><gt><text><lt>/bdo<gt>
+
+<ruby_elem> = <lt>ruby<gt><text><lt>rp<gt>(<lt>/rp<gt><lt>rt<gt><text><lt>/rt<gt><lt>rp<gt>)<lt>/rp<gt><lt>/ruby<gt>
+
+<output_elem> = <lt>output for=<quot><identifier><quot> name=<quot><identifier><quot><gt><text><lt>/output<gt>
+
+<slot_elem> = <lt>slot name=<quot><identifier><quot><gt><text><lt>/slot<gt>
+<slot_elem> = <lt>slot<gt><lt>/slot<gt>
+
+# =============================================================================
+# Embedded content
+# =============================================================================
+<embedded_elem> = <img_elem>
+<embedded_elem> = <picture_elem>
+<embedded_elem> = <iframe_elem>
+<embedded_elem> = <video_elem>
+<embedded_elem> = <audio_elem>
+<embedded_elem> = <canvas_elem>
+<embedded_elem> = <object_elem>
+<embedded_elem> = <embed_elem>
+<embedded_elem> = <map_elem>
+<embedded_elem> = <portal_elem>
+
+# --- img (comprehensive) ---
+<img_elem> = <lt>img src=<quot><url><quot> alt=<quot><text><quot> <img_attrs><gt>
+<img_elem> = <lt>img src=<quot><url><quot> alt=<quot><text><quot><gt>
+<img_elem> = <lt>img src=<quot><url><quot> alt=<quot><quot><gt>
+<img_elem> = <lt>img src=<quot><data_uri><quot> alt=<quot><text><quot><gt>
+<img_elem> = <lt>img srcset=<quot><srcset_val><quot> sizes=<quot><sizes_val><quot> src=<quot><url><quot> alt=<quot><text><quot><gt>
+<img_elem> = <lt>img src=<quot><url><quot> loading=<quot><loading_val><quot> decoding=<quot><decoding_val><quot> alt=<quot><text><quot><gt>
+<img_elem> = <lt>img src=<quot><url><quot> onerror=<quot><js_expr><quot> alt=<quot><text><quot><gt>
+<img_elem> = <lt>img src=<quot><url><quot> ismap alt=<quot><text><quot><gt>
+<img_elem> = <lt>img src=<quot><url><quot> usemap=<quot>#<identifier><quot> alt=<quot><text><quot><gt>
+<img_elem> = <lt>img src=<quot><url><quot> crossorigin=<quot><crossorigin_val><quot> referrerpolicy=<quot><referrer_policy><quot> alt=<quot><text><quot><gt>
+<img_elem> = <lt>img src=<quot><url><quot> fetchpriority=<quot><fetchpriority_val><quot> alt=<quot><text><quot><gt>
+
+<img_attrs> = width=<quot><int min=1 max=4096><quot> height=<quot><int min=1 max=4096><quot>
+<img_attrs> = loading=<quot><loading_val><quot>
+<img_attrs> = decoding=<quot><decoding_val><quot>
+<img_attrs> = <global_attrs>
+
+<srcset_val> = <url> 1x, <url> 2x
+<srcset_val> = <url> <int min=100 max=2000>w, <url> <int min=100 max=2000>w
+<srcset_val> = <url> <int min=100 max=2000>w
+
+<sizes_val> = (max-width: <int min=300 max=1200>px) <int min=100 max=1200>px, <int min=100 max=1200>px
+<sizes_val> = <int min=100 max=1200>px
+
+<loading_val> = lazy
+<loading_val> = eager
+
+<decoding_val> = sync
+<decoding_val> = async
+<decoding_val> = auto
+
+<fetchpriority_val> = high
+<fetchpriority_val> = low
+<fetchpriority_val> = auto
+
+# --- picture ---
+<picture_elem> = <lt>picture<gt><nl><source_elems><nl><img_elem><nl><lt>/picture<gt>
+
+<source_elems> = <source_elem>
+<source_elems> = <source_elem><nl><source_elems>
+
+<source_elem> = <lt>source srcset=<quot><url><quot> type=<quot><mime_type><quot><gt>
+<source_elem> = <lt>source srcset=<quot><url><quot> media=<quot><media_query><quot><gt>
+<source_elem> = <lt>source srcset=<quot><srcset_val><quot> sizes=<quot><sizes_val><quot> type=<quot><mime_type><quot><gt>
+
+# --- iframe (comprehensive) ---
+<iframe_elem> = <lt>iframe src=<quot><url><quot> <iframe_attrs><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot><url><quot><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe srcdoc=<quot><lt>p<gt><text><lt>/p<gt><quot> <iframe_attrs><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot>javascript:<js_expr><quot><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot>data:text/html,<lt>script<gt>alert(1)<lt>/script<gt><quot><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot><url><quot> sandbox=<quot><sandbox_tokens><quot><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot><url><quot> sandbox<gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot><url><quot> allow=<quot><permissions_policy><quot><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot><url><quot> csp=<quot>@csp:<csp_header><quot><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot>about:blank<quot><gt><lt>/iframe<gt>
+<iframe_elem> = <lt>iframe src=<quot>about:srcdoc<quot><gt><lt>/iframe<gt>
+
+<iframe_attrs> = name=<quot><identifier><quot>
+<iframe_attrs> = width=<quot><int min=0 max=4096><quot> height=<quot><int min=0 max=4096><quot>
+<iframe_attrs> = sandbox=<quot><sandbox_tokens><quot>
+<iframe_attrs> = allow=<quot><permissions_policy><quot>
+<iframe_attrs> = loading=<quot><loading_val><quot>
+<iframe_attrs> = referrerpolicy=<quot><referrer_policy><quot>
+<iframe_attrs> = allowfullscreen
+<iframe_attrs> = <global_attrs>
+
+<sandbox_tokens> = <sandbox_token>
+<sandbox_tokens> = <sandbox_token> <sandbox_tokens>
+
+<sandbox_token> = allow-forms
+<sandbox_token> = allow-modals
+<sandbox_token> = allow-orientation-lock
+<sandbox_token> = allow-pointer-lock
+<sandbox_token> = allow-popups
+<sandbox_token> = allow-popups-to-escape-sandbox
+<sandbox_token> = allow-presentation
+<sandbox_token> = allow-same-origin
+<sandbox_token> = allow-scripts
+<sandbox_token> = allow-top-navigation
+<sandbox_token> = allow-top-navigation-by-user-activation
+<sandbox_token> = allow-top-navigation-to-custom-protocols
+<sandbox_token> = allow-downloads
+
+<permissions_policy> = <permission_name>
+<permissions_policy> = <permission_name>; <permissions_policy>
+<permissions_policy> = <permission_name> <permission_origin>
+
+<permission_name> = accelerometer
+<permission_name> = autoplay
+<permission_name> = camera
+<permission_name> = clipboard-read
+<permission_name> = clipboard-write
+<permission_name> = encrypted-media
+<permission_name> = fullscreen
+<permission_name> = geolocation
+<permission_name> = gyroscope
+<permission_name> = magnetometer
+<permission_name> = microphone
+<permission_name> = midi
+<permission_name> = payment
+<permission_name> = picture-in-picture
+<permission_name> = publickey-credentials-get
+<permission_name> = screen-wake-lock
+<permission_name> = usb
+<permission_name> = xr-spatial-tracking
+
+<permission_origin> = 'self'
+<permission_origin> = 'src'
+<permission_origin> = *
+<permission_origin> = 'none'
+
+# --- video ---
+<video_elem> = <lt>video src=<quot><url><quot> <video_attrs><gt><lt>/video<gt>
+<video_elem> = <lt>video <video_attrs><gt><nl><source_elems><nl><track_elems><lt>/video<gt>
+<video_elem> = <lt>video src=<quot><url><quot> <video_attrs><gt><text><lt>/video<gt>
+
+<video_attrs> = controls
+<video_attrs> = controls autoplay
+<video_attrs> = controls autoplay muted loop
+<video_attrs> = controls preload=<quot><preload_val><quot>
+<video_attrs> = controls poster=<quot><url><quot>
+<video_attrs> = controls width=<quot><int min=100 max=1920><quot> height=<quot><int min=100 max=1080><quot>
+<video_attrs> = playsinline muted autoplay loop
+<video_attrs> = controls crossorigin=<quot><crossorigin_val><quot>
+<video_attrs> = <global_attrs>
+
+<preload_val> = none
+<preload_val> = metadata
+<preload_val> = auto
+
+<track_elems> = <lt>track kind=<quot><track_kind><quot> src=<quot><url><quot> srclang=<quot><lang_tag><quot> label=<quot><text><quot><gt>
+<track_elems> = <lt>track kind=<quot><track_kind><quot> src=<quot><url><quot> default<gt>
+
+<track_kind> = subtitles
+<track_kind> = captions
+<track_kind> = descriptions
+<track_kind> = chapters
+<track_kind> = metadata
+
+# --- audio ---
+<audio_elem> = <lt>audio src=<quot><url><quot> controls<gt><lt>/audio<gt>
+<audio_elem> = <lt>audio controls autoplay<gt><nl><source_elems><nl><lt>/audio<gt>
+<audio_elem> = <lt>audio src=<quot><url><quot> controls preload=<quot><preload_val><quot><gt><lt>/audio<gt>
+
+# --- canvas ---
+<canvas_elem> = <lt>canvas width=<quot><int min=1 max=4096><quot> height=<quot><int min=1 max=4096><quot> <global_attrs><gt><text><lt>/canvas<gt>
+<canvas_elem> = <lt>canvas<gt><lt>/canvas<gt>
+
+# --- object / embed ---
+<object_elem> = <lt>object data=<quot><url><quot> type=<quot><mime_type><quot> <global_attrs><gt><lt>param name=<quot><identifier><quot> value=<quot><text><quot><gt><lt>/object<gt>
+<object_elem> = <lt>object data=<quot><url><quot> type=<quot><mime_type><quot> width=<quot><int min=1 max=1000><quot> height=<quot><int min=1 max=1000><quot><gt><lt>/object<gt>
+<object_elem> = <lt>object type=<quot>text/html<quot> data=<quot><url><quot><gt><lt>/object<gt>
+
+<embed_elem> = <lt>embed src=<quot><url><quot> type=<quot><mime_type><quot> width=<quot><int min=1 max=1000><quot> height=<quot><int min=1 max=1000><quot><gt>
+<embed_elem> = <lt>embed src=<quot><url><quot> type=<quot>application/x-shockwave-flash<quot><gt>
+
+# --- map / area ---
+<map_elem> = <lt>map name=<quot><identifier><quot><gt><nl><area_elems><nl><lt>/map<gt>
+
+<area_elems> = <area_elem>
+<area_elems> = <area_elem><nl><area_elems>
+
+<area_elem> = <lt>area shape=<quot><area_shape><quot> coords=<quot><area_coords><quot> href=<quot><url><quot> alt=<quot><text><quot><gt>
+<area_elem> = <lt>area shape=<quot>default<quot> href=<quot><url><quot> alt=<quot><text><quot><gt>
+
+<area_shape> = rect
+<area_shape> = circle
+<area_shape> = poly
+<area_shape> = default
+
+<area_coords> = <int min=0 max=1000>,<int min=0 max=1000>,<int min=0 max=1000>,<int min=0 max=1000>
+<area_coords> = <int min=0 max=1000>,<int min=0 max=1000>,<int min=0 max=500>
+
+# --- portal (experimental) ---
+<portal_elem> = <lt>portal src=<quot><url><quot><gt><lt>/portal<gt>
+
+# =============================================================================
+# Interactive content
+# =============================================================================
+<interactive_elem> = <details_elem>
+<interactive_elem> = <dialog_elem>
+
+# =============================================================================
+# Tabular content
+# =============================================================================
+<tabular_elem> = <table_elem>
+
+<table_elem> = <lt>table <global_attrs><gt><nl><table_children><nl><lt>/table<gt>
+<table_elem> = <lt>table<gt><nl><table_children><nl><lt>/table<gt>
+
+<table_children> = <caption_elem><nl><thead_elem><nl><tbody_elem><nl><tfoot_elem>
+<table_children> = <thead_elem><nl><tbody_elem>
+<table_children> = <tbody_elem>
+<table_children> = <colgroup_elem><nl><thead_elem><nl><tbody_elem>
+<table_children> = <tr_rows>
+
+<caption_elem> = <lt>caption<gt><phrasing_content><lt>/caption<gt>
+
+<colgroup_elem> = <lt>colgroup<gt><nl><col_elems><nl><lt>/colgroup<gt>
+<colgroup_elem> = <lt>colgroup span=<quot><int min=1 max=10><quot><gt><lt>/colgroup<gt>
+
+<col_elems> = <lt>col span=<quot><int min=1 max=10><quot><gt>
+<col_elems> = <lt>col<gt><nl><col_elems>
+
+<thead_elem> = <lt>thead<gt><nl><tr_rows><nl><lt>/thead<gt>
+<tbody_elem> = <lt>tbody<gt><nl><tr_rows><nl><lt>/tbody<gt>
+<tfoot_elem> = <lt>tfoot<gt><nl><tr_rows><nl><lt>/tfoot<gt>
+
+<tr_rows> = <tr_elem>
+<tr_rows> = <tr_elem><nl><tr_rows>
+
+<tr_elem> = <lt>tr<gt><td_cells><lt>/tr<gt>
+<tr_elem> = <lt>tr <global_attrs><gt><td_cells><lt>/tr<gt>
+
+<td_cells> = <td_cell>
+<td_cells> = <td_cell><td_cells>
+
+<td_cell> = <lt>td<gt><phrasing_content><lt>/td<gt>
+<td_cell> = <lt>td <td_attrs><gt><flow_content><lt>/td<gt>
+<td_cell> = <lt>th <th_attrs><gt><phrasing_content><lt>/th<gt>
+<td_cell> = <lt>th<gt><phrasing_content><lt>/th<gt>
+
+<td_attrs> = colspan=<quot><int min=1 max=1000><quot>
+<td_attrs> = rowspan=<quot><int min=1 max=65534><quot>
+<td_attrs> = colspan=<quot><int min=1 max=100><quot> rowspan=<quot><int min=1 max=100><quot>
+<td_attrs> = headers=<quot><identifier><quot>
+<td_attrs> = <global_attrs>
+
+<th_attrs> = scope=<quot><th_scope><quot>
+<th_attrs> = scope=<quot><th_scope><quot> abbr=<quot><text><quot>
+<th_attrs> = colspan=<quot><int min=1 max=100><quot>
+<th_attrs> = rowspan=<quot><int min=1 max=100><quot>
+
+<th_scope> = row
+<th_scope> = col
+<th_scope> = rowgroup
+<th_scope> = colgroup
+
+# =============================================================================
+# Form content (comprehensive)
+# =============================================================================
+<form_elem> = <lt>form <form_attrs><gt><nl><form_children><nl><lt>/form<gt>
+<form_elem> = <lt>form<gt><nl><form_children><nl><lt>/form<gt>
+
+<form_attrs> = action=<quot><url><quot> method=<quot><form_method><quot>
+<form_attrs> = action=<quot><url><quot> method=<quot><form_method><quot> enctype=<quot><enctype_val><quot>
+<form_attrs> = action=<quot><url><quot> method=<quot>dialog<quot>
+<form_attrs> = action=<quot><url><quot> method=<quot><form_method><quot> target=<quot><target_val><quot>
+<form_attrs> = action=<quot><url><quot> method=<quot><form_method><quot> novalidate
+<form_attrs> = action=<quot><url><quot> method=<quot><form_method><quot> autocomplete=<quot><autocomplete_switch><quot>
+<form_attrs> = action=<quot><url><quot> method=<quot><form_method><quot> accept-charset=<quot><charset_val><quot>
+<form_attrs> = action=<quot><url><quot> method=<quot><form_method><quot> rel=<quot><rel_val><quot>
+<form_attrs> = <global_attrs>
+
+<form_method> = GET
+<form_method> = POST
+<form_method> = get
+<form_method> = post
+<form_method> = dialog
+<form_method> = <string min=3 max=10>
+
+<enctype_val> = application/x-www-form-urlencoded
+<enctype_val> = multipart/form-data
+<enctype_val> = text/plain
+<enctype_val> = <string min=5 max=30>
+
+<autocomplete_switch> = on
+<autocomplete_switch> = off
+
+<form_children> = <form_child>
+<form_children> = <form_child><nl><form_children>
+
+<form_child> = <input_elem>
+<form_child> = <textarea_elem>
+<form_child> = <select_elem>
+<form_child> = <button_elem>
+<form_child> = <fieldset_elem>
+<form_child> = <label_elem>
+<form_child> = <datalist_elem>
+<form_child> = <meter_elem>
+<form_child> = <progress_elem>
+<form_child> = <output_elem>
+<form_child> = <element>
+
+# --- input (all types per spec) ---
+<input_elem> = <lt>input type=<quot><input_type><quot> name=<quot><identifier><quot> <input_attrs><gt>
+<input_elem> = <lt>input type=<quot><input_type><quot> name=<quot><identifier><quot><gt>
+<input_elem> = <lt>input type=<quot>hidden<quot> name=<quot><identifier><quot> value=<quot><text><quot><gt>
+<input_elem> = <lt>input type=<quot>file<quot> name=<quot><identifier><quot> accept=<quot><accept_val><quot> <file_input_attrs><gt>
+<input_elem> = <lt>input type=<quot>image<quot> src=<quot><url><quot> alt=<quot><text><quot> formaction=<quot><url><quot><gt>
+<input_elem> = <lt>input type=<quot>submit<quot> value=<quot><text><quot> formmethod=<quot><form_method><quot> formaction=<quot><url><quot><gt>
+<input_elem> = <lt>input type=<quot>text<quot> name=<quot><identifier><quot> autocomplete=<quot><autocomplete_val><quot><gt>
+<input_elem> = <lt>input type=<quot>text<quot> name=<quot><identifier><quot> list=<quot><identifier><quot><gt>
+<input_elem> = <lt>input type=<quot>text<quot> name=<quot><identifier><quot> pattern=<quot><regex_pattern><quot><gt>
+
+<input_type> = text
+<input_type> = password
+<input_type> = email
+<input_type> = url
+<input_type> = tel
+<input_type> = search
+<input_type> = number
+<input_type> = range
+<input_type> = date
+<input_type> = time
+<input_type> = datetime-local
+<input_type> = month
+<input_type> = week
+<input_type> = color
+<input_type> = checkbox
+<input_type> = radio
+<input_type> = file
+<input_type> = hidden
+<input_type> = image
+<input_type> = submit
+<input_type> = reset
+<input_type> = button
+<input_type> = <string min=3 max=15>
+
+<input_attrs> = value=<quot><text><quot>
+<input_attrs> = placeholder=<quot><text><quot>
+<input_attrs> = required
+<input_attrs> = disabled
+<input_attrs> = readonly
+<input_attrs> = autofocus
+<input_attrs> = maxlength=<quot><int min=1 max=10000><quot>
+<input_attrs> = minlength=<quot><int min=0 max=100><quot>
+<input_attrs> = min=<quot><int min=-1000 max=1000><quot> max=<quot><int min=-1000 max=1000><quot>
+<input_attrs> = step=<quot><int min=1 max=100><quot>
+<input_attrs> = size=<quot><int min=1 max=100><quot>
+<input_attrs> = multiple
+<input_attrs> = checked
+<input_attrs> = <global_attrs>
+
+<file_input_attrs> = multiple
+<file_input_attrs> = capture=<quot><capture_val><quot>
+<file_input_attrs> = <empty>
+
+<capture_val> = user
+<capture_val> = environment
+
+<accept_val> = image/*
+<accept_val> = video/*
+<accept_val> = audio/*
+<accept_val> = .pdf
+<accept_val> = .doc,.docx
+<accept_val> = <mime_type>
+<accept_val> = .<string min=2 max=5 charset=lower>
+
+<autocomplete_val> = off
+<autocomplete_val> = on
+<autocomplete_val> = name
+<autocomplete_val> = given-name
+<autocomplete_val> = family-name
+<autocomplete_val> = email
+<autocomplete_val> = username
+<autocomplete_val> = new-password
+<autocomplete_val> = current-password
+<autocomplete_val> = one-time-code
+<autocomplete_val> = street-address
+<autocomplete_val> = country
+<autocomplete_val> = postal-code
+<autocomplete_val> = cc-number
+<autocomplete_val> = cc-exp
+<autocomplete_val> = cc-csc
+<autocomplete_val> = tel
+<autocomplete_val> = url
+<autocomplete_val> = bday
+<autocomplete_val> = sex
+<autocomplete_val> = <string min=3 max=20>
+
+<regex_pattern> = [a-zA-Z]+
+<regex_pattern> = [0-9]+
+<regex_pattern> = .{3,20}
+<regex_pattern> = \d{4}-\d{2}-\d{2}
+<regex_pattern> = <string min=3 max=30>
+
+# --- textarea ---
+<textarea_elem> = <lt>textarea name=<quot><identifier><quot> <textarea_attrs><gt><text><lt>/textarea<gt>
+<textarea_elem> = <lt>textarea name=<quot><identifier><quot><gt><lt>/textarea<gt>
+
+<textarea_attrs> = rows=<quot><int min=1 max=100><quot> cols=<quot><int min=1 max=200><quot>
+<textarea_attrs> = placeholder=<quot><text><quot>
+<textarea_attrs> = required
+<textarea_attrs> = disabled readonly
+<textarea_attrs> = maxlength=<quot><int min=1 max=100000><quot>
+<textarea_attrs> = wrap=<quot><wrap_val><quot>
+<textarea_attrs> = autocomplete=<quot><autocomplete_switch><quot>
+<textarea_attrs> = spellcheck=<quot><spellcheck_val><quot>
+<textarea_attrs> = <global_attrs>
+
+<wrap_val> = soft
+<wrap_val> = hard
+<wrap_val> = off
+
+<spellcheck_val> = true
+<spellcheck_val> = false
+<spellcheck_val> = default
+
+# --- select ---
+<select_elem> = <lt>select name=<quot><identifier><quot> <select_attrs><gt><nl><option_items><nl><lt>/select<gt>
+
+<select_attrs> = multiple
+<select_attrs> = required
+<select_attrs> = size=<quot><int min=1 max=20><quot>
+<select_attrs> = disabled
+<select_attrs> = <global_attrs>
+
+<option_items> = <option_item>
+<option_items> = <option_item><nl><option_items>
+<option_items> = <lt>optgroup label=<quot><text><quot><gt><nl><option_item><nl><lt>/optgroup<gt>
+
+<option_item> = <lt>option value=<quot><text><quot><gt><text><lt>/option<gt>
+<option_item> = <lt>option value=<quot><text><quot> selected<gt><text><lt>/option<gt>
+<option_item> = <lt>option value=<quot><text><quot> disabled<gt><text><lt>/option<gt>
+
+# --- button ---
+<button_elem> = <lt>button type=<quot><button_type><quot> <global_attrs><gt><phrasing_content><lt>/button<gt>
+<button_elem> = <lt>button type=<quot><button_type><quot><gt><text><lt>/button<gt>
+<button_elem> = <lt>button type=<quot>submit<quot> formaction=<quot><url><quot> formmethod=<quot><form_method><quot><gt><text><lt>/button<gt>
+<button_elem> = <lt>button popovertarget=<quot><identifier><quot> popovertargetaction=<quot><popover_action><quot><gt><text><lt>/button<gt>
+<button_elem> = <lt>button disabled<gt><text><lt>/button<gt>
+<button_elem> = <lt>button commandfor=<quot><identifier><quot> command=<quot><command_val><quot><gt><text><lt>/button<gt>
+
+<button_type> = submit
+<button_type> = reset
+<button_type> = button
+
+<popover_action> = toggle
+<popover_action> = show
+<popover_action> = hide
+
+<command_val> = show-modal
+<command_val> = close
+<command_val> = show-popover
+<command_val> = hide-popover
+<command_val> = toggle-popover
+
+# --- fieldset / legend ---
+<fieldset_elem> = <lt>fieldset<gt><nl><lt>legend<gt><phrasing_content><lt>/legend<gt><nl><form_children><nl><lt>/fieldset<gt>
+<fieldset_elem> = <lt>fieldset disabled<gt><nl><lt>legend<gt><text><lt>/legend<gt><nl><form_children><nl><lt>/fieldset<gt>
+
+# --- label ---
+<label_elem> = <lt>label for=<quot><identifier><quot><gt><phrasing_content><lt>/label<gt>
+<label_elem> = <lt>label<gt><phrasing_content><lt>/label<gt>
+
+# --- datalist ---
+<datalist_elem> = <lt>datalist id=<quot><identifier><quot><gt><nl><option_items><nl><lt>/datalist<gt>
+
+# --- meter / progress ---
+<meter_elem> = <lt>meter value=<quot><float min=0.0 max=100.0 precision=1><quot> min=<quot>0<quot> max=<quot>100<quot> low=<quot>25<quot> high=<quot>75<quot> optimum=<quot>50<quot><gt><text><lt>/meter<gt>
+<progress_elem> = <lt>progress value=<quot><int min=0 max=100><quot> max=<quot>100<quot><gt><text><lt>/progress<gt>
+<progress_elem> = <lt>progress<gt><text><lt>/progress<gt>
+
+# =============================================================================
+# Script elements
+# =============================================================================
+<scripting_elem> = <script_elem>
+<scripting_elem> = <noscript_elem>
+<scripting_elem> = <template_elem>
+
+<script_elem> = <lt>script<gt><nl>@ecmascript:<program><nl><lt>/script<gt>
+<script_elem> = <lt>script src=<quot><url><quot><gt><lt>/script<gt>
+<script_elem> = <lt>script type=<quot>module<quot><gt><nl>@ecmascript:<program><nl><lt>/script<gt>
+<script_elem> = <lt>script type=<quot>module<quot> src=<quot><url><quot><gt><lt>/script<gt>
+<script_elem> = <lt>script type=<quot>importmap<quot><gt>{"imports":{}}<lt>/script<gt>
+<script_elem> = <lt>script type=<quot>speculationrules<quot><gt>{"prerender":[{"source":"list","urls":["<url>"]}]}<lt>/script<gt>
+<script_elem> = <lt>script type=<quot>application/ld+json<quot><gt>{"@context":"https://schema.org"}<lt>/script<gt>
+<script_elem> = <lt>script type=<quot><string min=5 max=25><quot><gt><text><lt>/script<gt>
+<script_elem> = <lt>script src=<quot><url><quot> async<gt><lt>/script<gt>
+<script_elem> = <lt>script src=<quot><url><quot> defer<gt><lt>/script<gt>
+<script_elem> = <lt>script src=<quot><url><quot> nomodule<gt><lt>/script<gt>
+<script_elem> = <lt>script src=<quot><url><quot> integrity=<quot><sri_hash><quot> crossorigin=<quot><crossorigin_val><quot><gt><lt>/script<gt>
+<script_elem> = <lt>script nonce=<quot><nonce_val><quot><gt><nl>@ecmascript:<program><nl><lt>/script<gt>
+<script_elem> = <lt>script src=<quot><url><quot> fetchpriority=<quot><fetchpriority_val><quot><gt><lt>/script<gt>
+<script_elem> = <lt>script blocking=<quot>render<quot> src=<quot><url><quot><gt><lt>/script<gt>
+
+<noscript_elem> = <lt>noscript<gt><phrasing_content><lt>/noscript<gt>
+
+<template_elem> = <lt>template id=<quot><identifier><quot><gt><nl><flow_content><nl><lt>/template<gt>
+<template_elem> = <lt>template shadowrootmode=<quot><shadowrootmode_val><quot><gt><nl><flow_content><nl><lt>/template<gt>
+<template_elem> = <lt>template shadowrootmode=<quot><shadowrootmode_val><quot> shadowrootclonable<gt><nl><flow_content><nl><lt>/template<gt>
+<template_elem> = <lt>template shadowrootmode=<quot><shadowrootmode_val><quot> shadowrootdelegatesfocus<gt><nl><flow_content><nl><lt>/template<gt>
+
+<shadowrootmode_val> = open
+<shadowrootmode_val> = closed
+
+# =============================================================================
+# Deprecated / obsolete elements (important for fuzzing parser edge cases)
+# =============================================================================
+<deprecated_elem> = <lt>marquee <marquee_attrs><gt><text><lt>/marquee<gt>
+<deprecated_elem> = <lt>blink<gt><text><lt>/blink<gt>
+<deprecated_elem> = <lt>center<gt><flow_content><lt>/center<gt>
+<deprecated_elem> = <lt>font <font_attrs><gt><text><lt>/font<gt>
+<deprecated_elem> = <lt>basefont size=<quot><int min=1 max=7><quot><gt>
+<deprecated_elem> = <lt>big<gt><text><lt>/big<gt>
+<deprecated_elem> = <lt>strike<gt><text><lt>/strike<gt>
+<deprecated_elem> = <lt>tt<gt><text><lt>/tt<gt>
+<deprecated_elem> = <lt>nobr<gt><text><lt>/nobr<gt>
+<deprecated_elem> = <lt>spacer type=<quot>horizontal<quot> size=<quot><int min=1 max=100><quot><gt>
+<deprecated_elem> = <lt>bgsound src=<quot><url><quot><gt>
+<deprecated_elem> = <lt>isindex prompt=<quot><text><quot><gt>
+<deprecated_elem> = <lt>listing<gt><text><lt>/listing<gt>
+<deprecated_elem> = <lt>xmp<gt><text><lt>/xmp<gt>
+<deprecated_elem> = <lt>nextid n=<quot><int min=1 max=100><quot><gt>
+<deprecated_elem> = <lt>multicol cols=<quot><int min=2 max=5><quot><gt><flow_content><lt>/multicol<gt>
+<deprecated_elem> = <lt>frameset cols=<quot>50%,50%<quot><gt><lt>frame src=<quot><url><quot><gt><lt>frame src=<quot><url><quot><gt><lt>/frameset<gt>
+<deprecated_elem> = <lt>noframes<gt><text><lt>/noframes<gt>
+<deprecated_elem> = <lt>applet code=<quot><identifier>.class<quot> width=<quot><int min=100 max=500><quot> height=<quot><int min=100 max=500><quot><gt><lt>param name=<quot><identifier><quot> value=<quot><text><quot><gt><lt>/applet<gt>
+<deprecated_elem> = <lt>dir<gt><nl><li_items><nl><lt>/dir<gt>
+<deprecated_elem> = <lt>acronym title=<quot><text><quot><gt><text><lt>/acronym<gt>
+<deprecated_elem> = <lt>plaintext<gt><text>
+<deprecated_elem> = <lt>noembed<gt><text><lt>/noembed<gt>
+<deprecated_elem> = <lt>nolayer<gt><text><lt>/nolayer<gt>
+<deprecated_elem> = <lt>layer<gt><flow_content><lt>/layer<gt>
+<deprecated_elem> = <lt>ilayer<gt><flow_content><lt>/ilayer<gt>
+
+<marquee_attrs> = behavior=<quot><marquee_behavior><quot> direction=<quot><marquee_direction><quot>
+<marquee_attrs> = scrollamount=<quot><int min=1 max=100><quot> scrolldelay=<quot><int min=1 max=1000><quot>
+<marquee_attrs> = loop=<quot><int min=-1 max=100><quot>
+
+<marquee_behavior> = scroll
+<marquee_behavior> = slide
+<marquee_behavior> = alternate
+
+<marquee_direction> = left
+<marquee_direction> = right
+<marquee_direction> = up
+<marquee_direction> = down
+
+<font_attrs> = face=<quot><text><quot> size=<quot><int min=1 max=7><quot> color=<quot><css_color><quot>
+<font_attrs> = color=<quot><css_color><quot>
+
+# =============================================================================
+# SVG inline (key elements for fuzzing)
+# =============================================================================
+<svg_elem> = <lt>svg xmlns=<quot>http://www.w3.org/2000/svg<quot> <svg_attrs><gt><nl><svg_content><nl><lt>/svg<gt>
+<svg_elem> = <lt>svg <svg_attrs><gt><nl><svg_content><nl><lt>/svg<gt>
+
+<svg_attrs> = viewBox=<quot><int min=0 max=100> <int min=0 max=100> <int min=100 max=2000> <int min=100 max=2000><quot>
+<svg_attrs> = width=<quot><int min=1 max=2000><quot> height=<quot><int min=1 max=2000><quot>
+<svg_attrs> = viewBox=<quot>0 0 <int min=100 max=2000> <int min=100 max=2000><quot> width=<quot><int min=1 max=2000><quot> height=<quot><int min=1 max=2000><quot>
+<svg_attrs> = <global_attrs>
+
+<svg_content> = <svg_shape>
+<svg_content> = <svg_shape><nl><svg_content>
+<svg_content> = <svg_container>
+<svg_content> = <svg_text_elem>
+<svg_content> = <svg_special>
+
+<svg_shape> = <lt>circle cx=<quot><int min=0 max=1000><quot> cy=<quot><int min=0 max=1000><quot> r=<quot><int min=1 max=500><quot> <svg_presentation>/<gt>
+<svg_shape> = <lt>rect x=<quot><int min=0 max=1000><quot> y=<quot><int min=0 max=1000><quot> width=<quot><int min=1 max=1000><quot> height=<quot><int min=1 max=1000><quot> rx=<quot><int min=0 max=100><quot> <svg_presentation>/<gt>
+<svg_shape> = <lt>ellipse cx=<quot><int min=0 max=1000><quot> cy=<quot><int min=0 max=1000><quot> rx=<quot><int min=1 max=500><quot> ry=<quot><int min=1 max=500><quot> <svg_presentation>/<gt>
+<svg_shape> = <lt>line x1=<quot><int min=0 max=1000><quot> y1=<quot><int min=0 max=1000><quot> x2=<quot><int min=0 max=1000><quot> y2=<quot><int min=0 max=1000><quot> <svg_presentation>/<gt>
+<svg_shape> = <lt>polyline points=<quot><svg_points><quot> <svg_presentation>/<gt>
+<svg_shape> = <lt>polygon points=<quot><svg_points><quot> <svg_presentation>/<gt>
+<svg_shape> = <lt>path d=<quot><svg_path_d><quot> <svg_presentation>/<gt>
+
+<svg_points> = <int min=0 max=1000>,<int min=0 max=1000>
+<svg_points> = <int min=0 max=1000>,<int min=0 max=1000> <svg_points>
+
+<svg_path_d> = M <int min=0 max=1000> <int min=0 max=1000> L <int min=0 max=1000> <int min=0 max=1000> Z
+<svg_path_d> = M <int min=0 max=500> <int min=0 max=500> C <int min=0 max=500> <int min=0 max=500> <int min=0 max=500> <int min=0 max=500> <int min=0 max=500> <int min=0 max=500> Z
+<svg_path_d> = M <int min=0 max=500> <int min=0 max=500> A <int min=1 max=200> <int min=1 max=200> 0 0 1 <int min=0 max=500> <int min=0 max=500>
+<svg_path_d> = M0,0 H<int min=10 max=500> V<int min=10 max=500> H0 Z
+
+<svg_presentation> = fill=<quot><css_color><quot> stroke=<quot><css_color><quot>
+<svg_presentation> = fill=<quot><css_color><quot> stroke=<quot><css_color><quot> stroke-width=<quot><int min=1 max=20><quot>
+<svg_presentation> = style=<quot><css_inline><quot>
+<svg_presentation> = opacity=<quot><float min=0.0 max=1.0 precision=2><quot>
+<svg_presentation> = transform=<quot><svg_transform><quot>
+<svg_presentation> = <empty>
+
+<svg_transform> = translate(<int min=-500 max=500>,<int min=-500 max=500>)
+<svg_transform> = rotate(<int min=0 max=360>)
+<svg_transform> = scale(<float min=0.1 max=5.0 precision=1>)
+<svg_transform> = matrix(<float min=-10.0 max=10.0 precision=2> <float min=-10.0 max=10.0 precision=2> <float min=-10.0 max=10.0 precision=2> <float min=-10.0 max=10.0 precision=2> <float min=-500.0 max=500.0 precision=1> <float min=-500.0 max=500.0 precision=1>)
+
+<svg_container> = <lt>g <svg_presentation><gt><nl><svg_content><nl><lt>/g<gt>
+<svg_container> = <lt>defs<gt><nl><svg_content><nl><lt>/defs<gt>
+<svg_container> = <lt>symbol id=<quot><identifier><quot> viewBox=<quot>0 0 <int min=10 max=500> <int min=10 max=500><quot><gt><nl><svg_content><nl><lt>/symbol<gt>
+<svg_container> = <lt>clipPath id=<quot><identifier><quot><gt><svg_shape><lt>/clipPath<gt>
+<svg_container> = <lt>mask id=<quot><identifier><quot><gt><svg_shape><lt>/mask<gt>
+<svg_container> = <lt>pattern id=<quot><identifier><quot> patternUnits=<quot>userSpaceOnUse<quot> width=<quot><int min=1 max=100><quot> height=<quot><int min=1 max=100><quot><gt><svg_shape><lt>/pattern<gt>
+
+<svg_text_elem> = <lt>text x=<quot><int min=0 max=500><quot> y=<quot><int min=0 max=500><quot> <svg_presentation><gt><text><lt>/text<gt>
+<svg_text_elem> = <lt>text<gt><lt>tspan dx=<quot><int min=-50 max=50><quot><gt><text><lt>/tspan<gt><lt>/text<gt>
+
+<svg_special> = <lt>use href=<quot>#<identifier><quot> x=<quot><int min=0 max=500><quot> y=<quot><int min=0 max=500><quot>/<gt>
+<svg_special> = <lt>use xlink:href=<quot>#<identifier><quot>/<gt>
+<svg_special> = <lt>image href=<quot><url><quot> x=<quot><int min=0 max=500><quot> y=<quot><int min=0 max=500><quot> width=<quot><int min=1 max=1000><quot> height=<quot><int min=1 max=1000><quot>/<gt>
+<svg_special> = <lt>foreignObject x=<quot><int min=0 max=500><quot> y=<quot><int min=0 max=500><quot> width=<quot><int min=10 max=500><quot> height=<quot><int min=10 max=500><quot><gt><lt>body xmlns=<quot>http://www.w3.org/1999/xhtml<quot><gt><flow_content><lt>/body<gt><lt>/foreignObject<gt>
+<svg_special> = <lt>animate attributeName=<quot><svg_anim_attr><quot> from=<quot><int min=0 max=100><quot> to=<quot><int min=100 max=500><quot> dur=<quot><int min=1 max=10>s<quot> repeatCount=<quot>indefinite<quot>/<gt>
+<svg_special> = <lt>set attributeName=<quot><svg_anim_attr><quot> to=<quot><int min=0 max=500><quot> begin=<quot><int min=0 max=5>s<quot>/<gt>
+<svg_special> = <lt>animateTransform attributeName=<quot>transform<quot> type=<quot>rotate<quot> from=<quot>0<quot> to=<quot>360<quot> dur=<quot><int min=1 max=10>s<quot> repeatCount=<quot>indefinite<quot>/<gt>
+<svg_special> = <lt>script type=<quot>text/ecmascript<quot><gt><nl>@ecmascript:<program><nl><lt>/script<gt>
+
+<svg_anim_attr> = opacity
+<svg_anim_attr> = cx
+<svg_anim_attr> = cy
+<svg_anim_attr> = r
+<svg_anim_attr> = width
+<svg_anim_attr> = height
+<svg_anim_attr> = fill
+<svg_anim_attr> = x
+<svg_anim_attr> = y
+
+# =============================================================================
+# MathML inline (basic)
+# =============================================================================
+<mathml_elem> = <lt>math xmlns=<quot>http://www.w3.org/1998/Math/MathML<quot><gt><nl><mathml_content><nl><lt>/math<gt>
+<mathml_elem> = <lt>math<gt><nl><mathml_content><nl><lt>/math<gt>
+
+<mathml_content> = <lt>mi<gt><text><lt>/mi<gt>
+<mathml_content> = <lt>mn<gt><int min=0 max=9999><lt>/mn<gt>
+<mathml_content> = <lt>mo<gt><mathml_operator><lt>/mo<gt>
+<mathml_content> = <lt>mfrac<gt><lt>mn<gt><int min=0 max=100><lt>/mn<gt><lt>mn<gt><int min=1 max=100><lt>/mn<gt><lt>/mfrac<gt>
+<mathml_content> = <lt>msqrt<gt><lt>mn<gt><int min=0 max=10000><lt>/mn<gt><lt>/msqrt<gt>
+<mathml_content> = <lt>msup<gt><lt>mi<gt><text><lt>/mi<gt><lt>mn<gt><int min=0 max=20><lt>/mn<gt><lt>/msup<gt>
+<mathml_content> = <lt>mrow<gt><mathml_content><lt>/mrow<gt>
+<mathml_content> = <lt>mtext<gt><text><lt>/mtext<gt>
+<mathml_content> = <lt>annotation encoding=<quot>text/html<quot><gt><flow_content><lt>/annotation<gt>
+
+<mathml_operator> = +
+<mathml_operator> = -
+<mathml_operator> = =
+<mathml_operator> = *
+
+# =============================================================================
+# Custom elements / Web Components
+# =============================================================================
+<custom_elem> = <lt><custom_tag> <global_attrs><gt><flow_content><lt>/<custom_tag><gt>
+<custom_elem> = <lt><custom_tag><gt><flow_content><lt>/<custom_tag><gt>
+
+<custom_tag> = <string min=2 max=10 charset=lower>-<string min=2 max=10 charset=lower>
+
+<web_component_elem> = <lt><custom_tag><gt><nl><template_elem><nl><lt>/<custom_tag><gt>
+<web_component_elem> = <lt><custom_tag> <global_attrs><gt><nl><lt>span slot=<quot><identifier><quot><gt><text><lt>/span<gt><nl><lt>/<custom_tag><gt>
+
+# =============================================================================
+# Global attributes (WHATWG spec - all)
+# =============================================================================
+<global_attrs> = <global_attr>
+<global_attrs> = <global_attr> <global_attrs>
+
+<global_attr> = id=<quot><identifier><quot>
+<global_attr> = class=<quot><class_list><quot>
+<global_attr> = style=<quot><css_inline><quot>
+<global_attr> = title=<quot><text><quot>
+<global_attr> = lang=<quot><lang_tag><quot>
+<global_attr> = dir=<quot><dir_val><quot>
+<global_attr> = tabindex=<quot><int min=-1 max=32767><quot>
+<global_attr> = accesskey=<quot><char charset=lower><quot>
+<global_attr> = contenteditable=<quot><contenteditable_val><quot>
+<global_attr> = draggable=<quot><draggable_val><quot>
+<global_attr> = enterkeyhint=<quot><enterkeyhint_val><quot>
+<global_attr> = hidden
+<global_attr> = hidden=<quot>until-found<quot>
+<global_attr> = inert
+<global_attr> = inputmode=<quot><inputmode_val><quot>
+<global_attr> = is=<quot><custom_tag><quot>
+<global_attr> = nonce=<quot><nonce_val><quot>
+<global_attr> = popover
+<global_attr> = popover=<quot>auto<quot>
+<global_attr> = popover=<quot>manual<quot>
+<global_attr> = spellcheck=<quot><spellcheck_val><quot>
+<global_attr> = translate=<quot><translate_val><quot>
+<global_attr> = autofocus
+<global_attr> = part=<quot><identifier><quot>
+<global_attr> = exportparts=<quot><identifier><quot>
+<global_attr> = slot=<quot><identifier><quot>
+<global_attr> = itemscope
+<global_attr> = itemtype=<quot><url><quot>
+<global_attr> = itemprop=<quot><identifier><quot>
+<global_attr> = itemid=<quot><url><quot>
+<global_attr> = itemref=<quot><identifier><quot>
+<global_attr> = <data_attr>
+<global_attr> = <aria_attr>
+<global_attr> = <event_handler_attr>
+
+<contenteditable_val> = true
+<contenteditable_val> = false
+<contenteditable_val> = plaintext-only
+
+<draggable_val> = true
+<draggable_val> = false
+
+<enterkeyhint_val> = enter
+<enterkeyhint_val> = done
+<enterkeyhint_val> = go
+<enterkeyhint_val> = next
+<enterkeyhint_val> = previous
+<enterkeyhint_val> = search
+<enterkeyhint_val> = send
+
+<inputmode_val> = none
+<inputmode_val> = text
+<inputmode_val> = decimal
+<inputmode_val> = numeric
+<inputmode_val> = tel
+<inputmode_val> = search
+<inputmode_val> = email
+<inputmode_val> = url
+
+<translate_val> = yes
+<translate_val> = no
+
+<data_attr> = data-<identifier>=<quot><text><quot>
+<data_attr> = data-<string min=1 max=20 charset=lower>=<quot><text><quot>
+
+# --- ARIA attributes (comprehensive) ---
+<aria_attr> = role=<quot><aria_role><quot>
+<aria_attr> = aria-label=<quot><text><quot>
+<aria_attr> = aria-labelledby=<quot><identifier><quot>
+<aria_attr> = aria-describedby=<quot><identifier><quot>
+<aria_attr> = aria-hidden=<quot><aria_bool><quot>
+<aria_attr> = aria-live=<quot><aria_live_val><quot>
+<aria_attr> = aria-atomic=<quot><aria_bool><quot>
+<aria_attr> = aria-busy=<quot><aria_bool><quot>
+<aria_attr> = aria-controls=<quot><identifier><quot>
+<aria_attr> = aria-current=<quot><aria_current_val><quot>
+<aria_attr> = aria-disabled=<quot><aria_bool><quot>
+<aria_attr> = aria-expanded=<quot><aria_bool><quot>
+<aria_attr> = aria-haspopup=<quot><aria_haspopup_val><quot>
+<aria_attr> = aria-invalid=<quot><aria_invalid_val><quot>
+<aria_attr> = aria-owns=<quot><identifier><quot>
+<aria_attr> = aria-pressed=<quot><aria_tristate><quot>
+<aria_attr> = aria-readonly=<quot><aria_bool><quot>
+<aria_attr> = aria-required=<quot><aria_bool><quot>
+<aria_attr> = aria-selected=<quot><aria_bool><quot>
+<aria_attr> = aria-sort=<quot><aria_sort_val><quot>
+<aria_attr> = aria-valuemin=<quot><int min=0 max=100><quot>
+<aria_attr> = aria-valuemax=<quot><int min=0 max=100><quot>
+<aria_attr> = aria-valuenow=<quot><int min=0 max=100><quot>
+<aria_attr> = aria-valuetext=<quot><text><quot>
+<aria_attr> = aria-roledescription=<quot><text><quot>
+<aria_attr> = aria-keyshortcuts=<quot><text><quot>
+<aria_attr> = aria-details=<quot><identifier><quot>
+<aria_attr> = aria-errormessage=<quot><identifier><quot>
+
+<aria_role> = alert
+<aria_role> = alertdialog
+<aria_role> = application
+<aria_role> = article
+<aria_role> = banner
+<aria_role> = button
+<aria_role> = cell
+<aria_role> = checkbox
+<aria_role> = columnheader
+<aria_role> = combobox
+<aria_role> = complementary
+<aria_role> = contentinfo
+<aria_role> = dialog
+<aria_role> = document
+<aria_role> = feed
+<aria_role> = figure
+<aria_role> = form
+<aria_role> = grid
+<aria_role> = gridcell
+<aria_role> = group
+<aria_role> = heading
+<aria_role> = img
+<aria_role> = link
+<aria_role> = list
+<aria_role> = listbox
+<aria_role> = listitem
+<aria_role> = log
+<aria_role> = main
+<aria_role> = marquee
+<aria_role> = math
+<aria_role> = menu
+<aria_role> = menubar
+<aria_role> = menuitem
+<aria_role> = menuitemcheckbox
+<aria_role> = menuitemradio
+<aria_role> = navigation
+<aria_role> = none
+<aria_role> = note
+<aria_role> = option
+<aria_role> = presentation
+<aria_role> = progressbar
+<aria_role> = radio
+<aria_role> = radiogroup
+<aria_role> = region
+<aria_role> = row
+<aria_role> = rowgroup
+<aria_role> = rowheader
+<aria_role> = scrollbar
+<aria_role> = search
+<aria_role> = searchbox
+<aria_role> = separator
+<aria_role> = slider
+<aria_role> = spinbutton
+<aria_role> = status
+<aria_role> = switch
+<aria_role> = tab
+<aria_role> = table
+<aria_role> = tablist
+<aria_role> = tabpanel
+<aria_role> = term
+<aria_role> = textbox
+<aria_role> = timer
+<aria_role> = toolbar
+<aria_role> = tooltip
+<aria_role> = tree
+<aria_role> = treegrid
+<aria_role> = treeitem
+
+<aria_bool> = true
+<aria_bool> = false
+
+<aria_live_val> = off
+<aria_live_val> = polite
+<aria_live_val> = assertive
+
+<aria_current_val> = page
+<aria_current_val> = step
+<aria_current_val> = location
+<aria_current_val> = date
+<aria_current_val> = time
+<aria_current_val> = true
+<aria_current_val> = false
+
+<aria_haspopup_val> = true
+<aria_haspopup_val> = false
+<aria_haspopup_val> = menu
+<aria_haspopup_val> = listbox
+<aria_haspopup_val> = tree
+<aria_haspopup_val> = grid
+<aria_haspopup_val> = dialog
+
+<aria_invalid_val> = true
+<aria_invalid_val> = false
+<aria_invalid_val> = grammar
+<aria_invalid_val> = spelling
+
+<aria_tristate> = true
+<aria_tristate> = false
+<aria_tristate> = mixed
+
+<aria_sort_val> = ascending
+<aria_sort_val> = descending
+<aria_sort_val> = none
+<aria_sort_val> = other
+
+# =============================================================================
+# Event handler attributes (all per WHATWG spec)
+# =============================================================================
+<event_handler_attr> = <on_event>=<quot><js_expr><quot>
+
+# GlobalEventHandlers
+<on_event> = onabort
+<on_event> = onauxclick
+<on_event> = onbeforeinput
+<on_event> = onbeforematch
+<on_event> = onbeforetoggle
+<on_event> = onblur
+<on_event> = oncancel
+<on_event> = oncanplay
+<on_event> = oncanplaythrough
+<on_event> = onchange
+<on_event> = onclick
+<on_event> = onclose
+<on_event> = oncontextlost
+<on_event> = oncontextmenu
+<on_event> = oncontextrestored
+<on_event> = oncopy
+<on_event> = oncuechange
+<on_event> = oncut
+<on_event> = ondblclick
+<on_event> = ondrag
+<on_event> = ondragend
+<on_event> = ondragenter
+<on_event> = ondragleave
+<on_event> = ondragover
+<on_event> = ondragstart
+<on_event> = ondrop
+<on_event> = ondurationchange
+<on_event> = onemptied
+<on_event> = onended
+<on_event> = onerror
+<on_event> = onfocus
+<on_event> = onformdata
+<on_event> = ongotpointercapture
+<on_event> = oninput
+<on_event> = oninvalid
+<on_event> = onkeydown
+<on_event> = onkeypress
+<on_event> = onkeyup
+<on_event> = onload
+<on_event> = onloadeddata
+<on_event> = onloadedmetadata
+<on_event> = onloadstart
+<on_event> = onlostpointercapture
+<on_event> = onmousedown
+<on_event> = onmouseenter
+<on_event> = onmouseleave
+<on_event> = onmousemove
+<on_event> = onmouseout
+<on_event> = onmouseover
+<on_event> = onmouseup
+<on_event> = onpaste
+<on_event> = onpause
+<on_event> = onplay
+<on_event> = onplaying
+<on_event> = onpointercancel
+<on_event> = onpointerdown
+<on_event> = onpointerenter
+<on_event> = onpointerleave
+<on_event> = onpointermove
+<on_event> = onpointerout
+<on_event> = onpointerover
+<on_event> = onpointerup
+<on_event> = onprogress
+<on_event> = onratechange
+<on_event> = onreset
+<on_event> = onresize
+<on_event> = onscroll
+<on_event> = onscrollend
+<on_event> = onsecuritypolicyviolation
+<on_event> = onseeked
+<on_event> = onseeking
+<on_event> = onselect
+<on_event> = onselectionchange
+<on_event> = onselectstart
+<on_event> = onslotchange
+<on_event> = onstalled
+<on_event> = onsubmit
+<on_event> = onsuspend
+<on_event> = ontimeupdate
+<on_event> = ontoggle
+<on_event> = ontouchcancel
+<on_event> = ontouchend
+<on_event> = ontouchmove
+<on_event> = ontouchstart
+<on_event> = ontransitioncancel
+<on_event> = ontransitionend
+<on_event> = ontransitionrun
+<on_event> = ontransitionstart
+<on_event> = onvolumechange
+<on_event> = onwaiting
+<on_event> = onwebkitanimationend
+<on_event> = onwebkitanimationiteration
+<on_event> = onwebkitanimationstart
+<on_event> = onwebkittransitionend
+<on_event> = onwheel
+<on_event> = onanimationcancel
+<on_event> = onanimationend
+<on_event> = onanimationiteration
+<on_event> = onanimationstart
+
+# =============================================================================
+# Comments and special constructs
+# =============================================================================
+<html_comment> = <lt>!-- <text> --<gt>
+<html_comment> = <lt>!--<text>--<gt>
+<html_comment> = <lt>!----<gt>
+<html_comment> = <lt>!-- --<gt>
+
+# =============================================================================
+# Shared value terminals
+# =============================================================================
+<js_expr> = alert(1)
+<js_expr> = alert(document.domain)
+<js_expr> = alert(document.cookie)
+<js_expr> = console.log(1)
+<js_expr> = <identifier>()
+<js_expr> = void(0)
+<js_expr> = this.<identifier>
+<js_expr> = window.<identifier>
+<js_expr> = <string min=3 max=30>
+
+<url> = https://example.com/<path>
+<url> = https://<string min=3 max=15 charset=lower>.<tld>/<path>
+<url> = http://<string min=3 max=15 charset=lower>.<tld>/<path>
+<url> = //<string min=3 max=15 charset=lower>.<tld>/<path>
+<url> = /<path>
+<url> = <path>
+<url> = javascript:void(0)
+<url> = javascript:<js_expr>
+<url> = data:<mime_type>;base64,<string min=10 max=40 charset=alphanumeric>
+<url> = blob:<url>
+<url> = about:blank
+<url> = about:srcdoc
+<url> = #<identifier>
+<url> = ?<identifier>=<text>
+<url> = <string min=5 max=40>
+
+<data_uri> = data:image/svg+xml,<lt>svg<gt><lt>/svg<gt>
+<data_uri> = data:text/html,<text>
+<data_uri> = data:text/html;base64,<string min=10 max=40 charset=alphanumeric>
+<data_uri> = data:<mime_type>;base64,<string min=10 max=40 charset=alphanumeric>
+<data_uri> = data:image/png;base64,<string min=20 max=60 charset=alphanumeric>
+
+<path> = <string min=1 max=15 charset=lower>
+<path> = <string min=1 max=10 charset=lower>/<path>
+<path> = <string min=1 max=10 charset=lower>.<string min=2 max=5 charset=lower>
+
+<tld> = com
+<tld> = net
+<tld> = org
+<tld> = io
+<tld> = dev
+<tld> = co.kr
+<tld> = co.jp
+
+<mime_type> = text/html
+<mime_type> = text/plain
+<mime_type> = text/css
+<mime_type> = text/javascript
+<mime_type> = application/javascript
+<mime_type> = application/json
+<mime_type> = application/xml
+<mime_type> = application/xhtml+xml
+<mime_type> = application/pdf
+<mime_type> = application/octet-stream
+<mime_type> = application/x-shockwave-flash
+<mime_type> = image/png
+<mime_type> = image/jpeg
+<mime_type> = image/gif
+<mime_type> = image/svg+xml
+<mime_type> = image/webp
+<mime_type> = image/avif
+<mime_type> = audio/mpeg
+<mime_type> = video/mp4
+<mime_type> = video/webm
+<mime_type> = font/woff2
+<mime_type> = multipart/form-data
+<mime_type> = <string min=3 max=15 charset=lower>/<string min=3 max=15 charset=lower>
+
+<identifier> = <string min=2 max=12 charset=lower>
+<text> = <string min=1 max=30>
+<class_list> = <identifier>
+<class_list> = <identifier> <class_list>
+
+# --- CSS inline (basic for attributes) ---
+<css_inline> = color: <css_color>
+<css_inline> = background: <css_color>
+<css_inline> = background-image: url(<url>)
+<css_inline> = <css_prop>: <css_val>
+<css_inline> = <css_inline>; <css_inline>
+
+<css_content> = <css_rule>
+<css_content> = <css_rule><nl><css_content>
+
+<css_rule> = <css_selector> { <css_declarations> }
+<css_rule> = @import url(<quot><url><quot>);
+<css_rule> = @media <media_query> { <css_rule> }
+<css_rule> = @font-face { font-family: <quot><text><quot>; src: url(<quot><url><quot>); }
+<css_rule> = @keyframes <identifier> { from { <css_declarations> } to { <css_declarations> } }
+
+<css_selector> = <css_simple_selector>
+<css_selector> = <css_simple_selector> <css_combinator> <css_simple_selector>
+
+<css_simple_selector> = <identifier>
+<css_simple_selector> = .<identifier>
+<css_simple_selector> = #<identifier>
+<css_simple_selector> = *
+<css_simple_selector> = [<identifier>]
+<css_simple_selector> = [<identifier>=<quot><text><quot>]
+<css_simple_selector> = :<css_pseudo_class>
+<css_simple_selector> = ::<css_pseudo_element>
+
+<css_combinator> = <sp>
+<css_combinator> = >
+<css_combinator> = +
+<css_combinator> = ~
+
+<css_pseudo_class> = hover
+<css_pseudo_class> = focus
+<css_pseudo_class> = active
+<css_pseudo_class> = first-child
+<css_pseudo_class> = last-child
+<css_pseudo_class> = nth-child(<int min=1 max=10>)
+<css_pseudo_class> = not(<css_simple_selector>)
+<css_pseudo_class> = has(<css_simple_selector>)
+
+<css_pseudo_element> = before
+<css_pseudo_element> = after
+<css_pseudo_element> = first-line
+<css_pseudo_element> = first-letter
+<css_pseudo_element> = placeholder
+<css_pseudo_element> = selection
+
+<css_declarations> = <css_declaration>
+<css_declarations> = <css_declaration>; <css_declarations>
+
+<css_declaration> = <css_prop>: <css_val>
+<css_declaration> = <css_prop>: <css_val> !important
+
+<css_color> = red
+<css_color> = blue
+<css_color> = green
+<css_color> = transparent
+<css_color> = currentColor
+<css_color> = #<hex len=6>
+<css_color> = #<hex len=3>
+<css_color> = #<hex len=8>
+<css_color> = rgb(<int min=0 max=255> <int min=0 max=255> <int min=0 max=255>)
+<css_color> = rgba(<int min=0 max=255>, <int min=0 max=255>, <int min=0 max=255>, <float min=0.0 max=1.0 precision=2>)
+<css_color> = hsl(<int min=0 max=360> <int min=0 max=100>% <int min=0 max=100>%)
+<css_color> = oklch(<float min=0.0 max=1.0 precision=2> <float min=0.0 max=0.4 precision=3> <int min=0 max=360>)
+<css_color> = color-mix(in srgb, <css_color> <int min=0 max=100>%, <css_color>)
+
+<css_prop> = width
+<css_prop> = height
+<css_prop> = min-width
+<css_prop> = max-width
+<css_prop> = min-height
+<css_prop> = max-height
+<css_prop> = margin
+<css_prop> = padding
+<css_prop> = border
+<css_prop> = display
+<css_prop> = position
+<css_prop> = top
+<css_prop> = right
+<css_prop> = bottom
+<css_prop> = left
+<css_prop> = float
+<css_prop> = clear
+<css_prop> = overflow
+<css_prop> = z-index
+<css_prop> = opacity
+<css_prop> = visibility
+<css_prop> = font-size
+<css_prop> = font-family
+<css_prop> = font-weight
+<css_prop> = line-height
+<css_prop> = text-align
+<css_prop> = text-decoration
+<css_prop> = transform
+<css_prop> = transition
+<css_prop> = animation
+<css_prop> = flex
+<css_prop> = grid-template-columns
+<css_prop> = gap
+<css_prop> = aspect-ratio
+<css_prop> = container-type
+<css_prop> = content-visibility
+
+<css_val> = <int min=0 max=1000>px
+<css_val> = <int min=0 max=100>%
+<css_val> = <float min=0.0 max=10.0 precision=1>em
+<css_val> = <float min=0.0 max=100.0 precision=1>rem
+<css_val> = <int min=0 max=100>vw
+<css_val> = <int min=0 max=100>vh
+<css_val> = auto
+<css_val> = none
+<css_val> = inherit
+<css_val> = initial
+<css_val> = unset
+<css_val> = revert
+<css_val> = <css_color>
+<css_val> = <text>

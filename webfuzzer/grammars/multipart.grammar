@@ -1,0 +1,281 @@
+# =============================================================================
+# MIME Multipart Grammar — RFC 2046 (MIME Part Two) + RFC 7578 (multipart/form-data)
+# Also covers: multipart/mixed, multipart/alternative, multipart/related,
+#              nested multiparts, Content-Disposition, Content-Transfer-Encoding,
+#              edge cases for parser differential testing
+# =============================================================================
+
+!root <multipart_body>
+!max_depth 6
+
+# =============================================================================
+# Multipart body (RFC 2046 §5.1)
+# Format: preamble CRLF --boundary CRLF body-part *(CRLF --boundary CRLF body-part) CRLF --boundary-- CRLF epilogue
+# =============================================================================
+<multipart_body> = <preamble><boundary_start><body_parts><boundary_end><epilogue>
+
+# Without preamble/epilogue (common case)
+<multipart_body> = <boundary_start><body_parts><boundary_end>
+
+# =============================================================================
+# Boundaries (RFC 2046 §5.1.1)
+# boundary = 0*69(bcharsnospace) bchars
+# bchars = bcharsnospace / " "
+# bcharsnospace = DIGIT / ALPHA / "'" / "(" / ")" / "+" / "_" / "," / "-" / "." / "/" / ":" / "=" / "?"
+# =============================================================================
+<boundary_start> = --<boundary_value><crlf>
+<boundary_end> = <crlf>--<boundary_value>--<crlf>
+
+<boundary_value> = <string min=16 max=40 charset=alphanumeric>
+<boundary_value> = ----<string min=12 max=30 charset=alphanumeric>
+<boundary_value> = ----WebKitFormBoundary<string min=16 max=16 charset=alphanumeric>
+<boundary_value> = ----geckoformboundary<string min=16 max=16 charset=hex>
+<boundary_value> = ---------------------------<int min=100000000 max=999999999><int min=100000000 max=999999999>
+<boundary_value> = ----------<int min=10000000 max=99999999>
+<boundary_value> = <string min=1 max=70 charset=alphanumeric>
+<boundary_value> = =_<string min=20 max=40 charset=alphanumeric>
+
+# Edge case boundaries
+<boundary_value> = <string min=1 max=1 charset=lower>
+<boundary_value> = <string min=60 max=70 charset=alphanumeric>
+<boundary_value> = <string min=10 max=20 charset=alphanumeric>-<string min=10 max=20 charset=alphanumeric>
+<boundary_value> = '<string min=10 max=30 charset=alphanumeric>'
+<boundary_value> = (<string min=10 max=30 charset=alphanumeric>)
+<boundary_value> = <string min=5 max=15 charset=alphanumeric>+<string min=5 max=15 charset=alphanumeric>
+
+<crlf> = <nl>
+
+# =============================================================================
+# Body parts
+# =============================================================================
+<body_parts> = <body_part>
+<body_parts> = <body_part><crlf>--<boundary_value><crlf><body_parts>
+
+<body_part> = <part_headers><crlf><part_body>
+
+# =============================================================================
+# Part headers (RFC 2046 §5.1 + RFC 7578 §4)
+# =============================================================================
+<part_headers> = <content_disposition><crlf>
+<part_headers> = <content_disposition><crlf><content_type_header><crlf>
+<part_headers> = <content_disposition><crlf><content_type_header><crlf><content_transfer_encoding><crlf>
+<part_headers> = <content_disposition><crlf><content_transfer_encoding><crlf>
+<part_headers> = <content_type_header><crlf>
+<part_headers> = <content_type_header><crlf><content_transfer_encoding><crlf>
+
+# With additional headers
+<part_headers> = <content_disposition><crlf><content_type_header><crlf><extra_headers>
+
+# =============================================================================
+# Content-Disposition (RFC 7578 §4.2 + RFC 6266)
+# =============================================================================
+<content_disposition> = Content-Disposition: form-data; name="<field_name>"
+<content_disposition> = Content-Disposition: form-data; name="<field_name>"; filename="<filename>"
+<content_disposition> = Content-Disposition: form-data; name="<field_name>"; filename*=<encoded_filename>
+<content_disposition> = Content-Disposition: form-data; name="<field_name>"; filename="<filename>"; filename*=<encoded_filename>
+<content_disposition> = Content-Disposition: attachment; filename="<filename>"
+<content_disposition> = Content-Disposition: attachment; filename*=<encoded_filename>
+<content_disposition> = Content-Disposition: inline
+<content_disposition> = Content-Disposition: inline; filename="<filename>"
+
+# Edge cases: varied casing/quoting
+<content_disposition> = content-disposition: form-data; name="<field_name>"
+<content_disposition> = Content-Disposition: form-data; name=<field_name>
+<content_disposition> = Content-Disposition: form-data; name="<field_name>"; filename=<filename>
+<content_disposition> = Content-Disposition: form-data; NAME="<field_name>"
+<content_disposition> = Content-Disposition: form-data; name="<field_name>"; filename=""
+
+<field_name> = <string min=1 max=30 charset=lower>
+<field_name> = <string min=3 max=10 charset=lower>_<string min=3 max=10 charset=lower>
+<field_name> = <string min=3 max=10 charset=lower>[<int min=0 max=10>]
+<field_name> = <string min=3 max=10 charset=lower>[]
+<field_name> = file
+<field_name> = upload
+<field_name> = image
+<field_name> = document
+<field_name> = avatar
+<field_name> = name
+<field_name> = email
+<field_name> = username
+<field_name> = password
+<field_name> = csrf_token
+<field_name> = _method
+<field_name> = <string min=3 max=10 charset=lower>[<string min=3 max=10 charset=lower>]
+
+<filename> = <string min=1 max=20 charset=lower>.<file_ext>
+<filename> = <string min=1 max=20 charset=alphanumeric>.<file_ext>
+<filename> = <string min=1 max=10 charset=lower> (<int min=1 max=99>).<file_ext>
+
+# Filename edge cases (path traversal, null byte injection, etc.)
+<filename> = ../<string min=3 max=10 charset=lower>.<file_ext>
+<filename> = ../../<string min=3 max=10 charset=lower>.<file_ext>
+<filename> = ..\\<string min=3 max=10 charset=lower>.<file_ext>
+<filename> = ....//....//.<file_ext>
+<filename> = <string min=3 max=10 charset=lower>.<file_ext>%00.<file_ext>
+<filename> = <string min=3 max=10 charset=lower>.<file_ext>\x00.txt
+<filename> = .<string min=3 max=10 charset=lower>
+<filename> = .htaccess
+<filename> = .env
+<filename> = web.config
+<filename> = <string min=3 max=10 charset=lower>.php.jpg
+<filename> = <string min=3 max=10 charset=lower>.jpg.php
+<filename> = <string min=200 max=300 charset=lower>.<file_ext>
+<filename> = <string min=3 max=10 charset=lower>.<file_ext>;.<file_ext>
+<filename> = <string min=3 max=10 charset=lower>%2e<file_ext>
+
+<file_ext> = txt
+<file_ext> = html
+<file_ext> = htm
+<file_ext> = jpg
+<file_ext> = jpeg
+<file_ext> = png
+<file_ext> = gif
+<file_ext> = webp
+<file_ext> = svg
+<file_ext> = pdf
+<file_ext> = xml
+<file_ext> = json
+<file_ext> = csv
+<file_ext> = zip
+<file_ext> = gz
+<file_ext> = tar
+<file_ext> = js
+<file_ext> = css
+<file_ext> = php
+<file_ext> = jsp
+<file_ext> = asp
+<file_ext> = aspx
+<file_ext> = py
+<file_ext> = rb
+<file_ext> = exe
+<file_ext> = sh
+<file_ext> = bat
+<file_ext> = dll
+<file_ext> = so
+<file_ext> = <string min=1 max=5 charset=lower>
+
+<encoded_filename> = UTF-8''<string min=5 max=20 charset=lower>.<file_ext>
+<encoded_filename> = utf-8''%<hex len=2>%<hex len=2>%<hex len=2><string min=3 max=10 charset=lower>.<file_ext>
+<encoded_filename> = ISO-8859-1''<string min=5 max=20 charset=lower>.<file_ext>
+<encoded_filename> = UTF-8''%E2%80%8B<string min=3 max=10 charset=lower>.<file_ext>
+
+# =============================================================================
+# Content-Type header for parts
+# =============================================================================
+<content_type_header> = Content-Type: <mime_type>
+<content_type_header> = Content-Type: <mime_type>; charset=<charset>
+<content_type_header> = Content-Type: <mime_type>; boundary=<boundary_value>
+<content_type_header> = content-type: <mime_type>
+
+<mime_type> = text/plain
+<mime_type> = text/html
+<mime_type> = text/xml
+<mime_type> = text/csv
+<mime_type> = application/json
+<mime_type> = application/xml
+<mime_type> = application/octet-stream
+<mime_type> = application/pdf
+<mime_type> = application/x-www-form-urlencoded
+<mime_type> = application/javascript
+<mime_type> = application/zip
+<mime_type> = application/gzip
+<mime_type> = image/jpeg
+<mime_type> = image/png
+<mime_type> = image/gif
+<mime_type> = image/svg+xml
+<mime_type> = image/webp
+<mime_type> = audio/mpeg
+<mime_type> = video/mp4
+<mime_type> = multipart/mixed
+<mime_type> = multipart/alternative
+<mime_type> = multipart/related
+<mime_type> = multipart/form-data
+<mime_type> = <string min=3 max=15 charset=lower>/<string min=3 max=20 charset=lower>
+
+<charset> = utf-8
+<charset> = UTF-8
+<charset> = iso-8859-1
+<charset> = us-ascii
+<charset> = windows-1252
+<charset> = shift_jis
+<charset> = euc-kr
+<charset> = gb2312
+<charset> = <string min=3 max=15 charset=lower>
+
+# =============================================================================
+# Content-Transfer-Encoding (RFC 2045 §6)
+# =============================================================================
+<content_transfer_encoding> = Content-Transfer-Encoding: <transfer_encoding>
+
+<transfer_encoding> = 7bit
+<transfer_encoding> = 8bit
+<transfer_encoding> = binary
+<transfer_encoding> = quoted-printable
+<transfer_encoding> = base64
+
+# =============================================================================
+# Extra headers
+# =============================================================================
+<extra_headers> = <extra_header><crlf>
+<extra_headers> = <extra_header><crlf><extra_headers>
+
+<extra_header> = Content-ID: <<string min=5 max=30 charset=alphanumeric>@<string min=3 max=12 charset=lower>.<string min=2 max=5 charset=lower>>
+<extra_header> = Content-Description: <string min=5 max=40 charset=lower>
+<extra_header> = Content-Language: <lang_tag>
+<extra_header> = Content-Location: /<string min=3 max=20 charset=lower>
+<extra_header> = Content-Length: <int min=0 max=10485760>
+<extra_header> = X-<string min=3 max=15 charset=lower>: <string min=3 max=30 charset=alphanumeric>
+
+<lang_tag> = en
+<lang_tag> = en-US
+<lang_tag> = ko
+<lang_tag> = ko-KR
+<lang_tag> = ja
+<lang_tag> = zh-CN
+<lang_tag> = de
+<lang_tag> = fr
+
+# =============================================================================
+# Part body content
+# =============================================================================
+<part_body> = <text_body>
+<part_body> = <binary_placeholder>
+<part_body> = <form_value>
+
+<text_body> = <string min=10 max=200 charset=alphanumeric>
+<text_body> = <string min=1 max=50 charset=lower> <string min=1 max=50 charset=lower>
+<text_body> = <string min=5 max=100 charset=alphanumeric><crlf><string min=5 max=100 charset=alphanumeric>
+
+# For file upload bodies — placeholders since actual binary doesn't matter for parsing tests
+<binary_placeholder> = <hex len=8><hex len=8><hex len=8><hex len=8>
+<binary_placeholder> = <string min=100 max=500 charset=alphanumeric>
+<binary_placeholder> = GIF89a<hex len=6>
+<binary_placeholder> = %PDF-1.4<crlf><hex len=20>
+<binary_placeholder> = PK<hex len=4><hex len=20>
+
+<form_value> = <string min=1 max=100 charset=alphanumeric>
+<form_value> = <string min=1 max=50 charset=lower>
+<form_value> = <int min=0 max=999999>
+<form_value> = true
+<form_value> = false
+<form_value> =
+<form_value> = <string min=3 max=20 charset=lower>@<string min=3 max=12 charset=lower>.<string min=2 max=5 charset=lower>
+
+# =============================================================================
+# Preamble / Epilogue (RFC 2046 §5.1.1 — ignored by MIME parsers)
+# =============================================================================
+<preamble> = <string min=10 max=50 charset=lower><crlf>
+<preamble> = This is a multi-part message in MIME format.<crlf>
+<preamble> =
+
+<epilogue> =
+<epilogue> = <crlf><string min=5 max=30 charset=lower>
+<epilogue> = <crlf>
+
+# =============================================================================
+# Realistic full multipart/form-data patterns (weighted)
+# =============================================================================
+<multipart_body> = [weight=3] --<boundary_value><crlf>Content-Disposition: form-data; name="<field_name>"<crlf><crlf><form_value><crlf>--<boundary_value><crlf>Content-Disposition: form-data; name="<field_name>"<crlf><crlf><form_value><crlf>--<boundary_value>--<crlf>
+<multipart_body> = [weight=3] --<boundary_value><crlf>Content-Disposition: form-data; name="<field_name>"; filename="<filename>"<crlf>Content-Type: <mime_type><crlf><crlf><binary_placeholder><crlf>--<boundary_value>--<crlf>
+<multipart_body> = [weight=2] --<boundary_value><crlf>Content-Disposition: form-data; name="csrf_token"<crlf><crlf><string min=32 max=64 charset=hex><crlf>--<boundary_value><crlf>Content-Disposition: form-data; name="<field_name>"<crlf><crlf><form_value><crlf>--<boundary_value><crlf>Content-Disposition: form-data; name="file"; filename="<filename>"<crlf>Content-Type: <mime_type><crlf><crlf><binary_placeholder><crlf>--<boundary_value>--<crlf>
+<multipart_body> = [weight=1] --<boundary_value><crlf>Content-Disposition: form-data; name="files[]"; filename="<filename>"<crlf>Content-Type: <mime_type><crlf><crlf><binary_placeholder><crlf>--<boundary_value><crlf>Content-Disposition: form-data; name="files[]"; filename="<filename>"<crlf>Content-Type: <mime_type><crlf><crlf><binary_placeholder><crlf>--<boundary_value>--<crlf>

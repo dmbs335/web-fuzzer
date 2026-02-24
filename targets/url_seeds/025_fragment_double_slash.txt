@@ -1,0 +1,1 @@
+http://good.com#//evil.com/path

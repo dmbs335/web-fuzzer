@@ -1,0 +1,268 @@
+# =============================================================================
+# JSON Grammar — RFC 8259 (The JavaScript Object Notation Data Interchange Format)
+# Also covers: JSON5 common extensions, edge cases for parser differential
+#              testing (duplicate keys, deep nesting, numeric precision,
+#              Unicode escapes, trailing commas, comments)
+# =============================================================================
+
+!root <json_value>
+!max_depth 8
+
+# =============================================================================
+# JSON value (RFC 8259 §3)
+# =============================================================================
+<json_value> = <json_object>
+<json_value> = <json_array>
+<json_value> = <json_string>
+<json_value> = <json_number>
+<json_value> = true
+<json_value> = false
+<json_value> = null
+
+# =============================================================================
+# JSON object (RFC 8259 §4)
+# =============================================================================
+<json_object> = {<object_members>}
+<json_object> = {}
+
+<object_members> = <member>
+<object_members> = <member>, <object_members>
+
+<member> = <json_string>: <json_value>
+<member> = <json_string>:<json_value>
+<member> = <json_string> : <json_value>
+
+# --- weighted realistic members ---
+<member> = [weight=2] "<common_key>": <json_value>
+<member> = [weight=2] "<common_key>": <json_string>
+<member> = [weight=2] "<common_key>": <json_number>
+<member> = [weight=2] "<common_key>": <json_bool>
+<member> = [weight=1] "<common_key>": null
+
+<json_bool> = true
+<json_bool> = false
+
+# =============================================================================
+# Common object keys (for realistic output)
+# =============================================================================
+<common_key> = id
+<common_key> = name
+<common_key> = type
+<common_key> = value
+<common_key> = data
+<common_key> = error
+<common_key> = message
+<common_key> = status
+<common_key> = code
+<common_key> = result
+<common_key> = items
+<common_key> = count
+<common_key> = total
+<common_key> = page
+<common_key> = limit
+<common_key> = offset
+<common_key> = url
+<common_key> = href
+<common_key> = title
+<common_key> = description
+<common_key> = email
+<common_key> = username
+<common_key> = password
+<common_key> = token
+<common_key> = key
+<common_key> = created_at
+<common_key> = updated_at
+<common_key> = deleted
+<common_key> = enabled
+<common_key> = version
+<common_key> = config
+<common_key> = metadata
+<common_key> = tags
+<common_key> = labels
+<common_key> = permissions
+<common_key> = role
+<common_key> = user
+<common_key> = users
+<common_key> = <string min=1 max=20 charset=lower>
+
+# =============================================================================
+# JSON array (RFC 8259 §5)
+# =============================================================================
+<json_array> = [<array_elements>]
+<json_array> = []
+
+<array_elements> = <json_value>
+<array_elements> = <json_value>, <array_elements>
+
+# =============================================================================
+# JSON string (RFC 8259 §7)
+# =============================================================================
+<json_string> = "<string_content>"
+
+<string_content> = <string min=0 max=50 charset=alphanumeric>
+<string_content> = <string min=1 max=20 charset=lower>
+<string_content> = <string min=1 max=10 charset=lower> <string min=1 max=10 charset=lower>
+<string_content> = <string_with_escapes>
+<string_content> = <unicode_content>
+<string_content> =
+
+# --- escape sequences (RFC 8259 §7) ---
+<string_with_escapes> = <string min=1 max=10 charset=lower><escape_seq><string min=1 max=10 charset=lower>
+<string_with_escapes> = <escape_seq>
+<string_with_escapes> = <escape_seq><escape_seq>
+<string_with_escapes> = <string min=1 max=10 charset=lower><escape_seq>
+
+<escape_seq> = \"
+<escape_seq> = \\
+<escape_seq> = \/
+<escape_seq> = \b
+<escape_seq> = \f
+<escape_seq> = \n
+<escape_seq> = \r
+<escape_seq> = \t
+<escape_seq> = <unicode_escape>
+
+# --- unicode escapes ---
+<unicode_escape> = \u<hex len=4>
+<unicode_escape> = \u0000
+<unicode_escape> = \u0041
+<unicode_escape> = \u00e9
+<unicode_escape> = \u4e16
+<unicode_escape> = \uffff
+<unicode_escape> = \ud800\udc00
+<unicode_escape> = \udbff\udfff
+
+# Edge case: lone surrogates (technically invalid but parsers may accept)
+<unicode_escape> = \ud800
+<unicode_escape> = \udfff
+<unicode_escape> = \udead
+
+# --- Unicode content (direct UTF-8) ---
+<unicode_content> = <string min=3 max=20 charset=lower>
+<unicode_content> = <string min=1 max=5 charset=lower>\u00e0\u00e1\u00e2
+<unicode_content> = \u0000
+<unicode_content> = \u200b<string min=3 max=10 charset=lower>\u200b
+<unicode_content> = \ufeff<string min=3 max=10 charset=lower>
+<unicode_content> = <string min=3 max=10 charset=lower>\u0000<string min=3 max=10 charset=lower>
+
+# =============================================================================
+# JSON number (RFC 8259 §6)
+# number = [ minus ] int [ frac ] [ exp ]
+# =============================================================================
+<json_number> = <json_integer>
+<json_number> = <json_float>
+<json_number> = <json_exponent>
+
+# --- integers ---
+<json_integer> = 0
+<json_integer> = <int min=1 max=999999999>
+<json_integer> = -<int min=1 max=999999999>
+<json_integer> = <int min=0 max=127>
+<json_integer> = <int min=0 max=255>
+<json_integer> = <int min=0 max=65535>
+
+# Large integers (precision edge cases)
+<json_integer> = 2147483647
+<json_integer> = -2147483648
+<json_integer> = 2147483648
+<json_integer> = 4294967295
+<json_integer> = 4294967296
+<json_integer> = 9007199254740991
+<json_integer> = 9007199254740992
+<json_integer> = -9007199254740991
+<json_integer> = 9007199254740993
+<json_integer> = 18446744073709551615
+<json_integer> = 18446744073709551616
+<json_integer> = 99999999999999999999999999999999
+
+# --- floating point ---
+<json_float> = <int min=0 max=999>.<int min=0 max=999999>
+<json_float> = -<int min=0 max=999>.<int min=0 max=999999>
+<json_float> = 0.<int min=1 max=999999>
+<json_float> = -0.<int min=1 max=999999>
+<json_float> = 0.0
+<json_float> = -0.0
+<json_float> = 3.14159265358979323846
+<json_float> = 1.7976931348623157e+308
+<json_float> = 5e-324
+<json_float> = 2.2250738585072014e-308
+<json_float> = 2.2250738585072011e-308
+<json_float> = 1.0000000000000002
+
+# --- exponent notation ---
+<json_exponent> = <int min=1 max=99>e<int min=0 max=20>
+<json_exponent> = <int min=1 max=99>E<int min=0 max=20>
+<json_exponent> = <int min=1 max=99>e+<int min=0 max=20>
+<json_exponent> = <int min=1 max=99>e-<int min=0 max=20>
+<json_exponent> = <int min=1 max=99>E+<int min=0 max=308>
+<json_exponent> = <int min=1 max=99>E-<int min=0 max=308>
+<json_exponent> = -<int min=1 max=99>e<int min=0 max=20>
+<json_exponent> = <int min=1 max=99>.<int min=0 max=999>e<int min=0 max=20>
+<json_exponent> = <int min=1 max=99>.<int min=0 max=999>E+<int min=0 max=308>
+<json_exponent> = <int min=1 max=99>.<int min=0 max=999>E-<int min=0 max=308>
+
+# Extreme exponents
+<json_exponent> = 1e308
+<json_exponent> = 1e309
+<json_exponent> = 1e-400
+<json_exponent> = 1e999
+<json_exponent> = -1e999
+
+# =============================================================================
+# Edge cases for parser differential testing
+# =============================================================================
+
+# Duplicate keys — behavior varies per spec/implementation
+<json_object> = [weight=1] {"<common_key>": <json_value>, "<common_key>": <json_value>}
+<json_object> = [weight=1] {"<common_key>": <json_string>, "<common_key>": <json_number>}
+
+# Deeply nested structures
+<json_value> = [weight=1] [[[[[[<json_value>]]]]]]
+<json_value> = [weight=1] {"a":{"b":{"c":{"d":{"e":<json_value>}}}}}
+
+# Trailing comma (invalid per RFC 8259, accepted by some parsers)
+<json_object> = [weight=1] {<member>,}
+<json_array> = [weight=1] [<json_value>,]
+<json_array> = [weight=1] [<json_value>, <json_value>,]
+
+# Leading zeros (invalid per RFC 8259)
+<json_number> = [weight=1] 00
+<json_number> = [weight=1] 01
+<json_number> = [weight=1] 0123
+<json_number> = [weight=1] -00
+<json_number> = [weight=1] -01
+
+# Numeric edge cases
+<json_number> = [weight=1] 0e0
+<json_number> = [weight=1] 0e1
+<json_number> = [weight=1] -0
+<json_number> = [weight=1] -0e0
+<json_number> = [weight=1] 0.0e0
+
+# Whitespace edge cases
+<json_object> = [weight=1] { <member> }
+<json_object> = [weight=1] {  <member>  ,  <member>  }
+<json_array> = [weight=1] [ <json_value> ]
+<json_array> = [weight=1] [  <json_value>  ,  <json_value>  ]
+
+# Special string edge cases
+<json_string> = [weight=1] ""
+<json_string> = [weight=1] "\/"
+<json_string> = [weight=1] "\\\\"
+<json_string> = [weight=1] "\"\""
+<json_string> = [weight=1] "\n\r\t\b\f"
+<json_string> = [weight=1] "\u0000"
+<json_string> = [weight=1] "\u001f"
+<json_string> = [weight=1] "<string min=500 max=1000 charset=alphanumeric>"
+<json_string> = [weight=1] "<string min=5000 max=10000 charset=alphanumeric>"
+
+# =============================================================================
+# Realistic full JSON patterns (weighted high)
+# =============================================================================
+<json_value> = [weight=3] {"id": <json_integer>, "name": "<string min=3 max=15 charset=lower>", "email": "<string min=3 max=10 charset=lower>@<string min=3 max=10 charset=lower>.<string min=2 max=5 charset=lower>", "active": <json_bool>}
+<json_value> = [weight=3] {"status": <json_integer>, "message": "<string min=5 max=30 charset=lower>", "data": <json_value>}
+<json_value> = [weight=2] {"items": [<json_value>], "total": <json_integer>, "page": <int min=1 max=100>, "limit": <int min=10 max=100>}
+<json_value> = [weight=2] {"error": {"code": <json_integer>, "message": "<string min=5 max=40 charset=lower>", "details": <json_value>}}
+<json_value> = [weight=2] [<json_value>, <json_value>, <json_value>]
+<json_value> = [weight=1] {"type": "<string min=3 max=15 charset=lower>", "version": "<int min=1 max=9>.<int min=0 max=99>.<int min=0 max=99>", "config": <json_object>, "metadata": <json_object>}
+<json_value> = [weight=1] {"users": [{"id": <json_integer>, "name": "<string min=3 max=10 charset=lower>", "role": "<string min=3 max=10 charset=lower>"}, {"id": <json_integer>, "name": "<string min=3 max=10 charset=lower>", "role": "<string min=3 max=10 charset=lower>"}]}

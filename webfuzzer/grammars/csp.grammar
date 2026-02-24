@@ -1,0 +1,294 @@
+# =============================================================================
+# Content-Security-Policy Grammar — W3C CSP Level 3 based
+# Also covers: CSP Embedded Enforcement, Trusted Types, Reporting API,
+#              Permissions Policy integration, all source expressions,
+#              edge cases for parser differential testing
+# =============================================================================
+
+!root <csp_header>
+!max_depth 8
+
+# =============================================================================
+# CSP Header — full policy
+# =============================================================================
+<csp_header> = <policy>
+
+<policy> = <directive>
+<policy> = <directive>; <policy>
+
+<directive> = <fetch_directive>
+<directive> = <document_directive>
+<directive> = <navigation_directive>
+<directive> = <reporting_directive>
+<directive> = <trusted_types_directive>
+<directive> = <other_directive>
+<directive> = <experimental_directive>
+
+# =============================================================================
+# Fetch directives (CSP3 §6.1)
+# =============================================================================
+<fetch_directive> = <fetch_directive_name> <source_list>
+
+<fetch_directive_name> = default-src
+<fetch_directive_name> = script-src
+<fetch_directive_name> = script-src-elem
+<fetch_directive_name> = script-src-attr
+<fetch_directive_name> = style-src
+<fetch_directive_name> = style-src-elem
+<fetch_directive_name> = style-src-attr
+<fetch_directive_name> = img-src
+<fetch_directive_name> = font-src
+<fetch_directive_name> = connect-src
+<fetch_directive_name> = media-src
+<fetch_directive_name> = object-src
+<fetch_directive_name> = frame-src
+<fetch_directive_name> = child-src
+<fetch_directive_name> = worker-src
+<fetch_directive_name> = manifest-src
+<fetch_directive_name> = prefetch-src
+<fetch_directive_name> = fenced-frame-src
+
+# =============================================================================
+# Source list expressions (CSP3 §2.3)
+# =============================================================================
+<source_list> = <source_expr>
+<source_list> = <source_expr> <source_list>
+<source_list> = 'none'
+
+<source_expr> = <keyword_source>
+<source_expr> = <host_source>
+<source_expr> = <scheme_source>
+<source_expr> = <nonce_source>
+<source_expr> = <hash_source>
+
+# --- keyword sources ---
+<keyword_source> = 'self'
+<keyword_source> = 'unsafe-inline'
+<keyword_source> = 'unsafe-eval'
+<keyword_source> = 'unsafe-hashes'
+<keyword_source> = 'strict-dynamic'
+<keyword_source> = 'report-sample'
+<keyword_source> = 'wasm-unsafe-eval'
+<keyword_source> = 'inline-speculation-rules'
+<keyword_source> = 'unsafe-allow-redirects'
+
+# --- nonce sources ---
+<nonce_source> = 'nonce-<string min=16 max=48 charset=alphanumeric>'
+<nonce_source> = 'nonce-<string min=22 max=22 charset=alphanumeric>=='
+<nonce_source> = 'nonce-<string min=32 max=32 charset=alphanumeric>'
+
+# --- hash sources (all algorithms per spec) ---
+<hash_source> = 'sha256-<string min=44 max=44 charset=alphanumeric>'
+<hash_source> = 'sha384-<string min=64 max=64 charset=alphanumeric>'
+<hash_source> = 'sha512-<string min=88 max=88 charset=alphanumeric>'
+<hash_source> = 'sha256-<base64_hash>'
+
+<base64_hash> = <string min=40 max=44 charset=alphanumeric>==
+<base64_hash> = <string min=40 max=44 charset=alphanumeric>=
+<base64_hash> = <string min=42 max=44 charset=alphanumeric>
+
+# --- host sources (comprehensive) ---
+<host_source> = <hostname>
+<host_source> = *.<domain>
+<host_source> = <scheme>://<hostname>
+<host_source> = <scheme>://<hostname>:<port>
+<host_source> = <scheme>://<hostname>/<path>
+<host_source> = <scheme>://<hostname>:<port>/<path>
+<host_source> = *
+<host_source> = <scheme>://*.<domain>
+<host_source> = <scheme>://*.<domain>:<port>
+<host_source> = <scheme>://*.<domain>/<path>
+
+# Edge cases for host source parsing
+<host_source> = <hostname>:<port>
+<host_source> = *.<domain>:<port>
+<host_source> = *.<domain>/<path>
+<host_source> = <scheme>://<hostname>/<path>/<path>
+<host_source> = <ipv4_addr>
+<host_source> = <ipv4_addr>:<port>
+
+<hostname> = <string min=3 max=12 charset=lower>.<tld>
+<hostname> = <string min=3 max=8 charset=lower>.<string min=3 max=8 charset=lower>.<tld>
+<hostname> = <string min=3 max=8 charset=lower>.<string min=2 max=5 charset=lower>.<string min=2 max=5 charset=lower>.<tld>
+<hostname> = localhost
+<hostname> = <string min=5 max=20 charset=lower>
+
+<domain> = <string min=3 max=12 charset=lower>.<tld>
+<domain> = <string min=3 max=8 charset=lower>.<string min=3 max=8 charset=lower>.<tld>
+<domain> = <tld>
+
+<ipv4_addr> = <int min=1 max=255>.<int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>
+<ipv4_addr> = 127.0.0.1
+<ipv4_addr> = 0.0.0.0
+<ipv4_addr> = 10.<int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>
+<ipv4_addr> = 192.168.<int min=0 max=255>.<int min=0 max=255>
+<ipv4_addr> = 172.<int min=16 max=31>.<int min=0 max=255>.<int min=0 max=255>
+
+<tld> = com
+<tld> = net
+<tld> = org
+<tld> = io
+<tld> = dev
+<tld> = app
+<tld> = co.uk
+<tld> = co.kr
+<tld> = co.jp
+<tld> = com.br
+<tld> = de
+<tld> = fr
+<tld> = cn
+<tld> = <string min=2 max=6 charset=lower>
+
+# --- scheme sources ---
+<scheme_source> = https:
+<scheme_source> = http:
+<scheme_source> = data:
+<scheme_source> = blob:
+<scheme_source> = mediastream:
+<scheme_source> = filesystem:
+<scheme_source> = ws:
+<scheme_source> = wss:
+<scheme_source> = ftp:
+<scheme_source> = <string min=3 max=12 charset=lower>:
+
+<scheme> = https
+<scheme> = http
+<scheme> = ws
+<scheme> = wss
+<scheme> = ftp
+<scheme> = <string min=3 max=8 charset=lower>
+
+<port> = <int min=1 max=65535>
+<port> = *
+<port> = 80
+<port> = 443
+<port> = 8080
+<port> = 8443
+<port> = 3000
+<port> = 5000
+
+<path> = <string min=1 max=20 charset=lower>
+<path> = <string min=1 max=10 charset=lower>/<path>
+<path> = <string min=1 max=10 charset=lower>.<string min=2 max=5 charset=lower>
+<path> = *
+
+# =============================================================================
+# Document directives (CSP3 §6.2)
+# =============================================================================
+<document_directive> = base-uri <source_list>
+<document_directive> = base-uri 'none'
+<document_directive> = base-uri 'self'
+<document_directive> = sandbox
+<document_directive> = sandbox <sandbox_token_list>
+
+<sandbox_token_list> = <sandbox_token>
+<sandbox_token_list> = <sandbox_token> <sandbox_token_list>
+
+<sandbox_token> = allow-forms
+<sandbox_token> = allow-modals
+<sandbox_token> = allow-orientation-lock
+<sandbox_token> = allow-pointer-lock
+<sandbox_token> = allow-popups
+<sandbox_token> = allow-popups-to-escape-sandbox
+<sandbox_token> = allow-presentation
+<sandbox_token> = allow-same-origin
+<sandbox_token> = allow-scripts
+<sandbox_token> = allow-top-navigation
+<sandbox_token> = allow-top-navigation-by-user-activation
+<sandbox_token> = allow-top-navigation-to-custom-protocols
+<sandbox_token> = allow-downloads
+<sandbox_token> = allow-storage-access-by-user-activation
+
+# =============================================================================
+# Navigation directives (CSP3 §6.3)
+# =============================================================================
+<navigation_directive> = form-action <source_list>
+<navigation_directive> = form-action 'none'
+<navigation_directive> = form-action 'self'
+<navigation_directive> = frame-ancestors <ancestor_source_list>
+<navigation_directive> = navigate-to <source_list>
+<navigation_directive> = navigate-to 'none'
+
+<ancestor_source_list> = <ancestor_source>
+<ancestor_source_list> = <ancestor_source> <ancestor_source_list>
+<ancestor_source_list> = 'none'
+
+<ancestor_source> = 'self'
+<ancestor_source> = <host_source>
+<ancestor_source> = <scheme_source>
+
+# =============================================================================
+# Reporting directives (CSP3 §6.4 + Reporting API)
+# =============================================================================
+<reporting_directive> = report-uri <report_uri_list>
+<reporting_directive> = report-to <group_name>
+<reporting_directive> = report-uri <report_uri_list>; report-to <group_name>
+
+<report_uri_list> = <report_uri>
+<report_uri_list> = <report_uri> <report_uri_list>
+
+<report_uri> = https://<hostname>/<path>
+<report_uri> = /<path>
+<report_uri> = /csp-report
+<report_uri> = https://<hostname>/csp-violation
+
+<group_name> = <string min=3 max=20 charset=lower>
+<group_name> = csp-endpoint
+<group_name> = default
+
+# =============================================================================
+# Trusted Types (W3C Trusted Types API)
+# =============================================================================
+<trusted_types_directive> = require-trusted-types-for 'script'
+<trusted_types_directive> = trusted-types <policy_name_list>
+<trusted_types_directive> = trusted-types <policy_name_list> 'allow-duplicates'
+<trusted_types_directive> = trusted-types 'none'
+<trusted_types_directive> = trusted-types *
+
+<policy_name_list> = <policy_name>
+<policy_name_list> = <policy_name> <policy_name_list>
+
+<policy_name> = default
+<policy_name> = dompurify
+<policy_name> = <string min=3 max=20 charset=lower>
+<policy_name> = <string min=3 max=10 charset=lower>-<string min=3 max=10 charset=lower>
+
+# =============================================================================
+# Other directives
+# =============================================================================
+<other_directive> = upgrade-insecure-requests
+<other_directive> = block-all-mixed-content
+
+# =============================================================================
+# Experimental / proposed directives
+# =============================================================================
+<experimental_directive> = require-sri-for script
+<experimental_directive> = require-sri-for style
+<experimental_directive> = require-sri-for script style
+<experimental_directive> = plugin-types <mime_type_list>
+<experimental_directive> = webrtc 'allow'
+<experimental_directive> = webrtc 'block'
+
+<mime_type_list> = <mime_type>
+<mime_type_list> = <mime_type> <mime_type_list>
+
+<mime_type> = application/pdf
+<mime_type> = application/x-shockwave-flash
+<mime_type> = application/java-archive
+<mime_type> = application/x-java-applet
+<mime_type> = text/html
+<mime_type> = text/plain
+<mime_type> = image/png
+<mime_type> = image/svg+xml
+<mime_type> = <string min=3 max=15 charset=lower>/<string min=3 max=15 charset=lower>
+
+# =============================================================================
+# Realistic full policy patterns (weighted high for practical output)
+# =============================================================================
+<policy> = [weight=3] default-src 'none'; script-src <source_list>; style-src <source_list>; img-src <source_list>; connect-src <source_list>; font-src <source_list>; frame-ancestors <ancestor_source_list>; base-uri 'self'; form-action 'self'
+<policy> = [weight=3] default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src * data:
+<policy> = [weight=2] default-src 'self'; script-src 'nonce-<string min=24 max=24 charset=alphanumeric>' 'strict-dynamic'; object-src 'none'; base-uri 'self'
+<policy> = [weight=2] default-src https:; script-src https: 'unsafe-inline'; style-src https: 'unsafe-inline'; upgrade-insecure-requests
+<policy> = [weight=2] default-src 'self'; script-src 'self' <host_source>; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' <host_source>; frame-src 'none'; object-src 'none'; report-uri /<path>
+<policy> = [weight=1] default-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'
+<policy> = [weight=1] default-src 'self'; script-src 'sha256-<string min=44 max=44 charset=alphanumeric>' 'strict-dynamic' https:; object-src 'none'; base-uri 'none'; require-trusted-types-for 'script'; trusted-types default

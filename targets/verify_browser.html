@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>mXSS Verification - Browser Round-Trip Test</title>
+<style>
+body { font-family: monospace; margin: 2em; background: #1a1a2e; color: #e0e0e0; }
+h1 { color: #0ff; }
+h2 { color: #ff0; margin-top: 2em; }
+.test { border: 1px solid #333; padding: 1em; margin: 1em 0; background: #16213e; border-radius: 4px; }
+.pass { border-color: #0f0; }
+.fail { border-color: #f00; background: #2a1020; }
+.warn { border-color: #ff0; background: #2a2010; }
+pre { white-space: pre-wrap; word-break: break-all; background: #0a0a1a; padding: 0.5em; border-radius: 4px; }
+.label { font-weight: bold; color: #0ff; }
+.danger { color: #f44; font-weight: bold; }
+.safe { color: #4f4; }
+.warning { color: #ff0; }
+</style>
+</head>
+<body>
+<h1>mXSS Verification - Browser Round-Trip Test</h1>
+<p>This page tests if DOMPurify-sanitized output becomes dangerous after a browser innerHTML round-trip.</p>
+<div id="results"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js"></script>
+<script>
+const tests = [
+  {
+    id: "v1_0001",
+    name: "v1 0001 - SVG onfocus escape",
+    session: "mxss_taxonomy",
+    input: `<html>
+<head>
+<meta http-equiv="Content-Type" content="t<math><mtext><table<svg onload=yle>e>j</title>
+</head>
+<body onoffline="this.uzcosdsbnw">
+<details open>
+<summary><output for="cvhktjqclt" name="zjqpulj">XOYn5hOVaAFqqFY736wwT9</output><bdi>F4ECIjLsE5sKlXGJHZ</bdi></summary>
+<svg inert>
+<use xlink:href="%2e%2e%2f#b2147483647"/>
+</svg>
+</details>
+</body>
+</html>
+\\"autofocus onfocus=\\"`
+  },
+  {
+    id: "v1_0002",
+    name: "v1 0002 - SVG set onbegin inside option",
+    session: "mxss_taxonomy",
+    input: `\\xEF\\xB<script\\x0d>B\\xBF<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<title>7RbpCxB</title>
+<noscript><meta name="viewport" content="width=device-width, shrink-to-fit=no"></noscript>
+</head>
+<body>
+<section>
+<!---->
+</section>
+<form>
+<select name="dzjutp" required>
+<option value="9d0stei<svg><set onbegin=RSZ7YcKNlm7mTTrjOQS</option>
+</select>
+<select name="vpyfq" tabindex="3782" hidden="until-found">
+<option value="DWGVHdwTOLFCKxQNjw3m" selected>Uw2vVRdBzdWLxz02Fp9oeTMNE</option>
+<optijava\\x09script:4SooCLcum6p7XKF4m1gW3j">aG</option>
+</select>
+<progress>nn3g4s4WJTY</progress>
+<input type="hidden" name="kgrjvxcchtgi" value="yhKayxIr6jU">
+<select name="ubucrxxjlmzs" disabled>
+<option value="kCsM2c0N7uzA4rBTq6y">vOnp</option>
+</select>
+<input type="month" name="fnyrc">
+</form>
+WfEMj81c
+</body>
+</html>`
+  },
+  {
+    id: "v2_0001",
+    name: "v2 0001 - Math xmlns namespace injection with onload",
+    session: "mxss_taxonomy_v2",
+    input: `<!DOCTYPE HTML PUBLIC "-//W3C//DTDHTML 4.01//EN">
+<html>
+<head>
+<meta charset="GB2312">
+<title>eM946mviP8YzwA5Cw6</title>
+</head>
+<body>
+<math xmlns="http://www.w3.org/1998/Mat' onload='h/MathML">
+<msuexpression(p><mi>RSLZPdWXxtwHhrJ</mi><mn>2</mn></msup>
+</math>
+<table>
+<caption><a name="vvkfrnkjdk">Bo6NnXQpyRIKWMJ9o1</a></caption><thead>
+tr< itemscope><td><span>jVdwYkTMIkzVR7n2VAEb2h89L6Q</span></td></tr>
+</thead>
+<tbody>
+<tr><td><span>aQwQJw9j</span></td><td><span>6HGaQj1P6MJ4qGpfu7TsB</span></td></tr>
+</tbody>
+<tfoot>
+<tr><td><span>WDmw0BwrRx</span></td></tr>
+<svg><desc><template>ody>
+</html>%p`
+  },
+  {
+    id: "v3_0001",
+    name: "v3 0001 - Attribute value event handler injection",
+    session: "mxss_taxonomy_v3",
+    input: `\\xEF\\xBB\\xBF<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html>
+<head>
+<title>RWe3dHjNp</title>
+<noscript><meta http-equiv="X-XSS-Protection" content="IE=edge"></noscript>
+<noscript><meta name="generator" content="XY0uMCbhBxrMfSP1R1xBX"></noscript>
+<!-- -->
+</head>
+<body>
+<h2><a name="kfeisdy onmessageerror="console.log(1)">
+<details open>
+<summary><em><span tabindex="15995"><span>17baGZCaGvlwuGGeJFqvUmo4nw</ead>
+<body>
+<dir>
+<li>gE</li>
+</dir>
+</body>
+</html>`
+  }
+];
+
+const EVENT_RE = /^on[a-z]+$/i;
+
+function findHandlers(el, path) {
+  const results = [];
+  if (!el || !el.attributes) return results;
+  const tag = el.tagName ? el.tagName.toLowerCase() : "?";
+  const p = path ? path + " > " + tag : tag;
+  for (const attr of el.attributes) {
+    if (EVENT_RE.test(attr.name)) {
+      results.push({ path: p, attr: attr.name, val: attr.value });
+    }
+  }
+  for (const child of el.children) {
+    results.push(...findHandlers(child, p));
+  }
+  return results;
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+const container = document.getElementById("results");
+
+for (const t of tests) {
+  // Step 1: Sanitize
+  const sanitized = DOMPurify.sanitize(t.input);
+
+  // Step 2: innerHTML round-trip (real browser parser!)
+  const div = document.createElement("div");
+  div.innerHTML = sanitized;
+  const reparsed = div.innerHTML;
+
+  // Step 3: Check for event handlers in real DOM
+  const handlers = findHandlers(div, "");
+
+  // Step 4: Check mutation
+  const mutated = sanitized !== reparsed;
+
+  // Step 5: Check for on* patterns in raw text
+  const patterns = reparsed.match(/\bon[a-z]+=(?:[^\s>]*)/gi) || [];
+
+  let verdict, cls;
+  if (handlers.length > 0) {
+    verdict = "EXPLOITABLE - Event handler survived in real browser DOM!";
+    cls = "fail";
+  } else if (mutated && patterns.length > 0) {
+    verdict = "MUTATION DETECTED + event handler pattern in output (potential mXSS)";
+    cls = "warn";
+  } else if (mutated) {
+    verdict = "MUTATION DETECTED but no event handlers found";
+    cls = "warn";
+  } else if (patterns.length > 0) {
+    verdict = "FALSE POSITIVE - Pattern in text/value, not in DOM attributes";
+    cls = "pass";
+  } else {
+    verdict = "FALSE POSITIVE - No event handlers found";
+    cls = "pass";
+  }
+
+  let html = `<div class="test ${cls}">`;
+  html += `<h2>${escHtml(t.name)}</h2>`;
+  html += `<p><span class="label">Verdict:</span> <span class="${handlers.length > 0 ? 'danger' : mutated ? 'warning' : 'safe'}">${escHtml(verdict)}</span></p>`;
+  html += `<p><span class="label">Mutation:</span> ${mutated ? '<span class="warning">YES</span>' : '<span class="safe">NO</span>'}</p>`;
+  html += `<p><span class="label">Event handlers in DOM:</span> ${handlers.length > 0 ? '<span class="danger">' + handlers.length + '</span>' : '<span class="safe">0</span>'}</p>`;
+
+  if (handlers.length > 0) {
+    html += `<p class="danger">Handlers found:</p><pre>`;
+    for (const h of handlers) html += `${escHtml(h.path)} [${escHtml(h.attr)}]="${escHtml(h.val)}"\n`;
+    html += `</pre>`;
+  }
+
+  html += `<details><summary>DOMPurify Output</summary><pre>${escHtml(sanitized)}</pre></details>`;
+  html += `<details><summary>Browser Re-parsed</summary><pre>${escHtml(reparsed)}</pre></details>`;
+
+  if (mutated) {
+    html += `<details open><summary>Diff (sanitized vs reparsed)</summary><pre>`;
+    const sLines = sanitized.split("\n");
+    const rLines = reparsed.split("\n");
+    const maxLen = Math.max(sLines.length, rLines.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (sLines[i] !== rLines[i]) {
+        html += `<span class="danger">- ${escHtml(sLines[i] || "(empty)")}\n+ ${escHtml(rLines[i] || "(empty)")}</span>\n`;
+      }
+    }
+    html += `</pre></details>`;
+  }
+
+  html += `</div>`;
+  container.innerHTML += html;
+}
+</script>
+</body>
+</html>

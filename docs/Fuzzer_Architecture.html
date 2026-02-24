@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web Fuzzer Architecture &amp; Algorithms</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface2: #1c2129;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --red: #f85149;
+  --orange: #d29922;
+  --green: #3fb950;
+  --purple: #bc8cff;
+  --cyan: #39d2c0;
+  --pink: #f778ba;
+  --yellow: #e3b341;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  line-height: 1.7;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+h1 {
+  font-size: 2.2rem;
+  margin-bottom: 0.3rem;
+  background: linear-gradient(135deg, var(--cyan), var(--accent), var(--purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+h2 {
+  font-size: 1.5rem;
+  margin: 3rem 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid var(--border);
+  color: var(--accent);
+}
+h3 { font-size: 1.15rem; margin: 1.5rem 0 0.75rem; color: var(--text); }
+h4 { font-size: 0.95rem; margin: 1rem 0 0.5rem; color: var(--cyan); }
+p { margin: 0.5rem 0; color: var(--text); font-size: 0.9rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin: 1rem 0;
+}
+.card-accent { border-left: 3px solid var(--accent); }
+.card-green { border-left: 3px solid var(--green); }
+.card-orange { border-left: 3px solid var(--orange); }
+.card-red { border-left: 3px solid var(--red); }
+.card-purple { border-left: 3px solid var(--purple); }
+.card-cyan { border-left: 3px solid var(--cyan); }
+.card-pink { border-left: 3px solid var(--pink); }
+
+/* Code */
+code {
+  background: rgba(110,118,129,0.15);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  color: var(--cyan);
+}
+pre {
+  background: #0d1117;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  margin: 0.75rem 0;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  color: var(--text);
+}
+pre .kw { color: var(--pink); }
+pre .fn { color: var(--accent); }
+pre .cm { color: var(--muted); font-style: italic; }
+pre .str { color: var(--green); }
+pre .num { color: var(--orange); }
+pre .op { color: var(--red); }
+pre .type { color: var(--purple); }
+
+/* Grid */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+@media (max-width: 900px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
+
+/* Stat cards */
+.stat-card { text-align: center; padding: 1.2rem 0.5rem; }
+.stat-value { font-size: 1.8rem; font-weight: 700; }
+.stat-label { color: var(--muted); font-size: 0.78rem; margin-top: 0.2rem; }
+
+/* Badge */
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 99px;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.badge-blue { background: rgba(88,166,255,0.15); color: var(--accent); }
+.badge-green { background: rgba(63,185,80,0.15); color: var(--green); }
+.badge-orange { background: rgba(210,153,34,0.15); color: var(--orange); }
+.badge-red { background: rgba(248,81,73,0.15); color: var(--red); }
+.badge-purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+.badge-cyan { background: rgba(57,210,192,0.15); color: var(--cyan); }
+.badge-pink { background: rgba(247,120,186,0.15); color: var(--pink); }
+
+/* TOC */
+.toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0 2rem;
+}
+.toc a {
+  padding: 0.4rem 0.8rem;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+.toc a:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Collapsible */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  transition: all 0.2s;
+}
+.section-header:hover { border-color: var(--accent); }
+.section-header .toggle {
+  color: var(--muted);
+  font-size: 0.8rem;
+  transition: transform 0.2s;
+  margin-left: auto;
+}
+.section-header .toggle.open { transform: rotate(90deg); }
+.section-body {
+  overflow: hidden;
+  transition: max-height 0.4s ease;
+  padding-left: 0.5rem;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin: 0.75rem 0;
+}
+th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  border-bottom: 2px solid var(--border);
+}
+td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+tr:hover td { background: rgba(88,166,255,0.04); }
+
+/* Flow diagram */
+.flow-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  position: relative;
+}
+.flow-arrow {
+  text-align: center;
+  color: var(--muted);
+  font-size: 1.2rem;
+  padding: 0.3rem 0;
+}
+.flow-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  max-width: 600px;
+  margin: 1rem auto;
+}
+
+/* Formula */
+.formula {
+  background: rgba(57,210,192,0.05);
+  border: 1px solid rgba(57,210,192,0.2);
+  border-radius: 8px;
+  padding: 1rem 1.5rem;
+  margin: 0.75rem 0;
+  font-family: 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  color: var(--cyan);
+  text-align: center;
+  line-height: 2;
+}
+
+/* Annotation */
+.note {
+  background: rgba(88,166,255,0.05);
+  border-left: 3px solid var(--accent);
+  padding: 0.6rem 1rem;
+  margin: 0.75rem 0;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+}
+.warn {
+  background: rgba(248,81,73,0.05);
+  border-left: 3px solid var(--red);
+  padding: 0.6rem 1rem;
+  margin: 0.75rem 0;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.85rem;
+}
+
+/* Horizontal bar */
+.hbar { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; }
+.hbar-label { font-size: 0.78rem; width: 130px; text-align: right; color: var(--muted); }
+.hbar-track { flex: 1; height: 22px; background: rgba(110,118,129,0.1); border-radius: 4px; overflow: hidden; }
+.hbar-fill { height: 100%; border-radius: 4px; display: flex; align-items: center; padding-left: 8px; font-size: 0.72rem; font-weight: 700; color: #fff; min-width: 28px; }
+
+/* Lists */
+ul, ol { margin: 0.5rem 0 0.5rem 1.5rem; font-size: 0.9rem; }
+li { margin: 0.3rem 0; }
+li code { font-size: 0.8rem; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+</style>
+</head>
+<body>
+
+<h1>Web Fuzzer Architecture &amp; Algorithms</h1>
+<p class="subtitle">Coverage-guided differential fuzzing framework &mdash; 핵심 원리, 알고리즘, 데이터 흐름 총정리</p>
+
+<!-- ============ TOC ============ -->
+<div class="toc">
+  <a href="#overview">Overview</a>
+  <a href="#data-structures">Data Structures</a>
+  <a href="#engine">Fuzzing Loop</a>
+  <a href="#grammar">Grammar Generation</a>
+  <a href="#mutation">Mutation Strategies</a>
+  <a href="#scheduling">Seed Scheduling</a>
+  <a href="#coverage">Coverage Models</a>
+  <a href="#oracles">Bug Detection Oracles</a>
+  <a href="#dedup">Deduplication</a>
+  <a href="#targets">Target Execution</a>
+  <a href="#orchestrator">Orchestrator</a>
+  <a href="#perf">Performance</a>
+</div>
+
+<!-- ============================================================== -->
+<h2 id="overview">1. Architecture Overview</h2>
+<!-- ============================================================== -->
+
+<p>Protocol 기반 모듈형 설계. 모든 핵심 컴포넌트가 <code>typing.Protocol</code> 인터페이스로 정의되어 자유롭게 교체 가능하다.</p>
+
+<div class="grid-4 card" style="gap:0.5rem; padding:1rem;">
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--accent);">6</div>
+    <div class="stat-label">Mutator 전략</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--green);">4</div>
+    <div class="stat-label">Scheduler 알고리즘</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--orange);">7</div>
+    <div class="stat-label">Oracle 종류</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value" style="color:var(--red);">3</div>
+    <div class="stat-label">Coverage 모델</div>
+  </div>
+</div>
+
+<h3>Core Loop: Generate &rarr; Execute &rarr; Evaluate &rarr; Update</h3>
+
+<div class="flow-grid">
+  <div class="flow-box" style="border-color:var(--purple);">SeedScheduler.select() &mdash; 코퍼스에서 시드 선택 (에너지 기반)</div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-box" style="border-color:var(--pink);">MutatorScheduler.select() &mdash; 변이 전략 선택</div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-box" style="border-color:var(--cyan);">Mutator.mutate(seed) &mdash; 입력 변이 생성</div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-box" style="border-color:var(--accent);">Target.execute(input) + ReferenceTargets &mdash; 실행 (primary + N개 reference)</div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-box" style="border-color:var(--green);">CoverageCollector.collect() &mdash; 커버리지 수집 &amp; 신규성 판단</div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-box" style="border-color:var(--orange);">Oracle.check() &times; N &mdash; 버그 탐지 (crash, diff, SSRF, XSS...)</div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-box" style="border-color:var(--red);">Deduplicator &mdash; 중복 제거 후 Finding 등록</div>
+  <div class="flow-arrow">&darr;</div>
+  <div class="flow-box" style="border-color:var(--muted);">Scheduler.update() &mdash; 시드 에너지 &amp; 뮤테이터 효과 업데이트</div>
+</div>
+
+<h3>Protocol Interfaces</h3>
+<div class="card">
+<table>
+  <tr><th>Protocol</th><th>핵심 메서드</th><th>구현체</th></tr>
+  <tr><td><code>Target</code></td><td><code>execute(inp) &rarr; ExecutionResult</code></td><td>ProcessTarget, PersistentTarget</td></tr>
+  <tr><td><code>CoverageCollector</code></td><td><code>collect(), is_novel(), merge()</code></td><td>Edge, Response, Diff</td></tr>
+  <tr><td><code>Oracle</code></td><td><code>check(inp, result) &rarr; Finding?</code></td><td>Crash, Diff, SSRF, XSS, mXSS, Sanitizer, Response</td></tr>
+  <tr><td><code>Mutator</code></td><td><code>mutate(inp, corpus) &rarr; Input</code></td><td>Grammar, Havoc, Token, Splice, Dictionary, mXSS</td></tr>
+  <tr><td><code>SeedScheduler</code></td><td><code>select(corpus), update(seed, result)</code></td><td>Random, Entropic, EcoFuzz, RareBranch</td></tr>
+  <tr><td><code>Deduplicator</code></td><td><code>fingerprint(), is_duplicate()</code></td><td>CoverageDeduplicator</td></tr>
+  <tr><td><code>InputSource</code></td><td><code>generate() &rarr; Input</code></td><td>GrammarInputSource</td></tr>
+</table>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="data-structures">2. Core Data Structures</h2>
+<!-- ============================================================== -->
+
+<div class="grid-2">
+  <div class="card card-cyan">
+    <h4>Input</h4>
+    <pre><span class="type">Input</span>(
+  data: <span class="type">bytes</span>,          <span class="cm"># 퍼즈 입력 바이트</span>
+  metadata: <span class="type">dict</span>,       <span class="cm"># derivation tree, 출처 등</span>
+)</pre>
+    <p>하나의 테스트 케이스. <code>metadata</code>에 Grammar derivation tree를 저장하면 AST-level 변이가 가능해진다.</p>
+  </div>
+
+  <div class="card card-green">
+    <h4>ExecutionResult</h4>
+    <pre><span class="type">ExecutionResult</span>(
+  exit_code: <span class="type">int</span>,       <span class="cm"># 0=성공, 음수=시그널</span>
+  stdout: <span class="type">bytes</span>,        <span class="cm"># 타겟 출력</span>
+  stderr: <span class="type">bytes</span>,        <span class="cm"># 에러 출력</span>
+  duration_ms: <span class="type">float</span>,   <span class="cm"># 실행 시간</span>
+  coverage_data: <span class="type">bytes</span>, <span class="cm"># 커버리지 비트맵 (선택)</span>
+  metadata: <span class="type">dict</span>,       <span class="cm"># status_code 등</span>
+)</pre>
+  </div>
+
+  <div class="card card-red">
+    <h4>Finding</h4>
+    <pre><span class="type">Finding</span>(
+  title: <span class="type">str</span>,
+  severity: <span class="type">Severity</span>,   <span class="cm"># CRITICAL|HIGH|MEDIUM|LOW|INFO</span>
+  input: <span class="type">Input</span>,
+  result: <span class="type">ExecutionResult</span>,
+  oracle_name: <span class="type">str</span>,
+  fingerprint: <span class="type">str</span>,     <span class="cm"># SHA256 해시 (중복 제거용)</span>
+  metadata: <span class="type">dict</span>,       <span class="cm"># strategy, category, diff_fields...</span>
+)</pre>
+  </div>
+
+  <div class="card card-purple">
+    <h4>Seed</h4>
+    <pre><span class="type">Seed</span>(
+  id: <span class="type">int</span>,
+  input: <span class="type">Input</span>,
+  coverage: <span class="type">CoverageMap</span>,
+  energy: <span class="type">float</span> = 1.0,       <span class="cm"># 스케줄러가 할당하는 우선순위</span>
+  priority_boost: <span class="type">float</span> = 1.0, <span class="cm"># 외부 부스트 (오케스트레이터)</span>
+  exec_count: <span class="type">int</span> = 0,        <span class="cm"># 변이 횟수</span>
+  finding_count: <span class="type">int</span> = 0,     <span class="cm"># 이 시드에서 발견된 버그 수</span>
+  depth: <span class="type">int</span> = 0,             <span class="cm"># 코퍼스 트리 깊이</span>
+  parent_id: <span class="type">int?</span>,            <span class="cm"># 부모 시드</span>
+  feature_set: <span class="type">set[int]</span>,      <span class="cm"># 이 시드가 새로 발견한 에지들</span>
+)</pre>
+  </div>
+</div>
+
+<h3>CoverageMap (AFL-style Bitmap)</h3>
+<div class="card card-accent">
+<pre><span class="type">CoverageMap</span>(
+  bitmap: <span class="type">bytearray[65536]</span>,  <span class="cm"># 64KB bitmap — 에지 하나당 1바이트</span>
+  edge_count: <span class="type">int</span>,            <span class="cm"># 0이 아닌 엔트리 수</span>
+)
+
+<span class="cm"># 에지 인덱스 = (source_block XOR dest_block) % 65536</span>
+<span class="cm"># 각 바이트는 해당 에지의 hit count</span></pre>
+
+<h4>Hit-Count Bucketing (AFL 표준)</h4>
+<p>실행 횟수를 버킷으로 압축하여 "1번 vs 2번"같은 노이즈를 제거한다:</p>
+<div class="formula">
+bucket(count) = min{ x &isin; [1, 2, 3, 4, 8, 16, 32, 128] : count &le; x }
+</div>
+<p>예: hit count 5 &rarr; bucket 8, hit count 17 &rarr; bucket 32</p>
+
+<h4>Novelty Check Algorithm</h4>
+<pre><span class="kw">def</span> <span class="fn">has_new_bits</span>(existing, new) &rarr; <span class="type">bool</span>:
+    <span class="kw">for</span> i <span class="kw">in</span> range(<span class="num">65536</span>):
+        <span class="kw">if</span> new.bitmap[i] &gt; <span class="num">0</span> <span class="kw">and</span> existing.bitmap[i] == <span class="num">0</span>:
+            <span class="kw">return</span> <span class="str">True</span>   <span class="cm"># 완전히 새로운 에지</span>
+        <span class="kw">if</span> bucket(new[i]) != bucket(existing[i]):
+            <span class="kw">return</span> <span class="str">True</span>   <span class="cm"># 새로운 hit-count 버킷</span>
+    <span class="kw">return</span> <span class="str">False</span></pre>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="engine">3. Fuzzing Engine &mdash; Main Loop</h2>
+<!-- ============================================================== -->
+
+<div class="card">
+<h3>Phase 1: Seeding</h3>
+<ol>
+  <li><code>seeds_dir</code>에서 파일 기반 시드 로드 (있으면)</li>
+  <li>Grammar으로 초기 시드 생성 (기본 100개)</li>
+  <li>각 시드를 primary + reference 타겟에 실행</li>
+  <li>커버리지 수집 &amp; 오라클 체크 &rarr; 코퍼스에 추가</li>
+</ol>
+
+<h3>Phase 2: Main Loop</h3>
+<pre><span class="kw">while</span> running <span class="kw">and not</span> should_stop():
+
+    <span class="cm"># 1. 시드 선택 (에너지 가중 확률)</span>
+    seed = seed_scheduler.<span class="fn">select</span>(corpus)
+    seed.exec_count += <span class="num">1</span>
+
+    <span class="cm"># 2. 뮤테이터 선택</span>
+    mutator = mutator_scheduler.<span class="fn">select</span>(mutators, seed)
+
+    <span class="cm"># 3. 변이 생성</span>
+    mutated = mutator.<span class="fn">mutate</span>(seed.input, corpus.seeds)
+
+    <span class="cm"># 4. 실행 (primary + references 병렬)</span>
+    result = target.<span class="fn">execute</span>(mutated)
+    ref_results = ThreadPool.<span class="fn">map</span>(ref.execute, mutated)
+
+    <span class="cm"># 5. 커버리지 신규성 판단</span>
+    new_cov = coverage.<span class="fn">collect</span>(result, ref_results)
+    is_novel = coverage.<span class="fn">is_novel</span>(corpus.global_coverage, new_cov)
+    <span class="kw">if</span> is_novel:
+        corpus.<span class="fn">add</span>(mutated, new_cov, parent_id=seed.id)
+
+    <span class="cm"># 6. 모든 오라클로 버그 탐지</span>
+    <span class="kw">for</span> oracle <span class="kw">in</span> oracles:
+        findings = oracle.<span class="fn">check_with_refs</span>(mutated, result, ref_results)
+        <span class="kw">for</span> f <span class="kw">in</span> findings:
+            <span class="kw">if not</span> dedup.<span class="fn">is_duplicate</span>(f):
+                dedup.<span class="fn">register</span>(f)
+                stats.<span class="fn">record_finding</span>(f)
+
+    <span class="cm"># 7. 스케줄러 피드백</span>
+    result_info = <span class="type">ScheduleResult</span>(
+        found_new_coverage=is_novel,
+        found_crash=has_crash,
+        new_edges=new_seed.feature_set
+    )
+    seed_scheduler.<span class="fn">update</span>(seed, result_info)
+    mutator_scheduler.<span class="fn">update</span>(mutator, result_info)</pre>
+</div>
+
+<div class="note">
+  <strong>Stopping 조건:</strong> <code>max_iterations</code> 도달, <code>max_time_secs</code> 초과, 또는 외부 SIGTERM/stdin 명령
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="grammar">4. Grammar-Based Generation</h2>
+<!-- ============================================================== -->
+
+<h3>Grammar IR (Intermediate Representation)</h3>
+
+<div class="card card-purple">
+<h4>Symbol Types</h4>
+<table>
+  <tr><th>타입</th><th>예시</th><th>설명</th></tr>
+  <tr><td><code>literal</code></td><td><code>"://"</code></td><td>고정 텍스트</td></tr>
+  <tr><td><code>rule_ref</code></td><td><code>&lt;authority&gt;</code></td><td>다른 룰 참조 (재귀 가능)</td></tr>
+  <tr><td><code>builtin</code></td><td><code>&lt;int min=1 max=65535&gt;</code></td><td>내장 생성기</td></tr>
+  <tr><td><code>cross_ref</code></td><td><code>@ecmascript:&lt;program&gt;</code></td><td>다른 그래머 참조</td></tr>
+</table>
+
+<h4>Modifiers</h4>
+<table>
+  <tr><th>수식자</th><th>의미</th><th>동작</th></tr>
+  <tr><td><code>?</code></td><td>Optional</td><td>50% 확률로 생성</td></tr>
+  <tr><td><code>+</code></td><td>One or more</td><td>1~N회 반복</td></tr>
+  <tr><td><code>*</code></td><td>Zero or more</td><td>0~N회 반복</td></tr>
+  <tr><td><code>{n,m}</code></td><td>Bounded</td><td>n~m회 반복</td></tr>
+</table>
+
+<h4>Production Weights</h4>
+<pre><span class="cm"># uri.grammar에서:</span>
+&lt;ssrf_bypass&gt; =
+  | [<span class="num">weight=3</span>] &lt;fragment_at_bypass&gt;     <span class="cm"># 높은 가중치 — SSRF 핵심</span>
+  | [<span class="num">weight=2</span>] &lt;encoded_redirect&gt;      <span class="cm"># 중간 가중치</span>
+  | [<span class="num">weight=1</span>] &lt;unicode_confusable&gt;    <span class="cm"># 낮은 가중치</span></pre>
+</div>
+
+<h3>Expansion Algorithm</h3>
+
+<div class="card card-cyan">
+<pre><span class="kw">def</span> <span class="fn">_expand_rule</span>(grammar, rule_name, depth, max_depth):
+    rule = grammar.rules[rule_name]
+
+    <span class="cm"># 깊이 제한: 무한 재귀 방지</span>
+    <span class="kw">if</span> depth &gt;= max_depth:
+        <span class="cm"># 터미널 프로덕션만 선택 (rule_ref 없는 것)</span>
+        candidates = rule.<span class="fn">terminal_productions</span>()
+        <span class="kw">if not</span> candidates:
+            candidates = [<span class="fn">minimal_production</span>(rule)]  <span class="cm"># 최소 재귀</span>
+    <span class="kw">else</span>:
+        candidates = rule.productions
+
+    <span class="cm"># 가중치 기반 확률 선택</span>
+    production = random.<span class="fn">choices</span>(
+        candidates,
+        weights=[p.weight <span class="kw">for</span> p <span class="kw">in</span> candidates]
+    )[<span class="num">0</span>]
+
+    <span class="cm"># 각 심볼 재귀 확장</span>
+    <span class="kw">return</span> <span class="str">""</span>.<span class="fn">join</span>(
+        <span class="fn">_expand_symbol</span>(s, depth + <span class="num">1</span>, max_depth)
+        <span class="kw">for</span> s <span class="kw">in</span> production.symbols
+    )
+
+<span class="cm"># Hard ceiling: depth &ge; 2 &times; max_depth &rarr; 강제 터미널</span></pre>
+</div>
+
+<h3>Derivation Tree</h3>
+
+<p>Grammar 생성 시 derivation tree를 함께 기록한다. 이 트리가 있어야 AST-level 변이(subtree replace, splice)가 가능하다.</p>
+
+<div class="card">
+<pre><span class="type">TreeNode</span>(
+  symbol: <span class="type">Symbol</span>,
+  rule_name: <span class="type">str?</span>,
+  production_idx: <span class="type">int</span>,       <span class="cm"># 선택된 프로덕션 인덱스</span>
+  children: <span class="type">list[TreeNode]</span>,
+  value: <span class="type">str</span>,                <span class="cm"># 리프 노드의 터미널 값</span>
+)
+
+<span class="type">DerivationTree</span>(
+  root: <span class="type">TreeNode</span>,
+  grammar_name: <span class="type">str</span>,
+)
+  .<span class="fn">random_subtree</span>(rng) &rarr; <span class="type">TreeNode?</span>   <span class="cm"># 변이 지점 선택</span>
+  .<span class="fn">to_bytes</span>() &rarr; <span class="type">bytes</span>                <span class="cm"># 트리 &rarr; 문자열 직렬화</span></pre>
+</div>
+
+<h3>URI Grammar 구조 (681 lines)</h3>
+<div class="card card-orange">
+<p>URL 퍼징을 위한 종합 문법. 주요 섹션:</p>
+<div class="grid-2" style="margin-top:0.5rem;">
+  <div>
+    <h4>구조적 요소</h4>
+    <ul>
+      <li>Scheme variants (http, data, javascript, blob...)</li>
+      <li>Authority / userinfo tricks (multi-@, encoded @)</li>
+      <li>IPv4/IPv6 variants (hex, octal, decimal, mapped)</li>
+      <li>Path traversal (../, %252e, null byte)</li>
+      <li>Query/fragment confusion (%3f, %23)</li>
+    </ul>
+  </div>
+  <div>
+    <h4>SSRF-specific</h4>
+    <ul>
+      <li>Fragment before @: <code>evil.com#@127.0.0.1</code></li>
+      <li>Port as userinfo: <code>evil.com:80@127.0.0.1</code></li>
+      <li>Bracket confusion: <code>[127.0.0.1]</code></li>
+      <li>Unicode confusables (fullwidth digits)</li>
+      <li>Cloud metadata IPs (169.254.169.254)</li>
+    </ul>
+  </div>
+</div>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="mutation">5. Mutation Strategies</h2>
+<!-- ============================================================== -->
+
+<p>6개의 독립적인 변이 전략. 각각 다른 granularity에서 입력을 변형한다.</p>
+
+<!-- Havoc -->
+<div class="section-header" onclick="toggleSection(this)">
+  <span class="badge badge-red">BYTE</span>
+  <strong>HavocMutator</strong> &mdash; AFL-style byte-level havoc
+  <span class="toggle open">&#9654;</span>
+</div>
+<div class="section-body" style="max-height:none;">
+<div class="card card-red">
+<p>한 번의 mutate() 호출에 <strong>2~128개의 연산을 스태킹</strong>하여 적용.</p>
+
+<div class="formula">
+stacking_count = 2<sup>(1 + random(0..5))</sup> = { 2, 4, 8, 16, 32, 64, 128 } 중 하나
+</div>
+
+<h4>14가지 연산</h4>
+<table>
+  <tr><th>#</th><th>연산</th><th>설명</th></tr>
+  <tr><td>0</td><td>Bit flip</td><td>랜덤 위치의 1비트 반전</td></tr>
+  <tr><td>1</td><td>Byte flip</td><td>랜덤 바이트 반전 (XOR 0xFF)</td></tr>
+  <tr><td>2</td><td>Byte set</td><td>랜덤 바이트를 랜덤 값으로 설정</td></tr>
+  <tr><td>3-4</td><td>Arithmetic 8/16</td><td>&plusmn;1~35 (little/big endian)</td></tr>
+  <tr><td>5-6</td><td>Arithmetic 32</td><td>&plusmn;1~35 (32-bit)</td></tr>
+  <tr><td>7-8</td><td>Interesting values</td><td>0, 1, 127, 128, 255, 32767, 65535, MAX_INT 등</td></tr>
+  <tr><td>9</td><td>Block delete</td><td>1~min(len/4, 32) 바이트 삭제</td></tr>
+  <tr><td>10</td><td>Block insert</td><td>랜덤 바이트 블록 삽입</td></tr>
+  <tr><td>11</td><td>Block overwrite</td><td>랜덤 바이트로 덮어쓰기</td></tr>
+  <tr><td>12</td><td>Block clone</td><td>입력 내 다른 위치에서 블록 복사</td></tr>
+  <tr><td>13</td><td>Corpus splice</td><td>코퍼스의 다른 시드에서 tail 이식</td></tr>
+</table>
+
+<pre><span class="cm"># 연산 0-12: Rust (PyO3) 네이티브 가속</span>
+<span class="cm"># 연산 13: Python (코퍼스 접근 필요)</span>
+<span class="cm"># Python fallback도 제공</span></pre>
+</div>
+</div>
+
+<!-- Grammar -->
+<div class="section-header" onclick="toggleSection(this)">
+  <span class="badge badge-purple">AST</span>
+  <strong>GrammarMutator</strong> &mdash; Nautilus/Superion style AST mutation
+  <span class="toggle open">&#9654;</span>
+</div>
+<div class="section-body" style="max-height:none;">
+<div class="card card-purple">
+<p>Derivation tree가 있는 입력에 대해 <strong>문법 구조를 보존하면서</strong> 변이.</p>
+
+<h4>4가지 전략 (랜덤 선택)</h4>
+
+<table>
+  <tr><th>전략</th><th>동작</th><th>효과</th></tr>
+  <tr>
+    <td><strong>subtree_replace</strong></td>
+    <td>트리에서 랜덤 룰 노드를 선택 &rarr; 해당 서브트리를 fresh generation으로 교체</td>
+    <td>구조 유지, 내용 랜덤화</td>
+  </tr>
+  <tr>
+    <td><strong>subtree_splice</strong></td>
+    <td>다른 코퍼스 시드에서 <strong>같은 룰 타입</strong>의 서브트리를 찾아 이식</td>
+    <td>두 시드의 특성 결합</td>
+  </tr>
+  <tr>
+    <td><strong>production_swap</strong></td>
+    <td>룰 노드의 프로덕션 대안을 다른 것으로 교체 &rarr; 자식 재생성</td>
+    <td>같은 위치에서 다른 문법적 선택</td>
+  </tr>
+  <tr>
+    <td><strong>rule_regenerate</strong></td>
+    <td>전체 트리를 루트부터 재생성</td>
+    <td>완전히 새로운 입력 (exploration)</td>
+  </tr>
+</table>
+
+<pre><span class="cm"># subtree_splice 알고리즘:</span>
+target_node = tree.<span class="fn">random_subtree</span>()     <span class="cm"># 예: &lt;authority&gt; 노드</span>
+<span class="kw">for</span> seed <span class="kw">in</span> corpus:
+    donor = seed.tree.<span class="fn">find_node</span>(rule=<span class="str">"authority"</span>)  <span class="cm"># 같은 룰 타입</span>
+    <span class="kw">if</span> donor:
+        target_node.<span class="fn">replace_with</span>(donor.<span class="fn">clone</span>())
+        <span class="kw">break</span></pre>
+
+<div class="note">Derivation tree가 없는 입력은 GrammarInputSource로 fresh 생성하여 fallback.</div>
+</div>
+</div>
+
+<!-- Token -->
+<div class="section-header" onclick="toggleSection(this)">
+  <span class="badge badge-green">TOKEN</span>
+  <strong>TokenMutator</strong> &mdash; Regex-based token-level mutation
+  <span class="toggle open">&#9654;</span>
+</div>
+<div class="section-body" style="max-height:none;">
+<div class="card card-green">
+<p>바이트와 AST 사이의 <strong>중간 granularity</strong>. 정규식으로 토큰화 후 토큰 단위 변이.</p>
+
+<pre><span class="cm"># 토큰화 패턴</span>
+tokens = re.<span class="fn">findall</span>(r<span class="str">'\s+|[{}()\[\]&lt;&gt;:;,./\\@#?&amp;=]+|[^\s{}()...]+</span>', input)</pre>
+
+<h4>5가지 전략 (1회 호출에 1~3개 적용)</h4>
+<table>
+  <tr><th>전략</th><th>동작</th></tr>
+  <tr><td><code>token_replace</code></td><td>토큰을 코퍼스 내 유사 토큰이나 생성값으로 교체</td></tr>
+  <tr><td><code>token_delete</code></td><td>랜덤 토큰 삭제</td></tr>
+  <tr><td><code>token_duplicate</code></td><td>토큰을 인접 위치에 복제</td></tr>
+  <tr><td><code>token_swap</code></td><td>인접한 두 토큰 위치 교환</td></tr>
+  <tr><td><code>token_insert</code></td><td>딕셔너리 토큰 또는 랜덤 문자열 삽입</td></tr>
+</table>
+</div>
+</div>
+
+<!-- Dictionary -->
+<div class="section-header" onclick="toggleSection(this)">
+  <span class="badge badge-orange">DICT</span>
+  <strong>DictionaryMutator</strong> &mdash; Known-pattern injection
+  <span class="toggle open">&#9654;</span>
+</div>
+<div class="section-body" style="max-height:none;">
+<div class="card card-orange">
+<p>200+ 항목의 <strong>WEB_DICTIONARY</strong>에서 알려진 공격 패턴을 주입.</p>
+
+<div class="grid-2">
+  <div>
+    <h4>딕셔너리 카테고리</h4>
+    <ul>
+      <li><strong>XSS:</strong> <code>&lt;script&gt;</code>, <code>onerror</code>, <code>javascript:</code></li>
+      <li><strong>SQLi:</strong> <code>' OR '1'='1</code>, <code>UNION SELECT</code></li>
+      <li><strong>Path traversal:</strong> <code>../</code>, <code>%252e%252e</code></li>
+      <li><strong>SSRF:</strong> <code>0x7f000001</code>, <code>169.254.169.254</code></li>
+      <li><strong>mXSS:</strong> MathML/SVG integration points</li>
+      <li><strong>URL tricks:</strong> null bytes, encoding, fragments</li>
+    </ul>
+  </div>
+  <div>
+    <h4>3가지 연산 (1~3회 적용)</h4>
+    <ul>
+      <li><strong>Insert:</strong> 랜덤 위치에 딕셔너리 항목 삽입</li>
+      <li><strong>Overwrite:</strong> 랜덤 위치를 딕셔너리 항목으로 덮어쓰기</li>
+      <li><strong>Append:</strong> 입력 끝에 딕셔너리 항목 추가</li>
+    </ul>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- Splice -->
+<div class="section-header" onclick="toggleSection(this)">
+  <span class="badge badge-pink">SPLICE</span>
+  <strong>SpliceMutator</strong> &mdash; Cross-seed combination
+  <span class="toggle open">&#9654;</span>
+</div>
+<div class="section-body" style="max-height:none;">
+<div class="card card-pink">
+<p>두 시드를 랜덤 지점에서 결합하여 <strong>hybrid 입력</strong> 생성.</p>
+<pre>split_a = random(<span class="num">0</span>, len(seed_a))
+split_b = random(<span class="num">0</span>, len(seed_b))
+result = seed_a[:split_a] + seed_b[split_b:]</pre>
+<p>단순하지만 강력: 서로 다른 커버리지를 가진 시드를 조합해 새 경로 탐색.</p>
+</div>
+</div>
+
+<!-- mXSS -->
+<div class="section-header" onclick="toggleSection(this)">
+  <span class="badge badge-cyan">mXSS</span>
+  <strong>MxssMutator</strong> &mdash; Taxonomy-driven DOMPurify bypass
+  <span class="toggle open">&#9654;</span>
+</div>
+<div class="section-body" style="max-height:none;">
+<div class="card card-cyan">
+<p>DOMPurify 우회를 위한 <strong>도메인 특화</strong> 변이기. 분류 체계 기반 패턴 적용.</p>
+<table>
+  <tr><th>분류</th><th>기법</th></tr>
+  <tr><td>&sect;1-1</td><td>MathML integration points (<code>&lt;math&gt;&lt;mtext&gt;</code>)</td></tr>
+  <tr><td>&sect;1-2</td><td>SVG style breakout</td></tr>
+  <tr><td>&sect;1-3</td><td>Comment-based smuggling</td></tr>
+  <tr><td>&sect;2-1</td><td>Node flattening (nesting bomb)</td></tr>
+  <tr><td>&sect;2-3</td><td>Triple-parse form reorder</td></tr>
+  <tr><td>&sect;3</td><td>DOM clobbering</td></tr>
+  <tr><td>&sect;4-1</td><td>Template literal regex bypass</td></tr>
+  <tr><td>&sect;5</td><td>Custom element handling</td></tr>
+  <tr><td>&sect;6</td><td>Serialize-parse roundtrip</td></tr>
+</table>
+</div>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="scheduling">6. Seed Scheduling Algorithms</h2>
+<!-- ============================================================== -->
+
+<p>어떤 시드를 다음에 변이할지 결정하는 알고리즘. 모든 스케줄러는 <code>select(corpus)</code>와 <code>update(seed, result)</code>를 구현한다.</p>
+
+<!-- Entropic -->
+<h3>6.1 EntropicScheduler <span class="badge badge-purple">기본값</span></h3>
+<div class="card card-purple">
+<p><strong>LibFuzzer (FSE'20)</strong>에서 제안된 정보 이론 기반 에너지 할당.</p>
+
+<div class="note">
+<strong>핵심 아이디어:</strong> "희귀한 feature를 발견한 시드에 더 많은 에너지를 준다." 희귀할수록 정보량(information)이 높다.
+</div>
+
+<h4>Information Content</h4>
+<div class="formula">
+I(f) = &minus;log<sub>2</sub>( freq(f) / total_seeds )
+</div>
+<p><code>freq(f)</code>: feature f를 가진 시드 수. <code>total_seeds</code>: 전체 코퍼스 크기.</p>
+<p>예: feature가 320개 시드 중 2개만 가지고 있으면 &rarr; I = &minus;log<sub>2</sub>(2/320) = 7.32 bits</p>
+
+<h4>Seed Entropy (Energy)</h4>
+<div class="formula">
+entropy(seed) = &sum;<sub>f &isin; seed.feature_set, freq(f) &lt; &theta;</sub> I(f)
+<br>
+seed.energy = entropy &times; base_energy
+</div>
+
+<p><strong>Abundance threshold</strong> (&theta; = 256): feature가 256개 이상의 시드에서 발견되면 "abundant"로 간주, 엔트로피 계산에서 제외.</p>
+
+<h4>Selection</h4>
+<pre><span class="cm"># 에너지 &times; 외부 부스트 비례 확률 선택</span>
+weights = [max(seed.energy * seed.priority_boost, <span class="num">0.01</span>) <span class="kw">for</span> seed <span class="kw">in</span> corpus]
+selected = random.<span class="fn">choices</span>(corpus.seeds, weights=weights)[<span class="num">0</span>]</pre>
+
+<h4>Update (실행 후)</h4>
+<pre><span class="kw">if</span> found_new_coverage:
+    seed.energy *= <span class="num">1.5</span>    <span class="cm"># 보상: 에너지 50% 증가</span>
+<span class="kw">else</span>:
+    seed.energy *= <span class="num">0.99</span>   <span class="cm"># 감쇠: 에너지 1% 감소</span></pre>
+
+<div class="warn">
+<strong>Native acceleration:</strong> Rust 구현으로 전체 코퍼스 에너지를 벌크 계산. O(seeds &times; features) &rarr; 수천 시드에서도 &lt;1ms.
+</div>
+</div>
+
+<!-- EcoFuzz -->
+<h3>6.2 EcoFuzzScheduler <span class="badge badge-green">MAB</span></h3>
+<div class="card card-green">
+<p><strong>EcoFuzz (USENIX Security'20)</strong>: Multi-Armed Bandit (UCB1) 접근법.</p>
+
+<div class="note">
+<strong>핵심 아이디어:</strong> 각 시드를 slot machine의 arm으로 취급. "많이 시도해서 성공률이 높은 시드" vs "아직 안 해본 시드" 사이의 최적 균형을 찾는다.
+</div>
+
+<h4>UCB1 Formula</h4>
+<div class="formula">
+reward(seed) = successes / trials
+<br><br>
+UCB1(seed) = reward + C &times; &radic;( ln(total_trials) / trials )
+<br><br>
+score(seed) = UCB1 &times; priority_boost
+</div>
+
+<p><code>successes</code>: 새 커버리지 또는 크래시 발견 횟수. <code>trials</code>: 변이 시도 횟수. <code>C</code>: exploration weight.</p>
+
+<h4>Selection</h4>
+<pre><span class="cm"># trials=0인 시드는 무한대 우선순위 (즉시 탐색)</span>
+selected = max(corpus.seeds, key=<span class="kw">lambda</span> s: <span class="fn">ucb1_score</span>(s))</pre>
+
+<h4>AAPS: Adaptive Average-cost Power Schedule</h4>
+<div class="formula">
+seed.energy = 1.0 + reward_rate &times; 10.0
+</div>
+<p>보상 비율이 높은 시드에 에너지를 집중.</p>
+
+<h4>Exploration vs Exploitation</h4>
+<div class="grid-2">
+  <div class="card" style="padding:0.8rem;">
+    <h4 style="color:var(--accent);">Exploration</h4>
+    <p>&radic;(ln(N)/n<sub>i</sub>) 항이 커짐 &rarr; 시도 횟수가 적은 시드 선호</p>
+  </div>
+  <div class="card" style="padding:0.8rem;">
+    <h4 style="color:var(--orange);">Exploitation</h4>
+    <p>reward 항이 커짐 &rarr; 성공률이 높은 시드 선호</p>
+  </div>
+</div>
+</div>
+
+<!-- RareBranch -->
+<h3>6.3 RareBranchScheduler <span class="badge badge-orange">FairFuzz</span></h3>
+<div class="card card-orange">
+<p><strong>FairFuzz (ASE'18)</strong> 영감: 드물게 실행되는 에지를 커버하는 시드에 집중.</p>
+
+<div class="formula">
+rare_score(seed) = | seed.rare_branches | &times; rarity_weight
+</div>
+
+<p><code>rare_branches</code>: 전체 코퍼스에서 소수의 시드만 커버하는 에지 집합. 이런 에지를 가진 시드가 우선 선택되어 under-explored 코드 영역을 탐색한다.</p>
+</div>
+
+<!-- Random -->
+<h3>6.4 RandomSeedScheduler <span class="badge badge-blue">Baseline</span></h3>
+<div class="card">
+<p>균일 랜덤 선택. 알고리즘 비교의 baseline.</p>
+<div class="formula">P(seed<sub>i</sub>) = 1 / |corpus|</div>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="coverage">7. Coverage Models</h2>
+<!-- ============================================================== -->
+
+<p>커버리지 정보는 퍼징의 <strong>피드백 신호</strong>. "이 입력이 새로운 행동을 유발했는가?"를 판단한다.</p>
+
+<!-- Edge -->
+<h3>7.1 EdgeCoverageCollector <span class="badge badge-green">AFL-style</span></h3>
+<div class="card card-green">
+<p>계측(instrumented) 바이너리에서 실행 경로의 에지(branch transition)를 추적.</p>
+
+<div class="formula">
+edge_index = (source_block XOR dest_block) mod 65536
+<br>
+bitmap[edge_index] += 1   <span style="color:var(--muted);">(매 실행 시 hit count 증가)</span>
+</div>
+
+<p>64KB bitmap으로 65,536개 에지 슬롯. 충돌(collision)이 있지만 실용적으로 충분.</p>
+</div>
+
+<!-- Response -->
+<h3>7.2 ResponseCoverageCollector <span class="badge badge-orange">Blackbox</span></h3>
+<div class="card card-orange">
+<p>계측 없는 타겟을 위한 <strong>응답 기반 유사 커버리지</strong>. 6가지 특성 조합으로 "커버리지"를 시뮬레이션.</p>
+
+<table>
+  <tr><th>#</th><th>Feature</th><th>Bucketing</th></tr>
+  <tr><td>1</td><td>HTTP status code</td><td>그대로 사용</td></tr>
+  <tr><td>2</td><td>Content length</td><td>[0, 64, 256, 1K, 4K, 16K, 64K, &infin;]</td></tr>
+  <tr><td>3</td><td>Error signature</td><td>SHA256(stderr[:64])</td></tr>
+  <tr><td>4</td><td>Response time</td><td>[10, 50, 100, 250, 500, 1000, 5000, &infin;] ms</td></tr>
+  <tr><td>5</td><td>Combined</td><td><code>{status}:{length}:{time}</code></td></tr>
+  <tr><td>6</td><td>Content-Type</td><td>헤더 값</td></tr>
+</table>
+<p>각 고유 조합이 bitmap의 한 feature로 매핑된다.</p>
+</div>
+
+<!-- Diff -->
+<h3>7.3 DiffCoverageCollector <span class="badge badge-red">Nezha-style</span></h3>
+<div class="card card-red">
+<p><strong>Nezha (IEEE S&amp;P'17)</strong> 영감: 타겟 간 <strong>행동 차이(divergence)</strong>를 커버리지로 취급.</p>
+
+<div class="note">
+<strong>핵심 아이디어:</strong> "파서 A는 accept하고 B는 reject한다"는 것 자체가 하나의 "에지"다. 새로운 divergence 패턴을 발견하면 코퍼스에 추가.
+</div>
+
+<pre><span class="kw">def</span> <span class="fn">collect_diff</span>(inp, primary, ref_results):
+    bitmap = bytearray(<span class="num">65536</span>)
+
+    <span class="cm"># Feature 1: Exit code class 벡터</span>
+    classes = [primary.exit_code // <span class="num">100</span>]
+    classes += [r.exit_code // <span class="num">100</span> <span class="kw">for</span> r <span class="kw">in</span> ref_results]
+    <span class="fn">set_feature</span>(bitmap, <span class="str">"exit_classes"</span>, str(classes))
+
+    <span class="cm"># Feature 2: 쌍별 divergence</span>
+    <span class="kw">for</span> i, ref <span class="kw">in</span> enumerate(ref_results):
+        divs = set()
+        <span class="kw">if</span> primary.exit_code != ref.exit_code:
+            divs.add(<span class="str">"exit"</span>)
+        <span class="kw">if</span> primary.stdout != ref.stdout:
+            divs.add(<span class="str">"output"</span>)
+        <span class="kw">if</span> primary.duration_ms &gt; ref.duration_ms * <span class="num">10</span>:
+            divs.add(<span class="str">"timing"</span>)
+        <span class="fn">set_feature</span>(bitmap, f<span class="str">"div_ref{i}"</span>, str(sorted(divs)))
+
+    <span class="cm"># Feature 3-5: Status codes, error patterns, divergence count</span>
+    ...
+
+    <span class="kw">return</span> <span class="type">CoverageMap</span>(bitmap)</pre>
+
+<p>새로운 divergence 패턴이 발견되면 코퍼스에 추가 &rarr; 스케줄러가 이런 시드에 에너지를 집중 &rarr; 더 많은 차이 발견.</p>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="oracles">8. Bug Detection Oracles</h2>
+<!-- ============================================================== -->
+
+<p>실행 결과를 검사하여 버그를 탐지. 각 Oracle은 독립적으로 Finding을 생산한다.</p>
+
+<!-- Crash -->
+<h3>8.1 CrashOracle</h3>
+<div class="card card-red">
+<h4>Signal-based Severity Classification</h4>
+<table>
+  <tr><th>Signal</th><th>의미</th><th>Severity</th></tr>
+  <tr><td>SIGSEGV (11)</td><td>Segmentation fault (메모리 접근 위반)</td><td><span class="badge badge-red">CRITICAL</span></td></tr>
+  <tr><td>SIGABRT (6)</td><td>Abort (assertion failure)</td><td><span class="badge badge-orange">HIGH</span></td></tr>
+  <tr><td>SIGFPE (8)</td><td>Floating point exception (0 나누기)</td><td><span class="badge badge-orange">HIGH</span></td></tr>
+  <tr><td>SIGILL (4)</td><td>Illegal instruction</td><td><span class="badge badge-orange">HIGH</span></td></tr>
+  <tr><td>SIGBUS (7)</td><td>Bus error</td><td><span class="badge badge-blue">MEDIUM</span></td></tr>
+  <tr><td>Timeout</td><td>실행 시간 초과</td><td><span class="badge badge-blue">MEDIUM</span></td></tr>
+  <tr><td>기타 non-zero</td><td>일반 비정상 종료</td><td><span class="badge badge-blue">LOW</span></td></tr>
+</table>
+</div>
+
+<!-- DiffOracle -->
+<h3>8.2 DiffOracle (Differential)</h3>
+<div class="card card-accent">
+<p>Primary 타겟과 N개 Reference 타겟의 결과를 비교. <strong>5개의 pluggable strategy</strong>가 독립적으로 finding을 생산.</p>
+
+<h4>Strategy Pipeline</h4>
+<pre><span class="kw">def</span> <span class="fn">_collect_all</span>(inp, result, ref_results):
+    best_per_strategy: <span class="type">dict[str, Finding]</span> = {}
+
+    <span class="kw">for</span> i, ref_result <span class="kw">in</span> enumerate(ref_results):
+        <span class="kw">for</span> strategy <span class="kw">in</span> strategies:
+            finding = strategy.<span class="fn">compare</span>(inp, result, ref_result, i)
+            <span class="kw">if</span> finding:
+                key = strategy.name
+                <span class="cm"># 같은 전략 중 가장 높은 severity만 유지</span>
+                <span class="kw">if</span> key <span class="kw">not in</span> best <span class="kw">or</span> sev_rank(finding) &gt; sev_rank(best[key]):
+                    best[key] = finding
+
+    <span class="kw">return</span> sorted(best.values(), key=sev_rank, reverse=<span class="str">True</span>)</pre>
+
+<h4>Built-in Strategies</h4>
+<table>
+  <tr><th>Strategy</th><th>탐지 대상</th><th>Severity</th></tr>
+  <tr>
+    <td><strong>ExitCodeStrategy</strong></td>
+    <td>Accept/reject 불일치 (한쪽은 파싱 성공, 다른 쪽은 실패)</td>
+    <td><span class="badge badge-orange">HIGH</span></td>
+  </tr>
+  <tr>
+    <td><strong>OutputStrategy</strong></td>
+    <td>JSON 필드 레벨 diff &mdash; host, scheme, path, port, query, fragment, userinfo</td>
+    <td>필드별 차등</td>
+  </tr>
+  <tr>
+    <td><strong>StatusCodeStrategy</strong></td>
+    <td>HTTP status class 차이 (2xx vs 4xx, 5xx)</td>
+    <td><span class="badge badge-blue">MEDIUM</span>~<span class="badge badge-orange">HIGH</span></td>
+  </tr>
+  <tr>
+    <td><strong>TimingStrategy</strong></td>
+    <td>타이밍 이상 (primary가 reference보다 10x 느림)</td>
+    <td><span class="badge badge-blue">MEDIUM</span></td>
+  </tr>
+  <tr>
+    <td><strong>ErrorPatternStrategy</strong></td>
+    <td>한쪽만 에러 패턴 출력 (segfault, stack overflow, AddressSanitizer)</td>
+    <td><span class="badge badge-orange">HIGH</span></td>
+  </tr>
+</table>
+
+<h4>OutputStrategy: Category Classification</h4>
+<pre><span class="cm"># JSON 양쪽 파싱 후 필드별 비교</span>
+diff_fields = [k <span class="kw">for</span> k <span class="kw">in</span> all_keys <span class="kw">if</span> a[k].lower() != b[k].lower()]
+
+<span class="cm"># 가장 중요한 필드 기준 분류</span>
+FIELD_CATEGORY_MAP = {
+    <span class="str">"host"</span>:     (<span class="str">"host_mismatch"</span>,      MEDIUM),
+    <span class="str">"scheme"</span>:   (<span class="str">"scheme_mismatch"</span>,    MEDIUM),
+    <span class="str">"userinfo"</span>: (<span class="str">"authority_mismatch"</span>, MEDIUM),
+    <span class="str">"path"</span>:     (<span class="str">"path_mismatch"</span>,      MEDIUM),
+    <span class="str">"port"</span>:     (<span class="str">"port_mismatch"</span>,      LOW),
+    <span class="str">"query"</span>:    (<span class="str">"query_mismatch"</span>,     LOW),
+    <span class="str">"fragment"</span>: (<span class="str">"fragment_mismatch"</span>,  LOW),
+}</pre>
+</div>
+
+<!-- SSRF -->
+<h3>8.3 SsrfOracle (SSRF Detection)</h3>
+<div class="card card-red">
+<p>URL 파서 간 차이에서 <strong>SSRF 공격 가능성</strong>을 탐지. DiffStrategy로 동작.</p>
+
+<h4>핵심 로직: Host Confusion Detection</h4>
+<pre><span class="cm"># 양쪽 파서 출력에서 host 추출</span>
+primary_host = parse_json(primary.stdout)[<span class="str">"host"</span>]
+ref_host     = parse_json(ref.stdout)[<span class="str">"host"</span>]
+
+<span class="cm"># 한쪽은 내부 IP, 다른 쪽은 외부 &rarr; SSRF!</span>
+<span class="kw">if</span> <span class="fn">is_internal</span>(primary_host) != <span class="fn">is_internal</span>(ref_host):
+    <span class="kw">return</span> Finding(severity=<span class="op">CRITICAL</span>, category=<span class="str">"ssrf_host_confusion"</span>)</pre>
+
+<h4>Internal Host Recognition</h4>
+<pre><span class="kw">def</span> <span class="fn">_is_internal_host</span>(host: <span class="type">str</span>) &rarr; <span class="type">bool</span>:
+    <span class="cm"># 1. 직접 매칭: localhost, *.internal, *.local</span>
+    <span class="kw">if</span> host <span class="kw">in</span> _INTERNAL_HOSTNAMES: <span class="kw">return</span> <span class="str">True</span>
+
+    <span class="cm"># 2. 대체 localhost: 0x7f000001, 017700000001, 2130706433, 127.1</span>
+    <span class="kw">if</span> host <span class="kw">in</span> _LOCALHOST_ALTERNATES: <span class="kw">return</span> <span class="str">True</span>
+
+    <span class="cm"># 3. 클라우드 메타데이터: 169.254.169.254, 100.100.100.200</span>
+    <span class="kw">if</span> host <span class="kw">in</span> _CLOUD_METADATA_IPS: <span class="kw">return</span> <span class="str">True</span>
+
+    <span class="cm"># 4. IP 주소 파싱 &rarr; RFC 1918 체크</span>
+    <span class="kw">try</span>:
+        addr = ipaddress.<span class="fn">ip_address</span>(host)
+        <span class="kw">return</span> addr.is_loopback <span class="kw">or</span> addr.is_private <span class="kw">or</span> addr.is_reserved
+    <span class="kw">except</span> <span class="type">ValueError</span>: <span class="kw">pass</span>
+
+    <span class="cm"># 5. Hex IP 디코딩: 0x7f000001 &rarr; 127.0.0.1</span>
+    <span class="kw">if</span> host.startswith(<span class="str">"0x"</span>):
+        decimal = int(host, <span class="num">16</span>)
+        <span class="kw">return</span> ipaddress.<span class="fn">ip_address</span>(decimal).is_loopback
+
+    <span class="kw">return</span> <span class="str">False</span></pre>
+
+<h4>탐지 카테고리</h4>
+<table>
+  <tr><th>Category</th><th>시나리오</th><th>Severity</th></tr>
+  <tr>
+    <td><code>ssrf_host_confusion</code></td>
+    <td>한쪽은 <code>127.0.0.1</code>, 다른 쪽은 <code>evil.com</code>으로 파싱</td>
+    <td><span class="badge badge-red">CRITICAL</span></td>
+  </tr>
+  <tr>
+    <td><code>host_confusion</code></td>
+    <td>양쪽 모두 외부지만 다른 도메인으로 파싱</td>
+    <td><span class="badge badge-orange">HIGH</span></td>
+  </tr>
+  <tr>
+    <td><code>scheme_confusion</code></td>
+    <td>한쪽은 http, 다른 쪽은 javascript/data</td>
+    <td><span class="badge badge-orange">HIGH</span></td>
+  </tr>
+  <tr>
+    <td><code>authority_confusion</code></td>
+    <td>@ 위치 해석 불일치 (userinfo vs host)</td>
+    <td><span class="badge badge-orange">HIGH</span></td>
+  </tr>
+  <tr>
+    <td><code>port_confusion</code></td>
+    <td>포트 번호 파싱 차이</td>
+    <td><span class="badge badge-blue">MEDIUM</span></td>
+  </tr>
+  <tr>
+    <td><code>path_confusion</code></td>
+    <td>경로 정규화 차이 (프록시 시나리오)</td>
+    <td><span class="badge badge-blue">MEDIUM</span></td>
+  </tr>
+</table>
+
+<div class="note">
+<strong>LRU Cache 최적화:</strong> <code>_parse_url_output()</code>에 <code>@lru_cache(16)</code>, <code>_is_internal_host()</code>에 <code>@lru_cache(64)</code> 적용. 입력당 ~32회 JSON 파싱을 ~5회로 감소.
+</div>
+</div>
+
+<!-- XSS -->
+<h3>8.4 XssOracle</h3>
+<div class="card card-orange">
+<p>Sanitizer 출력에서 XSS 패턴 탐지. ~15개 정규식 규칙.</p>
+<table>
+  <tr><th>패턴</th><th>예시</th><th>Context</th></tr>
+  <tr><td>Script tag</td><td><code>&lt;script&gt;</code>, <code>&lt;script/src=</code></td><td>any</td></tr>
+  <tr><td>Event handler</td><td><code>onerror=</code>, <code>onload=</code></td><td>html_attr</td></tr>
+  <tr><td>Dangerous URI</td><td><code>javascript:</code>, <code>vbscript:</code></td><td>any</td></tr>
+  <tr><td>SVG/MathML</td><td><code>&lt;svg onload&gt;</code>, <code>&lt;math&gt;</code></td><td>any</td></tr>
+  <tr><td>CSS expression</td><td><code>expression()</code>, <code>-moz-binding</code></td><td>css</td></tr>
+</table>
+</div>
+
+<!-- mXSS -->
+<h3>8.5 MxssOracle</h3>
+<div class="card card-cyan">
+<p>DOM mutation (mXSS) 탐지. sanitize &rarr; innerHTML &rarr; re-read 과정에서 구조 변화 검사.</p>
+<pre><span class="cm"># 타겟 JSON 출력 파싱</span>
+{
+  <span class="str">"sanitized"</span>:   <span class="str">"&lt;clean HTML&gt;"</span>,
+  <span class="str">"reparsed"</span>:    <span class="str">"&lt;after innerHTML re-parse&gt;"</span>,
+  <span class="str">"resanitized"</span>: <span class="str">"&lt;sanitize(sanitize(input))&gt;"</span>,
+  <span class="str">"mxss"</span>:        <span class="str">true</span>/<span class="str">false</span>,
+  <span class="str">"idempotency"</span>: <span class="str">true</span>/<span class="str">false</span>
+}
+
+<span class="cm"># 탐지:</span>
+<span class="cm"># sanitized &ne; reparsed &rarr; CRITICAL (DOM mutation)</span>
+<span class="cm"># sanitize(sanitize(x)) &ne; sanitize(x) &rarr; HIGH (idempotency violation)</span></pre>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="dedup">9. Deduplication</h2>
+<!-- ============================================================== -->
+
+<div class="card card-accent">
+<h3>Fingerprinting Algorithm</h3>
+
+<pre><span class="kw">def</span> <span class="fn">fingerprint</span>(finding: <span class="type">Finding</span>) &rarr; <span class="type">str</span>:
+    h = hashlib.<span class="fn">sha256</span>()
+
+    <span class="cm"># 항상 포함</span>
+    h.update(finding.oracle_name)           <span class="cm"># "differential", "crash", "ssrf"</span>
+    h.update(str(finding.severity))         <span class="cm"># "HIGH", "CRITICAL"</span>
+    h.update(str(finding.result.exit_code)) <span class="cm"># 0, 1, -11</span>
+    h.update(finding.result.stderr[:<span class="num">256</span>])  <span class="cm"># 에러 시그니처</span>
+
+    <span class="cm"># Metadata 필드 (있으면 포함)</span>
+    h.update(metadata.get(<span class="str">"strategy"</span>, <span class="str">""</span>))      <span class="cm"># exit_code, output, ssrf...</span>
+    h.update(metadata.get(<span class="str">"category"</span>, <span class="str">""</span>))      <span class="cm"># host_confusion, scheme_mismatch...</span>
+    h.update(str(metadata.get(<span class="str">"ref_index"</span>, <span class="str">""</span>))) <span class="cm"># 어느 reference 타겟</span>
+    h.update(<span class="str">","</span>.join(sorted(
+        metadata.get(<span class="str">"diff_fields"</span>, [])         <span class="cm"># ["host","scheme"] 등</span>
+    )))
+
+    <span class="kw">return</span> h.hexdigest()[:<span class="num">16</span>]  <span class="cm"># 16자 hex</span></pre>
+
+<div class="note">
+<strong>효과:</strong> 같은 구조적 divergence(예: "ref[0]에서 host mismatch")는 dedup되지만, 다른 카테고리(host vs scheme)는 별개 finding으로 유지.
+</div>
+
+<h3>3-Level Dedup</h3>
+<table>
+  <tr><th>Level</th><th>위치</th><th>방식</th></tr>
+  <tr><td>1. Engine</td><td>FuzzEngine 루프 내</td><td>SHA256 fingerprint &rarr; in-memory set</td></tr>
+  <tr><td>2. Orchestrator</td><td>Redis subscriber / result parser</td><td>DB fingerprint 조회 (프로젝트 범위)</td></tr>
+  <tr><td>3. DiffOracle</td><td>_collect_all() 내부</td><td>전략별 best-per-ref (같은 전략의 중복 억제)</td></tr>
+</table>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="targets">10. Target Execution</h2>
+<!-- ============================================================== -->
+
+<div class="grid-2">
+  <div class="card card-orange">
+    <h3>ProcessTarget</h3>
+    <p>매 실행마다 subprocess 생성. 단순하지만 느림.</p>
+    <pre><span class="cm"># ~1s overhead per execution</span>
+tmp_file.<span class="fn">write</span>(inp.data)
+proc = subprocess.<span class="fn">run</span>(
+    cmd.replace(<span class="str">"{input}"</span>, tmp_path),
+    capture_output=<span class="str">True</span>,
+    timeout=timeout,
+)
+<span class="kw">return</span> <span class="type">ExecutionResult</span>(proc.returncode, ...)</pre>
+  </div>
+
+  <div class="card card-green">
+    <h3>PersistentTarget</h3>
+    <p>프로세스를 살려두고 바이너리 프로토콜로 통신. <strong>~50x 빠름</strong>.</p>
+    <pre><span class="cm"># Binary framing protocol (Big-Endian)</span>
+<span class="cm"># Request:  [4B length][input bytes]</span>
+<span class="cm"># Response: [4B length][output bytes][4B exit_code]</span>
+
+<span class="cm"># Send</span>
+proc.stdin.<span class="fn">write</span>(struct.pack(<span class="str">"&gt;I"</span>, len(data)))
+proc.stdin.<span class="fn">write</span>(data)
+
+<span class="cm"># Recv</span>
+out_len = struct.unpack(<span class="str">"&gt;I"</span>, <span class="fn">read</span>(<span class="num">4</span>))
+output  = <span class="fn">read</span>(out_len)
+exit_cd = struct.unpack(<span class="str">"&gt;I"</span>, <span class="fn">read</span>(<span class="num">4</span>))</pre>
+    <div class="note">프로세스 crash 시 자동 재시작. Background thread로 timeout 탐지.</div>
+  </div>
+</div>
+
+<h3>URL Parser Targets (6-way Differential)</h3>
+<div class="card">
+<table>
+  <tr><th>Parser</th><th>언어</th><th>특성</th><th>Persistent</th></tr>
+  <tr>
+    <td style="color:var(--accent);font-weight:700;">Python urllib</td>
+    <td>Python</td>
+    <td>Primary target. 관대한 RFC 3986 파서. SSRF 취약 패턴 다수.</td>
+    <td>persistent_wrapper.py</td>
+  </tr>
+  <tr>
+    <td style="color:var(--purple);font-weight:700;">Node WHATWG</td>
+    <td>Node.js</td>
+    <td>WHATWG URL Standard. <code>\</code>&rarr;<code>/</code> 정규화, strict scheme.</td>
+    <td>persistent_wrapper.js</td>
+  </tr>
+  <tr>
+    <td style="color:var(--orange);font-weight:700;">Node Legacy</td>
+    <td>Node.js</td>
+    <td><code>url.parse()</code>. Backslash 미정규화, 느슨한 검증.</td>
+    <td>persistent_wrapper.js</td>
+  </tr>
+  <tr>
+    <td style="color:var(--green);font-weight:700;">Python rfc3986</td>
+    <td>Python</td>
+    <td>엄격한 RFC 3986 준수. 표준 파싱의 ground truth.</td>
+    <td>persistent_wrapper.py</td>
+  </tr>
+  <tr>
+    <td style="color:var(--pink);font-weight:700;">curl / libcurl</td>
+    <td>C (subprocess)</td>
+    <td><code>curl -w</code> 포맷으로 파싱. PHP+curl SSRF의 ground truth.</td>
+    <td>persistent_wrapper.py</td>
+  </tr>
+  <tr>
+    <td style="color:var(--cyan);font-weight:700;">Go net/url</td>
+    <td>Go</td>
+    <td>Hex/octal IP 미정규화. Caddy/Traefik 시나리오.</td>
+    <td>native --persistent</td>
+  </tr>
+</table>
+
+<h4>Output Format (모든 타겟 공통)</h4>
+<pre>{
+  <span class="str">"scheme"</span>:   <span class="str">"http"</span>,
+  <span class="str">"userinfo"</span>: <span class="str">"user:pass"</span>,
+  <span class="str">"host"</span>:     <span class="str">"example.com"</span>,
+  <span class="str">"port"</span>:     <span class="str">"8080"</span>,
+  <span class="str">"path"</span>:     <span class="str">"/path/to/resource"</span>,
+  <span class="str">"query"</span>:    <span class="str">"key=value"</span>,
+  <span class="str">"fragment"</span>: <span class="str">"section"</span>
+}</pre>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="orchestrator">11. Orchestrator Integration</h2>
+<!-- ============================================================== -->
+
+<div class="card">
+<h3>Architecture</h3>
+<div class="grid-3" style="margin:1rem 0;">
+  <div class="flow-box" style="border-color:var(--accent);">Frontend<br><small style="color:var(--muted);">React + Vite<br>:5175</small></div>
+  <div class="flow-box" style="border-color:var(--green);">Backend API<br><small style="color:var(--muted);">FastAPI + SQLite<br>:4000 / :8003</small></div>
+  <div class="flow-box" style="border-color:var(--orange);">Fuzzer Process<br><small style="color:var(--muted);">python -m webfuzzer fuzz<br>subprocess</small></div>
+</div>
+
+<h3>Communication Channels</h3>
+
+<h4>1. Redis Pub/Sub (실시간)</h4>
+<pre><span class="cm"># Fuzzer &rarr; Redis &rarr; Backend</span>
+Channel: fuzzer:{session_id}:{event_type}
+
+Event types:
+  <span class="str">"stats"</span>    &rarr; total_execs, exec/s, corpus_size, edges
+  <span class="str">"finding"</span>  &rarr; title, severity, oracle, fingerprint, input_hex
+  <span class="str">"coverage"</span> &rarr; edge_count, timestamp
+  <span class="str">"corpus"</span>   &rarr; seed_id, parent_id, depth, energy
+  <span class="str">"status"</span>   &rarr; started / completed / failed / stopped</pre>
+
+<h4>2. Stderr Events (Redis 없을 때 fallback)</h4>
+<pre><span class="cm"># Fuzzer stdout/stderr에 이벤트 prefix로 출력</span>
+@@EVENT@@{<span class="str">"event"</span>: <span class="str">"finding"</span>, <span class="str">"data"</span>: {...}}</pre>
+
+<h4>3. Stdin Commands (외부 &rarr; Fuzzer)</h4>
+<pre><span class="cm"># Orchestrator가 Fuzzer에 명령 전달 (JSON on stdin)</span>
+{<span class="str">"cmd"</span>: <span class="str">"set_priority"</span>, <span class="str">"seed_id"</span>: <span class="num">42</span>, <span class="str">"boost"</span>: <span class="num">2.5</span>}
+{<span class="str">"cmd"</span>: <span class="str">"reset_priorities"</span>}</pre>
+
+<h3>Session Lifecycle</h3>
+<ol>
+  <li><strong>Create:</strong> <code>POST /api/sessions</code> &rarr; DB에 세션 메타데이터 저장</li>
+  <li><strong>Start:</strong> <code>POST /api/sessions/{id}/start</code> &rarr; <code>subprocess.Popen()</code>으로 퍼저 실행</li>
+  <li><strong>Monitor:</strong> Redis subscriber가 실시간 stats/finding/coverage 수집</li>
+  <li><strong>Stop:</strong> <code>POST /api/sessions/{id}/stop</code> &rarr; SIGTERM &rarr; graceful shutdown</li>
+  <li><strong>Import:</strong> 세션 종료 후 <code>result_parser</code>가 파일시스템에서 최종 결과 import</li>
+</ol>
+</div>
+
+
+<!-- ============================================================== -->
+<h2 id="perf">12. Performance Optimizations</h2>
+<!-- ============================================================== -->
+
+<div class="card">
+<h3>Native Extensions (Rust / PyO3)</h3>
+<table>
+  <tr><th>함수</th><th>역할</th><th>속도 향상</th></tr>
+  <tr><td><code>bitmap_has_new_bits</code></td><td>에지 신규성 체크</td><td>~100x</td></tr>
+  <tr><td><code>bitmap_update</code></td><td>커버리지 merge + 에지 추적</td><td>~50x</td></tr>
+  <tr><td><code>bitmap_count</code></td><td>에지 개수 계산</td><td>~50x</td></tr>
+  <tr><td><code>havoc_mutate</code></td><td>Havoc 연산 0-12 일괄 처리</td><td>~20x</td></tr>
+  <tr><td><code>entropic_compute</code></td><td>전체 코퍼스 에너지 계산</td><td>~30x</td></tr>
+  <tr><td><code>feature_set_bitmap</code></td><td>Feature 해싱</td><td>~20x</td></tr>
+</table>
+<p>Rust 빌드 실패 시 순수 Python fallback 자동 사용.</p>
+
+<h3>LRU Cache</h3>
+<table>
+  <tr><th>대상</th><th>maxsize</th><th>효과</th></tr>
+  <tr><td><code>_parse_url_output()</code></td><td>16</td><td>입력당 ~32회 JSON 파싱 &rarr; ~5회</td></tr>
+  <tr><td><code>_is_internal_host()</code></td><td>64</td><td>반복 호스트 조회 캐싱</td></tr>
+</table>
+
+<h3>Persistent Mode</h3>
+<div class="grid-2">
+  <div class="card" style="padding:0.8rem; text-align:center;">
+    <div style="font-size:1.5rem; font-weight:700; color:var(--orange);">~1 exec/s</div>
+    <div style="color:var(--muted); font-size:0.8rem;">ProcessTarget</div>
+  </div>
+  <div class="card" style="padding:0.8rem; text-align:center;">
+    <div style="font-size:1.5rem; font-weight:700; color:var(--green);">~50 exec/s</div>
+    <div style="color:var(--muted); font-size:0.8rem;">PersistentTarget</div>
+  </div>
+</div>
+
+<h3>Parallel Execution</h3>
+<p>Reference 타겟들은 <code>ThreadPoolExecutor</code>로 병렬 실행. 6개 타겟 &times; 순차 = 6x 지연이 병렬로 ~1.5x 수준으로 감소.</p>
+</div>
+
+
+<!-- ============================================================== -->
+<h2>References</h2>
+<!-- ============================================================== -->
+
+<div class="card" style="font-size:0.85rem;">
+<table>
+  <tr><th>논문/도구</th><th>핵심 기여</th><th>본 퍼저의 적용</th></tr>
+  <tr><td>AFL (Zalewski, 2014)</td><td>Edge coverage bitmap, hit-count bucketing</td><td>CoverageMap, HavocMutator</td></tr>
+  <tr><td>LibFuzzer (LLVM)</td><td>In-process fuzzing</td><td>PersistentTarget 설계</td></tr>
+  <tr><td>Entropic (FSE'20)</td><td>Information-theoretic scheduling</td><td>EntropicScheduler</td></tr>
+  <tr><td>EcoFuzz (USENIX Sec'20)</td><td>MAB-based seed scheduling</td><td>EcoFuzzScheduler</td></tr>
+  <tr><td>FairFuzz (ASE'18)</td><td>Rare branch targeting</td><td>RareBranchScheduler</td></tr>
+  <tr><td>Nautilus (NDSS'19)</td><td>Grammar-aware AST mutation</td><td>GrammarMutator</td></tr>
+  <tr><td>Superion (ICSE'19)</td><td>Grammar-aware subtree splicing</td><td>subtree_splice 전략</td></tr>
+  <tr><td>Nezha (S&amp;P'17)</td><td>Delta-diversity for differential testing</td><td>DiffCoverageCollector</td></tr>
+  <tr><td>CSmith (PLDI'11)</td><td>Differential testing of compilers</td><td>DiffOracle 아키텍처</td></tr>
+  <tr><td>DPIFuzz (S&amp;P'22)</td><td>Protocol differential testing</td><td>URL 파서 6-way 비교</td></tr>
+  <tr><td>Orange Tsai (BlackHat'17)</td><td>URL parser confusion for SSRF</td><td>SSRF Oracle, URI grammar</td></tr>
+</table>
+</div>
+
+<p style="text-align:center; color:var(--muted); margin-top:3rem; font-size:0.8rem;">
+  Generated from webfuzzer codebase analysis &mdash; February 2026
+</p>
+
+<script>
+function toggleSection(header) {
+  const body = header.nextElementSibling;
+  const toggle = header.querySelector('.toggle');
+  if (!body || !body.classList.contains('section-body')) return;
+
+  if (body.style.maxHeight === '0px' || body.style.maxHeight === '0') {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    setTimeout(() => { body.style.maxHeight = 'none'; }, 400);
+    if (toggle) toggle.classList.add('open');
+  } else {
+    body.style.maxHeight = body.scrollHeight + 'px';
+    requestAnimationFrame(() => { body.style.maxHeight = '0px'; });
+    if (toggle) toggle.classList.remove('open');
+  }
+}
+
+// Smooth scroll for TOC
+document.querySelectorAll('.toc a').forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const target = document.querySelector(a.getAttribute('href'));
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+</script>
+
+</body>
+</html>

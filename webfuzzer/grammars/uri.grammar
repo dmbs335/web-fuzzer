@@ -1,0 +1,680 @@
+# =============================================================================
+# URI Grammar — RFC 3986 (URI), RFC 3987 (IRI), WHATWG URL Standard
+# Covers: all URI components, edge cases for parser differentials,
+#         SSRF bypass patterns, open redirect tricks, URL confusion,
+#         scheme-relative, fragment-only, data/blob/javascript URIs,
+#         punycode, IPv4/IPv6, percent-encoding edge cases
+# =============================================================================
+
+!root <uri>
+!max_depth 8
+
+# =============================================================================
+# Top-level URI forms (RFC 3986 §3)
+# =============================================================================
+<uri> = <absolute_uri>
+<uri> = <relative_ref>
+<uri> = <scheme_specific>
+
+# --- absolute URI: scheme ":" hier-part [ "?" query ] [ "#" fragment ] ---
+<absolute_uri> = <scheme>:<hier_part>
+<absolute_uri> = <scheme>:<hier_part>?<query>
+<absolute_uri> = <scheme>:<hier_part>#<fragment>
+<absolute_uri> = <scheme>:<hier_part>?<query>#<fragment>
+
+# --- relative reference ---
+<relative_ref> = //<authority><path_abempty>
+<relative_ref> = //<authority><path_abempty>?<query>
+<relative_ref> = //<authority><path_abempty>#<fragment>
+<relative_ref> = //<authority><path_abempty>?<query>#<fragment>
+<relative_ref> = <path_absolute>
+<relative_ref> = <path_absolute>?<query>
+<relative_ref> = <path_absolute>?<query>#<fragment>
+<relative_ref> = <path_noscheme>
+<relative_ref> = ?<query>
+<relative_ref> = #<fragment>
+<relative_ref> =
+
+# =============================================================================
+# Scheme (RFC 3986 §3.1)
+# =============================================================================
+<scheme> = http
+<scheme> = https
+<scheme> = ftp
+<scheme> = ftps
+<scheme> = ws
+<scheme> = wss
+<scheme> = ssh
+<scheme> = telnet
+<scheme> = file
+<scheme> = data
+<scheme> = blob
+<scheme> = javascript
+<scheme> = vbscript
+<scheme> = mailto
+<scheme> = tel
+<scheme> = urn
+<scheme> = ldap
+<scheme> = ldaps
+<scheme> = gopher
+<scheme> = dict
+<scheme> = git
+<scheme> = svn
+<scheme> = sftp
+<scheme> = jar
+<scheme> = view-source
+<scheme> = chrome
+<scheme> = chrome-extension
+<scheme> = moz-extension
+<scheme> = ms-browser-extension
+<scheme> = about
+<scheme> = resource
+<scheme> = content
+<scheme> = cid
+<scheme> = mid
+<scheme> = <string min=2 max=10 charset=lower>
+# §1-1: Scheme case variation (case-insensitive per RFC 3986 but some validators are case-sensitive)
+<scheme> = HTTP
+<scheme> = HTTPS
+<scheme> = Http
+<scheme> = hTtP
+<scheme> = FILE
+<scheme> = Gopher
+
+# Scheme-specific URIs
+<scheme_specific> = data:<data_uri_body>
+<scheme_specific> = javascript:<js_body>
+<scheme_specific> = blob:<absolute_uri>
+<scheme_specific> = mailto:<email_addr>
+<scheme_specific> = mailto:<email_addr>?subject=<pct_encoded_text>&body=<pct_encoded_text>
+<scheme_specific> = tel:<tel_number>
+<scheme_specific> = urn:<urn_body>
+<scheme_specific> = about:blank
+<scheme_specific> = about:srcdoc
+<scheme_specific> = about:invalid
+<scheme_specific> = view-source:http://<host>/<path_segment>
+<scheme_specific> = file:///<drive_letter>:/<path_segment>/<path_segment>
+<scheme_specific> = file://<host>/<path_segment>
+<scheme_specific> = file:///tmp/<path_segment>
+
+<drive_letter> = C
+<drive_letter> = D
+<drive_letter> = <char charset=upper>
+
+# --- data URI (RFC 2397) ---
+<data_uri_body> = <mediatype>;<data_params>base64,<string min=10 max=60 charset=alphanumeric>
+<data_uri_body> = <mediatype>,<pct_encoded_text>
+<data_uri_body> = <mediatype>;base64,<string min=10 max=60 charset=alphanumeric>
+<data_uri_body> = text/html,<pct_encoded_text>
+<data_uri_body> = text/html;base64,<string min=10 max=40 charset=alphanumeric>
+<data_uri_body> = image/svg+xml,<pct_encoded_text>
+<data_uri_body> = image/svg+xml;base64,<string min=10 max=60 charset=alphanumeric>
+<data_uri_body> = application/pdf;base64,<string min=10 max=60 charset=alphanumeric>
+<data_uri_body> = ;base64,<string min=10 max=40 charset=alphanumeric>
+<data_uri_body> = ,<pct_encoded_text>
+<data_uri_body> = text/html;charset=UTF-8,<pct_encoded_text>
+
+<data_params> = charset=<charset_name>;
+<data_params> = <empty>
+
+<charset_name> = UTF-8
+<charset_name> = utf-8
+<charset_name> = ISO-8859-1
+<charset_name> = US-ASCII
+<charset_name> = windows-1252
+<charset_name> = <string min=3 max=12>
+
+<mediatype> = text/html
+<mediatype> = text/plain
+<mediatype> = text/css
+<mediatype> = text/javascript
+<mediatype> = application/javascript
+<mediatype> = application/json
+<mediatype> = application/xml
+<mediatype> = application/xhtml+xml
+<mediatype> = application/pdf
+<mediatype> = application/octet-stream
+<mediatype> = image/png
+<mediatype> = image/gif
+<mediatype> = image/jpeg
+<mediatype> = image/svg+xml
+<mediatype> = image/webp
+<mediatype> = multipart/form-data
+<mediatype> = <string min=3 max=12 charset=lower>/<string min=3 max=15 charset=lower>
+
+<js_body> = void(0)
+<js_body> = alert(1)
+<js_body> = alert(document.domain)
+<js_body> = alert(document.cookie)
+<js_body> = <string min=3 max=30>
+
+<email_addr> = <string min=3 max=12 charset=lower>@<string min=3 max=12 charset=lower>.<tld>
+
+<tel_number> = +<int min=1 max=99><int min=100000000 max=999999999>
+<tel_number> = <int min=100 max=999>-<int min=100 max=999>-<int min=1000 max=9999>
+
+<urn_body> = isbn:<int min=1000000000 max=9999999999>
+<urn_body> = uuid:<hex len=8>-<hex len=4>-<hex len=4>-<hex len=4>-<hex len=12>
+<urn_body> = <string min=2 max=10 charset=lower>:<string min=5 max=30>
+
+# =============================================================================
+# Hier-part (RFC 3986 §3)
+# =============================================================================
+<hier_part> = //<authority><path_abempty>
+<hier_part> = <path_absolute>
+<hier_part> = <path_rootless>
+<hier_part> =
+
+# =============================================================================
+# Authority (RFC 3986 §3.2)
+# =============================================================================
+<authority> = <host>
+<authority> = <host>:<port>
+<authority> = <userinfo>@<host>
+<authority> = <userinfo>@<host>:<port>
+
+# --- userinfo (§3.2.1) ---
+<userinfo> = <string min=1 max=15 charset=lower>
+<userinfo> = <string min=1 max=10 charset=lower>:<string min=1 max=10>
+<userinfo> = <pct_encoded_text>
+<userinfo> = <string min=1 max=10 charset=lower>:<pct_encoded_text>
+# Confusion: userinfo that looks like a host
+<userinfo> = <string min=3 max=10 charset=lower>.<tld>
+<userinfo> = <string min=3 max=10 charset=lower>.<tld>:<int min=1 max=65535>
+# §2-1: Multi-@ ambiguity (parsers disagree on first-@ vs last-@)
+<userinfo> = <string min=3 max=8 charset=lower>@<string min=3 max=8 charset=lower>.<tld>
+# §2-1: Colon-@ trick (CVE-2025-0454: localhost:\@evil.com)
+<userinfo> = localhost:\
+<userinfo> = localhost:%5c
+<userinfo> = <host>:\
+<userinfo> = <host>:%5c
+# §2-1: Encoded @ (%40) confuses validators that check literal @
+<userinfo> = <string min=3 max=10 charset=lower>.<tld>%40
+
+# --- host (§3.2.2) ---
+<host> = <reg_name>
+<host> = <ipv4_address>
+<host> = <ipv6_address_bracketed>
+<host> = <ipvfuture>
+
+# Registered name (domain)
+<reg_name> = <string min=3 max=15 charset=lower>.<tld>
+<reg_name> = <string min=3 max=10 charset=lower>.<string min=3 max=10 charset=lower>.<tld>
+<reg_name> = <string min=2 max=6 charset=lower>.<string min=2 max=6 charset=lower>.<string min=2 max=6 charset=lower>.<tld>
+<reg_name> = localhost
+<reg_name> = <empty>
+
+# IDN / Punycode hostnames
+<reg_name> = xn--<string min=5 max=20 charset=lower>.<tld>
+<reg_name> = <string min=2 max=8 charset=lower>.xn--<string min=5 max=20 charset=lower>
+
+# Edge case: numeric-looking hostnames
+<reg_name> = <int min=1 max=255>.<int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>.<tld>
+# §3-2: Trailing dot (FQDN equivalent but different string)
+<reg_name> = <string min=3 max=10 charset=lower>.<tld>.
+<reg_name> = localhost.
+# §3-3: Bracket confusion (CVE-2025-0938: brackets in non-IPv6 context)
+<reg_name> = [<string min=3 max=10 charset=lower>.<tld>]
+<reg_name> = [localhost]
+<reg_name> = [127.0.0.1]
+# §3-2: Wildcard DNS services
+<reg_name> = <int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>.nip.io
+<reg_name> = <int min=0 max=255>-<int min=0 max=255>-<int min=0 max=255>-<int min=0 max=255>.sslip.io
+
+<tld> = com
+<tld> = net
+<tld> = org
+<tld> = io
+<tld> = dev
+<tld> = co.kr
+<tld> = co.jp
+<tld> = co.uk
+<tld> = com.br
+<tld> = <string min=2 max=6 charset=lower>
+
+# --- IPv4 (§3.2.2) ---
+<ipv4_address> = <int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>
+# SSRF bypass: alternative IPv4 formats
+<ipv4_address> = 127.0.0.1
+<ipv4_address> = 0.0.0.0
+<ipv4_address> = 0
+<ipv4_address> = 0x7f000001
+<ipv4_address> = 0x7f.0x0.0x0.0x1
+<ipv4_address> = 017700000001
+<ipv4_address> = 0177.0.0.01
+<ipv4_address> = 2130706433
+<ipv4_address> = 127.1
+<ipv4_address> = 127.0.1
+<ipv4_address> = 10.<int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>
+<ipv4_address> = 192.168.<int min=0 max=255>.<int min=0 max=255>
+<ipv4_address> = 172.<int min=16 max=31>.<int min=0 max=255>.<int min=0 max=255>
+<ipv4_address> = 169.254.<int min=0 max=255>.<int min=0 max=255>
+# §3-1: Mixed notation (hex + decimal + octal in same address)
+<ipv4_address> = 0x7f.0.0.01
+<ipv4_address> = 0177.0.0.1
+<ipv4_address> = 0x7f.0x0.0.1
+# Overflow/underflow
+<ipv4_address> = 256.256.256.256
+<ipv4_address> = 127.0.0.256
+<ipv4_address> = <int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>.
+
+# --- IPv6 (§3.2.2) ---
+<ipv6_address_bracketed> = [<ipv6_address>]
+<ipv6_address_bracketed> = [::1]
+<ipv6_address_bracketed> = [::]
+<ipv6_address_bracketed> = [::ffff:<ipv4_address>]
+<ipv6_address_bracketed> = [0:0:0:0:0:0:0:1]
+<ipv6_address_bracketed> = [0:0:0:0:0:ffff:<ipv4_address>]
+<ipv6_address_bracketed> = [<hex len=4>:<hex len=4>:<hex len=4>:<hex len=4>:<hex len=4>:<hex len=4>:<hex len=4>:<hex len=4>]
+<ipv6_address_bracketed> = [fe80::<hex len=4>%25<string min=2 max=8 charset=lower>]
+# Zone ID variations (parsers disagree on %25 vs %)
+<ipv6_address_bracketed> = [fe80::1%25eth0]
+<ipv6_address_bracketed> = [fe80::1%eth0]
+<ipv6_address_bracketed> = [::1%250]
+# Unbracketed IPv6 (some parsers accept, others reject)
+<ipv6_address_bracketed> = ::1
+<ipv6_address_bracketed> = ::ffff:127.0.0.1
+# Compact forms with various compression positions
+<ipv6_address_bracketed> = [2001:db8::1]
+<ipv6_address_bracketed> = [fe80::]
+<ipv6_address_bracketed> = [::ffff:7f00:1]
+<ipv6_address_bracketed> = [0000:0000:0000:0000:0000:0000:0000:0001]
+# Mixed notation: IPv6+IPv4 mapped
+<ipv6_address_bracketed> = [::ffff:127.0.0.1]
+<ipv6_address_bracketed> = [::ffff:10.0.0.1]
+<ipv6_address_bracketed> = [::ffff:169.254.169.254]
+<ipv6_address_bracketed> = [0:0:0:0:0:ffff:7f00:0001]
+# Bracket confusion with IPv6
+<ipv6_address_bracketed> = [::1
+<ipv6_address_bracketed> = ::1]
+<ipv6_address_bracketed> = [[::1]]
+
+<ipv6_address> = ::1
+<ipv6_address> = ::
+<ipv6_address> = <hex len=4>:<hex len=4>::<hex len=4>:<hex len=4>
+<ipv6_address> = ::ffff:<ipv4_address>
+<ipv6_address> = 0:0:0:0:0:0:0:1
+<ipv6_address> = ::ffff:7f00:1
+<ipv6_address> = fe80::<hex len=4>
+
+# IPvFuture (§3.2.2)
+<ipvfuture> = [v<hex len=1>.<string min=3 max=15 charset=lower>]
+
+# --- port (§3.2.3) ---
+<port> = <int min=0 max=65535>
+<port> = 80
+<port> = 443
+<port> = 8080
+<port> = 8443
+<port> = 3000
+<port> = 5000
+<port> = 0
+<port> = 65535
+<port> = 65536
+# §4-1: Port overflow wraps around in some parsers
+<port> = 65537
+<port> = 80080
+<port> = 0000080
+# §4-1: Leading zeros — some parsers strip, others reject or misinterpret
+<port> = 080
+<port> = 00443
+# §4-1: Huge/negative ports (parser-dependent behavior)
+<port> = 99999
+<port> = 4294967296
+<port> = -1
+<port> = +80
+# Non-numeric port values
+<port> = http
+<port> = <string min=1 max=5 charset=lower>
+# Whitespace in port
+<port> = 80%20
+<port> = %2080
+<port> = <empty>
+
+# =============================================================================
+# Path (RFC 3986 §3.3)
+# =============================================================================
+<path_abempty> = /<path_segment><path_abempty>
+<path_abempty> = /<path_segment>
+<path_abempty> =
+
+<path_absolute> = /<path_segment>
+<path_absolute> = /<path_segment>/<path_segments>
+<path_absolute> = /
+
+<path_rootless> = <path_segment>/<path_segments>
+<path_rootless> = <path_segment>
+
+<path_noscheme> = <path_segment_nz_nc>
+<path_noscheme> = <path_segment_nz_nc>/<path_segments>
+
+<path_segments> = <path_segment>
+<path_segments> = <path_segment>/<path_segments>
+
+<path_segment> = <string min=1 max=20 charset=lower>
+<path_segment> = <string min=1 max=12 charset=alphanumeric>
+<path_segment> = <string min=1 max=10 charset=lower>.<string min=1 max=5 charset=lower>
+<path_segment> = <pct_encoded_text>
+<path_segment> = <empty>
+
+# Path traversal patterns
+<path_segment> = ..
+<path_segment> = .
+<path_segment> = ..%2f<path_segment>
+<path_segment> = %2e%2e
+<path_segment> = %2e%2e%2f
+<path_segment> = ..%5c
+<path_segment> = .%00.
+<path_segment> = ..;
+<path_segment> = ..%00
+<path_segment> = ....//
+<path_segment> = ..%c0%af
+<path_segment> = ..%ef%bc%8f
+<path_segment> = ..%e0%80%af
+# §5-2: Semicolon path parameter (Spring matrix variable)
+<path_segment> = <string min=3 max=10 charset=lower>;
+<path_segment> = <string min=3 max=10 charset=lower>;.css
+<path_segment> = <string min=3 max=10 charset=lower>;.js
+<path_segment> = <string min=3 max=10 charset=lower>;jsessionid=<string min=5 max=15>
+# §5-4: Rails format extension
+<path_segment> = <string min=3 max=10 charset=lower>.json
+<path_segment> = <string min=3 max=10 charset=lower>.xml
+<path_segment> = <string min=3 max=10 charset=lower>.html
+
+<path_segment_nz_nc> = <string min=1 max=15 charset=lower>
+<path_segment_nz_nc> = <pct_encoded_text>
+
+# =============================================================================
+# Query (RFC 3986 §3.4)
+# =============================================================================
+<query> = <query_params>
+<query> = <string min=1 max=40>
+# §6: Multiple ? (parsers disagree on second ? handling)
+<query> = <query_key>=<query_value>?<query_key>=<query_value>
+# §6: Fragment-like content in query
+<query> = <query_key>=<query_value>#<string min=1 max=10 charset=lower>
+# §6: Empty query
+<query> = <empty>
+
+<query_params> = <query_param>
+<query_params> = <query_param>&<query_params>
+# §6-1: Semicolon as query parameter delimiter (some frameworks accept both ; and &)
+<query_params> = <query_param>;<query_params>
+# §6-1: HPP — duplicate parameter with conflicting values
+<query_params> = <query_key>=<query_value>&<query_key>=<query_value>
+
+<query_param> = <query_key>=<query_value>
+<query_param> = <query_key>
+<query_param> = <query_key>=
+
+<query_key> = <string min=1 max=15 charset=lower>
+<query_key> = <string min=1 max=10 charset=lower>[<int min=0 max=10>]
+<query_key> = <string min=1 max=10 charset=lower>[]
+<query_key> = <string min=1 max=10 charset=lower>[<string min=1 max=10 charset=lower>]
+<query_key> = <string min=1 max=10 charset=lower>.<string min=1 max=10 charset=lower>
+<query_key> = <pct_encoded_text>
+
+<query_value> = <string min=1 max=25>
+<query_value> = <int min=0 max=99999>
+<query_value> = <pct_encoded_text>
+<query_value> = true
+<query_value> = false
+<query_value> = null
+<query_value> = <absolute_uri>
+
+# =============================================================================
+# Fragment (RFC 3986 §3.5)
+# =============================================================================
+<fragment> = <string min=1 max=20 charset=lower>
+<fragment> = <string min=1 max=10 charset=lower>/<string min=1 max=10 charset=lower>
+<fragment> = top
+<fragment> = <pct_encoded_text>
+<fragment> = !/path/to/<string min=3 max=10 charset=lower>
+# §7-1: Fragment-authority interaction (fragment truncation tricks)
+<fragment> = @<string min=3 max=10 charset=lower>.<tld>
+<fragment> = @127.0.0.1
+<fragment> = @[::1]
+# §7: Multiple # (second # within fragment — parsers disagree)
+<fragment> = <string min=1 max=10 charset=lower>#<string min=1 max=10 charset=lower>
+<fragment> = #
+<fragment> = %23<string min=1 max=10 charset=lower>
+# §7: Fragment with query-like content (confuses parsers about ? boundary)
+<fragment> = <string min=1 max=10 charset=lower>?<string min=1 max=10 charset=lower>
+# §7: Fragment with authority-like content
+<fragment> = //<string min=3 max=10 charset=lower>.<tld>/<path_segment>
+<fragment> = <empty>
+
+# =============================================================================
+# Percent-encoding (RFC 3986 §2.1)
+# =============================================================================
+<pct_encoded_text> = <pct_encoded_char>
+<pct_encoded_text> = <pct_encoded_char><pct_encoded_text>
+<pct_encoded_text> = <string min=1 max=10 charset=lower><pct_encoded_char><string min=1 max=10 charset=lower>
+
+<pct_encoded_char> = %<hex len=2>
+<pct_encoded_char> = %20
+<pct_encoded_char> = %2F
+<pct_encoded_char> = %2f
+<pct_encoded_char> = %3A
+<pct_encoded_char> = %3a
+<pct_encoded_char> = %40
+<pct_encoded_char> = %23
+<pct_encoded_char> = %3F
+<pct_encoded_char> = %3f
+<pct_encoded_char> = %26
+<pct_encoded_char> = %3D
+<pct_encoded_char> = %00
+<pct_encoded_char> = %0a
+<pct_encoded_char> = %0d
+<pct_encoded_char> = %0d%0a
+<pct_encoded_char> = %09
+<pct_encoded_char> = %0A
+<pct_encoded_char> = %0D
+
+# Double/triple encoding
+<pct_encoded_char> = %25<hex len=2>
+<pct_encoded_char> = %2520
+
+# Invalid percent-encoding (fuzzing edge cases)
+<pct_encoded_char> = %<char charset=hex>
+<pct_encoded_char> = %%<hex len=2>
+<pct_encoded_char> = %GG
+
+# Unicode/overlong UTF-8 percent-encoded
+<pct_encoded_char> = %C0%AF
+<pct_encoded_char> = %E0%80%AF
+<pct_encoded_char> = %F0%80%80%AF
+<pct_encoded_char> = %EF%BC%8F
+<pct_encoded_char> = %EF%BB%BF
+<pct_encoded_char> = %C0%AE
+<pct_encoded_char> = %E0%80%AE
+<pct_encoded_char> = %F0%80%80%AE
+<pct_encoded_char> = %C1%9C
+<pct_encoded_char> = %FC%80%80%80%80%AF
+
+# Backslash encoding
+<pct_encoded_char> = %5C
+<pct_encoded_char> = %5c
+
+# =============================================================================
+# SSRF / URL confusion patterns (high-value for security testing)
+# =============================================================================
+<uri> = [weight=3] <scheme>://<ssrf_bypass_host>/<path_segment>
+<uri> = [weight=2] <scheme>://<ssrf_bypass_host>/<path_segment>?<query>
+
+<ssrf_bypass_host> = <string min=3 max=10 charset=lower>.<tld>@127.0.0.1
+<ssrf_bypass_host> = <string min=3 max=10 charset=lower>.<tld>@[::1]
+<ssrf_bypass_host> = 127.0.0.1#@<string min=3 max=10 charset=lower>.<tld>
+<ssrf_bypass_host> = 127.0.0.1%23@<string min=3 max=10 charset=lower>.<tld>
+<ssrf_bypass_host> = 127.0.0.1:80@<string min=3 max=10 charset=lower>.<tld>
+<ssrf_bypass_host> = <string min=3 max=10 charset=lower>.<tld>\@127.0.0.1
+<ssrf_bypass_host> = 0x7f000001
+<ssrf_bypass_host> = 017700000001
+<ssrf_bypass_host> = 2130706433
+<ssrf_bypass_host> = 0
+<ssrf_bypass_host> = 127.1
+<ssrf_bypass_host> = [0:0:0:0:0:ffff:127.0.0.1]
+<ssrf_bypass_host> = [::ffff:7f00:1]
+<ssrf_bypass_host> = 127.0.0.1.nip.io
+<ssrf_bypass_host> = localtest.me
+<ssrf_bypass_host> = spoofed.burpcollaborator.net
+<ssrf_bypass_host> = <reg_name>%00127.0.0.1
+<ssrf_bypass_host> = <reg_name>%2500127.0.0.1
+# §2-1: Colon-@ trick (CVE-2025-0454)
+<ssrf_bypass_host> = localhost:\@<string min=3 max=10 charset=lower>.<tld>
+<ssrf_bypass_host> = localhost:%5c@<string min=3 max=10 charset=lower>.<tld>
+# §2-1: Port-as-userinfo (§4-1 overlap)
+<ssrf_bypass_host> = <string min=3 max=10 charset=lower>.<tld>:80@127.0.0.1
+<ssrf_bypass_host> = <string min=3 max=10 charset=lower>.<tld>:443@[::1]
+# §7-1: Fragment before @ hides real host
+<ssrf_bypass_host> = <string min=3 max=10 charset=lower>.<tld>#@127.0.0.1
+<ssrf_bypass_host> = <string min=3 max=10 charset=lower>.<tld>%23@127.0.0.1
+# §3-3: Bracket confusion (CVE-2025-0938)
+<ssrf_bypass_host> = [<string min=3 max=10 charset=lower>.<tld>]
+<ssrf_bypass_host> = [127.0.0.1]
+# §8-1: Encoded backslash authority termination
+<ssrf_bypass_host> = <string min=3 max=10 charset=lower>.<tld>%5c@127.0.0.1
+# §2-2: Triple slash authority confusion
+<ssrf_bypass_host> = /<string min=3 max=10 charset=lower>.<tld>
+
+# Open redirect patterns
+<uri> = [weight=2] //<string min=3 max=10 charset=lower>.<tld>/<path_segment>
+<uri> = [weight=2] \/<string min=3 max=10 charset=lower>.<tld>/<path_segment>
+<uri> = [weight=2] \/\/<string min=3 max=10 charset=lower>.<tld>/<path_segment>
+<uri> = [weight=1] /<string min=3 max=10 charset=lower>.<tld>
+<uri> = [weight=1] /\<string min=3 max=10 charset=lower>.<tld>
+<uri> = [weight=1] https:<string min=3 max=10 charset=lower>.<tld>
+<uri> = [weight=1] ///<string min=3 max=10 charset=lower>.<tld>
+
+# Whitespace/control char in URL (parser differential)
+<uri> = [weight=1] <scheme>://<host>%09/<path_segment>
+<uri> = [weight=1] <scheme>://<host>%0a/<path_segment>
+<uri> = [weight=1] <scheme>://<host>%0d/<path_segment>
+<uri> = [weight=1] <scheme>://<host>%0d%0a/<path_segment>
+<uri> = [weight=1] <sp><scheme>://<host>/<path_segment>
+<uri> = [weight=1] <scheme>://<host>/<path_segment><sp>
+
+# §1-1: Leading control chars before scheme (WHATWG strips them)
+<uri> = [weight=1] %09<scheme>://<host>/<path_segment>
+<uri> = [weight=1] %0a<scheme>://<host>/<path_segment>
+<uri> = [weight=1] %0d<scheme>://<host>/<path_segment>
+# §2-2: Tab/newline within authority (WHATWG strips; RFC 3986 doesn't)
+<uri> = [weight=1] <scheme>://evil%09.com/<path_segment>
+<uri> = [weight=1] <scheme>://evil%0a.com/<path_segment>
+# §1-3: Colon-scheme confusion
+<uri> = [weight=1] <host>:@<host>/<path_segment>
+
+<sp> =
+<sp> = %20
+<sp> = %09
+<sp> = %0a
+
+# =============================================================================
+# Creative cross-cutting confusion patterns (taxonomy combinations)
+# =============================================================================
+
+# ── §1+§2: Scheme confusion × authority confusion ──────────────────
+# Missing scheme makes parser guess authority start
+<uri> = [weight=2] <host>:<port>/<path_segment>
+# Scheme containing backslash (WHATWG normalizes \ → / in scheme-relative)
+<uri> = [weight=2] http:\\/\\/<host>/<path_segment>
+# Null byte in scheme terminates early in some C parsers
+<uri> = [weight=1] http%00s://<host>/<path_segment>
+
+# ── §2+§3: Authority × host confusion (combined tricks) ────────────
+# Encoded @ + encoded backslash double confusion
+<uri> = [weight=3] <scheme>://<reg_name>%5c%40127.0.0.1/<path_segment>
+# Double userinfo with internal IP
+<uri> = [weight=3] <scheme>://a%40b@127.0.0.1/<path_segment>
+# Unicode fullwidth @ (U+FF20) as userinfo delimiter
+<uri> = [weight=2] <scheme>://<reg_name>%ef%bc%a0127.0.0.1/<path_segment>
+
+# ── §3+§4: Host × port interplay ───────────────────────────────────
+# Bracket host with port (parser confusion on bracket end)
+<uri> = [weight=2] <scheme>://[<reg_name>]:<port>/<path_segment>
+# IPv6 with port (ambiguous bracket/colon parsing)
+<uri> = [weight=2] <scheme>://[::1]:@<reg_name>/<path_segment>
+# Port overflow redirects to different service
+<uri> = [weight=1] <scheme>://<host>:65537/<path_segment>
+
+# ── §3+§8: Host × encoding confusion ───────────────────────────────
+# Fullwidth digits as IP octets (U+FF10-U+FF19)
+<uri> = [weight=2] <scheme>://%ef%bc%91%ef%bc%92%ef%bc%97.0.0.1/<path_segment>
+# Overlong UTF-8 dot in hostname
+<uri> = [weight=2] <scheme>://127%c0%ae0%c0%ae0%c0%ae1/<path_segment>
+# Mixed: hex IP with encoded delimiter
+<uri> = [weight=2] <scheme>://0x7f%2e0%2e0%2e1/<path_segment>
+
+# ── §2+§7: Userinfo × fragment interaction ──────────────────────────
+# Fragment hides internal host from validators that process # before @
+<uri> = [weight=3] <scheme>://<reg_name>#@127.0.0.1/<path_segment>
+# Double-encoded #@ — decoded at different layers
+<uri> = [weight=2] <scheme>://<reg_name>%2523@127.0.0.1/<path_segment>
+# @ in fragment (post-#) treated as userinfo by broken parsers
+<uri> = [weight=2] <scheme>://127.0.0.1#<reg_name>@<reg_name>/<path_segment>
+
+# ── §5+§8: Path confusion × encoding ───────────────────────────────
+# Path with semicolon + dot-segment (Spring + traversal)
+<uri> = [weight=2] <scheme>://<host>/admin;/../secret/<path_segment>
+# Backslash path traversal (Windows IIS)
+<uri> = [weight=2] <scheme>://<host>/..\\..\\<path_segment>
+# Double-encoded path traversal through proxy layers
+<uri> = [weight=2] <scheme>://<host>/%252e%252e/%252e%252e/<path_segment>
+# Null byte + extension (C-parser truncation vs high-level)
+<uri> = [weight=1] <scheme>://<host>/admin%00.jpg
+
+# ── §1+§3+§8: Triple combination ───────────────────────────────────
+# Case-varied scheme + hex IP + encoded path
+<uri> = [weight=2] HTTP://0x7f000001/%2e%2e/<path_segment>
+# file:// with UNC path to internal host
+<uri> = [weight=2] file:///\\127.0.0.1/<path_segment>
+<uri> = [weight=2] file:////127.0.0.1/<path_segment>
+
+# ── Novel: Unicode confusable chars in host ─────────────────────────
+# Cyrillic 'а' (U+0430) looks like Latin 'a' — IDN homograph
+<uri> = [weight=1] <scheme>://xn--80ak6aa92e.com/<path_segment>
+# Right-to-left override in host
+<uri> = [weight=1] <scheme>://evil%e2%80%ae.com/<path_segment>
+
+# ── Novel: CRLF injection in URL components ─────────────────────────
+# CRLF in path for header injection
+<uri> = [weight=1] <scheme>://<host>/<path_segment>%0d%0aHost:%20127.0.0.1
+# CRLF between host and path
+<uri> = [weight=1] <scheme>://<host>%0d%0a%0d%0a/<path_segment>
+
+# ── §3+IPv6: IPv6 SSRF bypass patterns ──────────────────────────────
+<uri> = [weight=3] <scheme>://[::ffff:127.0.0.1]/<path_segment>
+<uri> = [weight=3] <scheme>://[::ffff:7f00:1]/<path_segment>
+<uri> = [weight=2] <scheme>://[0:0:0:0:0:ffff:127.0.0.1]/<path_segment>
+<uri> = [weight=2] <scheme>://[::1]:<port>/<path_segment>
+<uri> = [weight=2] <scheme>://[::ffff:169.254.169.254]/<path_segment>
+<uri> = [weight=2] <scheme>://[0000:0000:0000:0000:0000:0000:0000:0001]/<path_segment>
+# Unbracketed IPv6 (will some parsers accept?)
+<uri> = [weight=2] <scheme>://::1/<path_segment>
+<uri> = [weight=2] <scheme>://::ffff:127.0.0.1/<path_segment>
+
+# ── §4: Port confusion SSRF ─────────────────────────────────────────
+<uri> = [weight=2] <scheme>://<host>:0/<path_segment>
+<uri> = [weight=2] <scheme>://<host>:65536/<path_segment>
+<uri> = [weight=2] <scheme>://<host>:0000080/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1:-1/<path_segment>
+
+# ── §6+§7: Query/fragment boundary confusion ────────────────────────
+# Fragment before query (unusual order)
+<uri> = [weight=2] <scheme>://<host>/<path_segment>#<fragment>?<query>
+# Multiple ? in URL
+<uri> = [weight=2] <scheme>://<host>/<path_segment>?<query_key>=<query_value>?<query_key>=<query_value>
+# Encoded ? and # confuse boundary detection
+<uri> = [weight=2] <scheme>://<host>/<path_segment>%3f<query_key>=<query_value>
+<uri> = [weight=2] <scheme>://<host>/<path_segment>?<query_key>=<query_value>%23<fragment>
+
+# ── Zero-width and invisible Unicode in host ─────────────────────────
+<uri> = [weight=1] <scheme>://%e2%80%8b127.0.0.1/<path_segment>
+<uri> = [weight=1] <scheme>://127%e2%80%8b.0.0.1/<path_segment>
+<uri> = [weight=1] <scheme>://%ef%bb%bf127.0.0.1/<path_segment>
+
+# ── Null byte truncation in various positions ────────────────────────
+<uri> = [weight=2] <scheme>://<reg_name>%00@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1%00.<reg_name>/<path_segment>
+<uri> = [weight=1] <scheme>%00://<host>/<path_segment>
+<uri> = [weight=1] <scheme>://127.0.0.1:<port>%00/<path_segment>

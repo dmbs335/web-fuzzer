@@ -1,0 +1,14 @@
+[package]
+name = "_speedups"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "_speedups"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module"] }
+sha2 = "0.10"
+rand_xorshift = "0.4"
+rand_core = "0.9"

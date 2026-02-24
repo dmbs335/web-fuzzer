@@ -1,0 +1,814 @@
+# =============================================================================
+# ECMAScript Grammar — ECMA-262 (ES2024) based
+# Covers: all expression/statement types, async/await, generators,
+#         classes, modules, destructuring, optional chaining, private fields,
+#         decorators, template literals, regex, BigInt, symbols, Proxy/Reflect
+# =============================================================================
+
+!root <program>
+!max_depth 12
+
+# =============================================================================
+# Program structure
+# =============================================================================
+<program> = <statement_list>
+<program> = <module_body>
+
+<statement_list> = <statement>
+<statement_list> = <statement><nl><statement_list>
+
+<module_body> = <module_item>
+<module_body> = <module_item><nl><module_body>
+
+<module_item> = <import_decl>
+<module_item> = <export_decl>
+<module_item> = <statement>
+
+# =============================================================================
+# Statements
+# =============================================================================
+<statement> = <var_stmt>;
+<statement> = <expr_stmt>;
+<statement> = <if_stmt>
+<statement> = <for_stmt>
+<statement> = <for_in_stmt>
+<statement> = <for_of_stmt>
+<statement> = <for_await_of_stmt>
+<statement> = <while_stmt>
+<statement> = <do_while_stmt>
+<statement> = <switch_stmt>
+<statement> = <try_stmt>
+<statement> = <throw_stmt>;
+<statement> = <return_stmt>;
+<statement> = <break_stmt>;
+<statement> = <continue_stmt>;
+<statement> = <labeled_stmt>
+<statement> = <block_stmt>
+<statement> = <with_stmt>
+<statement> = <debugger_stmt>
+<statement> = <empty_stmt>
+<statement> = <func_decl>
+<statement> = <class_decl>
+<statement> = <async_func_decl>
+<statement> = <generator_decl>
+<statement> = <async_generator_decl>
+
+<empty_stmt> = ;
+<debugger_stmt> = debugger;
+
+# --- variable declarations ---
+<var_stmt> = <var_keyword> <binding_list>
+
+<var_keyword> = var
+<var_keyword> = let
+<var_keyword> = const
+
+<binding_list> = <binding>
+<binding_list> = <binding>, <binding_list>
+
+<binding> = <ident> = <assign_expr>
+<binding> = <ident>
+<binding> = <destructuring_pattern> = <assign_expr>
+
+# --- destructuring ---
+<destructuring_pattern> = <array_destructuring>
+<destructuring_pattern> = <object_destructuring>
+
+<array_destructuring> = [<array_binding_elems>]
+
+<array_binding_elems> = <binding_elem>
+<array_binding_elems> = <binding_elem>, <array_binding_elems>
+<array_binding_elems> = , <array_binding_elems>
+<array_binding_elems> = ...<ident>
+
+<binding_elem> = <ident>
+<binding_elem> = <ident> = <assign_expr>
+<binding_elem> = <destructuring_pattern>
+
+<object_destructuring> = {<obj_binding_props>}
+
+<obj_binding_props> = <obj_binding_prop>
+<obj_binding_props> = <obj_binding_prop>, <obj_binding_props>
+<obj_binding_props> = ...<ident>
+
+<obj_binding_prop> = <ident>
+<obj_binding_prop> = <ident>: <binding_elem>
+<obj_binding_prop> = <ident> = <assign_expr>
+<obj_binding_prop> = <prop_name>: <binding_elem>
+<obj_binding_prop> = [<assign_expr>]: <binding_elem>
+
+# --- if ---
+<if_stmt> = if (<expr>) <block_stmt>
+<if_stmt> = if (<expr>) <block_stmt> else <block_stmt>
+<if_stmt> = if (<expr>) <block_stmt> else <if_stmt>
+
+# --- loops ---
+<for_stmt> = for (<var_keyword> <ident> = <assign_expr>; <expr>; <expr>) <block_stmt>
+<for_stmt> = for (;;) <block_stmt>
+
+<for_in_stmt> = for (<var_keyword> <ident> in <expr>) <block_stmt>
+<for_in_stmt> = for (<var_keyword> <destructuring_pattern> in <expr>) <block_stmt>
+
+<for_of_stmt> = for (<var_keyword> <ident> of <expr>) <block_stmt>
+<for_of_stmt> = for (<var_keyword> <destructuring_pattern> of <expr>) <block_stmt>
+
+<for_await_of_stmt> = for await (<var_keyword> <ident> of <expr>) <block_stmt>
+
+<while_stmt> = while (<expr>) <block_stmt>
+<do_while_stmt> = do <block_stmt> while (<expr>);
+
+# --- switch ---
+<switch_stmt> = switch (<expr>) { <case_clauses> }
+
+<case_clauses> = <case_clause>
+<case_clauses> = <case_clause> <case_clauses>
+<case_clauses> = <default_clause>
+
+<case_clause> = case <expr>: <statement_list> break;
+<case_clause> = case <expr>: <statement_list>
+<default_clause> = default: <statement_list>
+
+# --- try / catch / finally ---
+<try_stmt> = try <block_stmt> catch (<ident>) <block_stmt>
+<try_stmt> = try <block_stmt> catch <block_stmt>
+<try_stmt> = try <block_stmt> finally <block_stmt>
+<try_stmt> = try <block_stmt> catch (<ident>) <block_stmt> finally <block_stmt>
+
+<throw_stmt> = throw <expr>
+<throw_stmt> = throw new Error(<string_literal>)
+<throw_stmt> = throw new <error_type>(<string_literal>)
+
+<error_type> = Error
+<error_type> = TypeError
+<error_type> = RangeError
+<error_type> = ReferenceError
+<error_type> = SyntaxError
+<error_type> = URIError
+<error_type> = EvalError
+<error_type> = AggregateError
+
+# --- return / break / continue ---
+<return_stmt> = return <expr>
+<return_stmt> = return
+
+<break_stmt> = break
+<break_stmt> = break <ident>
+
+<continue_stmt> = continue
+<continue_stmt> = continue <ident>
+
+# --- labeled / with ---
+<labeled_stmt> = <ident>: <statement>
+<with_stmt> = with (<expr>) <block_stmt>
+
+# --- block ---
+<block_stmt> = { <statement_list> }
+<block_stmt> = { }
+
+# =============================================================================
+# Declarations
+# =============================================================================
+
+# --- function ---
+<func_decl> = function <ident>(<params>) <block_stmt>
+<func_decl> = function <ident>(<params_with_defaults>) <block_stmt>
+<func_decl> = function <ident>(...<ident>) <block_stmt>
+
+<async_func_decl> = async function <ident>(<params>) <block_stmt>
+<generator_decl> = function* <ident>(<params>) <block_stmt>
+<async_generator_decl> = async function* <ident>(<params>) <block_stmt>
+
+<params> = <ident>
+<params> = <ident>, <params>
+<params> =
+
+<params_with_defaults> = <ident> = <assign_expr>
+<params_with_defaults> = <ident>, <params_with_defaults>
+<params_with_defaults> = <ident> = <assign_expr>, <params_with_defaults>
+<params_with_defaults> = <destructuring_pattern>
+<params_with_defaults> = <destructuring_pattern>, <params_with_defaults>
+
+# --- class (comprehensive) ---
+<class_decl> = class <ident> <class_body>
+<class_decl> = class <ident> extends <expr> <class_body>
+
+<class_body> = { <class_elements> }
+<class_body> = { }
+
+<class_elements> = <class_element>
+<class_elements> = <class_element><nl><class_elements>
+
+<class_element> = <method_def>
+<class_element> = static <method_def>
+<class_element> = <field_def>;
+<class_element> = static <field_def>;
+<class_element> = <private_method_def>
+<class_element> = static <private_method_def>
+<class_element> = <private_field_def>;
+<class_element> = static <private_field_def>;
+<class_element> = <accessor_def>
+<class_element> = static <accessor_def>
+<class_element> = static <block_stmt>
+<class_element> = ;
+
+<method_def> = <prop_name>(<params>) <block_stmt>
+<method_def> = get <prop_name>() <block_stmt>
+<method_def> = set <prop_name>(<ident>) <block_stmt>
+<method_def> = async <prop_name>(<params>) <block_stmt>
+<method_def> = *<prop_name>(<params>) <block_stmt>
+<method_def> = async *<prop_name>(<params>) <block_stmt>
+
+<private_method_def> = #<ident>(<params>) <block_stmt>
+<private_method_def> = get #<ident>() <block_stmt>
+<private_method_def> = set #<ident>(<ident>) <block_stmt>
+<private_method_def> = async #<ident>(<params>) <block_stmt>
+<private_method_def> = *#<ident>(<params>) <block_stmt>
+
+<field_def> = <prop_name> = <assign_expr>
+<field_def> = <prop_name>
+
+<private_field_def> = #<ident> = <assign_expr>
+<private_field_def> = #<ident>
+
+<accessor_def> = accessor <ident> = <assign_expr>
+<accessor_def> = accessor #<ident> = <assign_expr>
+
+<prop_name> = <ident>
+<prop_name> = <string_literal>
+<prop_name> = <number_literal>
+<prop_name> = [<assign_expr>]
+
+# =============================================================================
+# Modules (import / export)
+# =============================================================================
+<import_decl> = import <import_clause> from <string_literal>;
+<import_decl> = import <string_literal>;
+<import_decl> = import(<string_literal>);
+
+<import_clause> = <ident>
+<import_clause> = * as <ident>
+<import_clause> = { <import_specifiers> }
+<import_clause> = <ident>, { <import_specifiers> }
+<import_clause> = <ident>, * as <ident>
+
+<import_specifiers> = <import_specifier>
+<import_specifiers> = <import_specifier>, <import_specifiers>
+
+<import_specifier> = <ident>
+<import_specifier> = <ident> as <ident>
+<import_specifier> = default as <ident>
+
+<export_decl> = export <var_stmt>;
+<export_decl> = export <func_decl>
+<export_decl> = export <class_decl>
+<export_decl> = export default <assign_expr>;
+<export_decl> = export default <func_decl>
+<export_decl> = export default <class_decl>
+<export_decl> = export { <export_specifiers> };
+<export_decl> = export { <export_specifiers> } from <string_literal>;
+<export_decl> = export * from <string_literal>;
+<export_decl> = export * as <ident> from <string_literal>;
+
+<export_specifiers> = <export_specifier>
+<export_specifiers> = <export_specifier>, <export_specifiers>
+
+<export_specifier> = <ident>
+<export_specifier> = <ident> as <ident>
+<export_specifier> = <ident> as default
+
+# =============================================================================
+# Expressions
+# =============================================================================
+<expr> = <assign_expr>
+<expr> = <expr>, <assign_expr>
+
+<assign_expr> = <cond_expr>
+<assign_expr> = <lhs_expr> = <assign_expr>
+<assign_expr> = <lhs_expr> <compound_assign_op> <assign_expr>
+<assign_expr> = <lhs_expr> <logical_assign_op> <assign_expr>
+<assign_expr> = <arrow_func>
+<assign_expr> = <yield_expr>
+<assign_expr> = <async_arrow_func>
+
+<compound_assign_op> = +=
+<compound_assign_op> = -=
+<compound_assign_op> = *=
+<compound_assign_op> = /=
+<compound_assign_op> = %=
+<compound_assign_op> = **=
+<compound_assign_op> = <lt><lt>=
+<compound_assign_op> = >>=
+<compound_assign_op> = >>>=
+<compound_assign_op> = &=
+<compound_assign_op> = |=
+<compound_assign_op> = ^=
+
+<logical_assign_op> = &&=
+<logical_assign_op> = ||=
+<logical_assign_op> = ??=
+
+# --- arrow functions ---
+<arrow_func> = (<params>) => <block_stmt>
+<arrow_func> = (<params>) => <assign_expr>
+<arrow_func> = <ident> => <assign_expr>
+<arrow_func> = <ident> => <block_stmt>
+<arrow_func> = (<params_with_defaults>) => <block_stmt>
+
+<async_arrow_func> = async (<params>) => <block_stmt>
+<async_arrow_func> = async (<params>) => <assign_expr>
+<async_arrow_func> = async <ident> => <assign_expr>
+
+# --- yield ---
+<yield_expr> = yield
+<yield_expr> = yield <assign_expr>
+<yield_expr> = yield* <assign_expr>
+
+# --- conditional (ternary) ---
+<cond_expr> = <coalesce_expr>
+<cond_expr> = <coalesce_expr> ? <assign_expr> : <assign_expr>
+
+# --- nullish coalescing ---
+<coalesce_expr> = <logical_or_expr>
+<coalesce_expr> = <coalesce_expr> ?? <logical_or_expr>
+
+# --- logical ---
+<logical_or_expr> = <logical_and_expr>
+<logical_or_expr> = <logical_or_expr> || <logical_and_expr>
+
+<logical_and_expr> = <bitwise_or_expr>
+<logical_and_expr> = <logical_and_expr> && <bitwise_or_expr>
+
+# --- bitwise ---
+<bitwise_or_expr> = <bitwise_xor_expr>
+<bitwise_or_expr> = <bitwise_or_expr> | <bitwise_xor_expr>
+
+<bitwise_xor_expr> = <bitwise_and_expr>
+<bitwise_xor_expr> = <bitwise_xor_expr> ^ <bitwise_and_expr>
+
+<bitwise_and_expr> = <equality_expr>
+<bitwise_and_expr> = <bitwise_and_expr> & <equality_expr>
+
+# --- equality ---
+<equality_expr> = <relational_expr>
+<equality_expr> = <equality_expr> == <relational_expr>
+<equality_expr> = <equality_expr> != <relational_expr>
+<equality_expr> = <equality_expr> === <relational_expr>
+<equality_expr> = <equality_expr> !== <relational_expr>
+
+# --- relational ---
+<relational_expr> = <shift_expr>
+<relational_expr> = <relational_expr> <lt> <shift_expr>
+<relational_expr> = <relational_expr> > <shift_expr>
+<relational_expr> = <relational_expr> <lt>= <shift_expr>
+<relational_expr> = <relational_expr> >= <shift_expr>
+<relational_expr> = <relational_expr> instanceof <shift_expr>
+<relational_expr> = <relational_expr> in <shift_expr>
+<relational_expr> = #<ident> in <shift_expr>
+
+# --- shift ---
+<shift_expr> = <additive_expr>
+<shift_expr> = <shift_expr> <lt><lt> <additive_expr>
+<shift_expr> = <shift_expr> >> <additive_expr>
+<shift_expr> = <shift_expr> >>> <additive_expr>
+
+# --- additive ---
+<additive_expr> = <multiplicative_expr>
+<additive_expr> = <additive_expr> + <multiplicative_expr>
+<additive_expr> = <additive_expr> - <multiplicative_expr>
+
+# --- multiplicative ---
+<multiplicative_expr> = <exponentiation_expr>
+<multiplicative_expr> = <multiplicative_expr> * <exponentiation_expr>
+<multiplicative_expr> = <multiplicative_expr> / <exponentiation_expr>
+<multiplicative_expr> = <multiplicative_expr> % <exponentiation_expr>
+
+# --- exponentiation ---
+<exponentiation_expr> = <unary_expr>
+<exponentiation_expr> = <update_expr> ** <exponentiation_expr>
+
+# --- unary ---
+<unary_expr> = <update_expr>
+<unary_expr> = delete <unary_expr>
+<unary_expr> = void <unary_expr>
+<unary_expr> = typeof <unary_expr>
+<unary_expr> = +<unary_expr>
+<unary_expr> = -<unary_expr>
+<unary_expr> = ~<unary_expr>
+<unary_expr> = !<unary_expr>
+<unary_expr> = await <unary_expr>
+
+# --- update ---
+<update_expr> = <lhs_expr>
+<update_expr> = <lhs_expr>++
+<update_expr> = <lhs_expr>--
+<update_expr> = ++<lhs_expr>
+<update_expr> = --<lhs_expr>
+
+# --- left-hand side ---
+<lhs_expr> = <primary_expr>
+<lhs_expr> = <call_expr>
+<lhs_expr> = <member_expr>
+<lhs_expr> = <new_expr>
+<lhs_expr> = <optional_chain_expr>
+<lhs_expr> = <tagged_template>
+<lhs_expr> = <meta_property>
+
+# --- member ---
+<member_expr> = <primary_expr>.<ident>
+<member_expr> = <primary_expr>[<expr>]
+<member_expr> = <member_expr>.<ident>
+<member_expr> = <member_expr>[<expr>]
+<member_expr> = <primary_expr>.#<ident>
+<member_expr> = super.<ident>
+<member_expr> = super[<expr>]
+
+# --- call ---
+<call_expr> = <member_expr>(<args>)
+<call_expr> = <ident>(<args>)
+<call_expr> = <call_expr>(<args>)
+<call_expr> = <call_expr>.<ident>
+<call_expr> = <call_expr>[<expr>]
+<call_expr> = super(<args>)
+<call_expr> = <builtin_global>(<args>)
+<call_expr> = import(<string_literal>)
+
+<builtin_global> = parseInt
+<builtin_global> = parseFloat
+<builtin_global> = isNaN
+<builtin_global> = isFinite
+<builtin_global> = encodeURI
+<builtin_global> = encodeURIComponent
+<builtin_global> = decodeURI
+<builtin_global> = decodeURIComponent
+<builtin_global> = eval
+<builtin_global> = setTimeout
+<builtin_global> = setInterval
+<builtin_global> = clearTimeout
+<builtin_global> = clearInterval
+<builtin_global> = queueMicrotask
+<builtin_global> = structuredClone
+<builtin_global> = atob
+<builtin_global> = btoa
+<builtin_global> = fetch
+<builtin_global> = String
+<builtin_global> = Number
+<builtin_global> = Boolean
+<builtin_global> = BigInt
+<builtin_global> = Symbol
+<builtin_global> = Array
+<builtin_global> = Object
+<builtin_global> = Array.from
+<builtin_global> = Array.of
+<builtin_global> = Array.isArray
+<builtin_global> = Object.keys
+<builtin_global> = Object.values
+<builtin_global> = Object.entries
+<builtin_global> = Object.assign
+<builtin_global> = Object.create
+<builtin_global> = Object.freeze
+<builtin_global> = Object.defineProperty
+<builtin_global> = Object.getPrototypeOf
+<builtin_global> = Object.setPrototypeOf
+<builtin_global> = Object.fromEntries
+<builtin_global> = Object.hasOwn
+<builtin_global> = Object.groupBy
+<builtin_global> = JSON.parse
+<builtin_global> = JSON.stringify
+<builtin_global> = Math.floor
+<builtin_global> = Math.ceil
+<builtin_global> = Math.round
+<builtin_global> = Math.random
+<builtin_global> = Math.max
+<builtin_global> = Math.min
+<builtin_global> = Math.abs
+<builtin_global> = Math.pow
+<builtin_global> = Math.sqrt
+<builtin_global> = Math.log
+<builtin_global> = Math.trunc
+<builtin_global> = Math.sign
+<builtin_global> = Math.clz32
+<builtin_global> = Date.now
+<builtin_global> = Promise.resolve
+<builtin_global> = Promise.reject
+<builtin_global> = Promise.all
+<builtin_global> = Promise.allSettled
+<builtin_global> = Promise.any
+<builtin_global> = Promise.race
+<builtin_global> = Reflect.apply
+<builtin_global> = Reflect.construct
+<builtin_global> = Reflect.get
+<builtin_global> = Reflect.set
+<builtin_global> = Reflect.has
+<builtin_global> = Reflect.ownKeys
+<builtin_global> = Reflect.deleteProperty
+<builtin_global> = Proxy.revocable
+<builtin_global> = WeakRef
+<builtin_global> = FinalizationRegistry
+<builtin_global> = Map
+<builtin_global> = Set
+<builtin_global> = WeakMap
+<builtin_global> = WeakSet
+<builtin_global> = ArrayBuffer
+<builtin_global> = SharedArrayBuffer
+<builtin_global> = DataView
+<builtin_global> = Atomics.wait
+<builtin_global> = Atomics.notify
+<builtin_global> = Atomics.load
+<builtin_global> = Atomics.store
+
+# --- new ---
+<new_expr> = new <member_expr>(<args>)
+<new_expr> = new <ident>(<args>)
+<new_expr> = new <ident>
+<new_expr> = new <new_target>
+
+<new_target> = Error(<string_literal>)
+<new_target> = <error_type>(<string_literal>)
+<new_target> = Array(<int min=0 max=100>)
+<new_target> = Map(<array_literal>)
+<new_target> = Set(<array_literal>)
+<new_target> = WeakMap()
+<new_target> = WeakSet()
+<new_target> = RegExp(<string_literal>, <string_literal>)
+<new_target> = Date(<args>)
+<new_target> = Proxy(<ident>, <object_literal>)
+<new_target> = Promise(<arrow_func>)
+<new_target> = URL(<string_literal>)
+<new_target> = URLSearchParams(<string_literal>)
+<new_target> = Headers(<object_literal>)
+<new_target> = Request(<string_literal>)
+<new_target> = Response(<string_literal>)
+<new_target> = Blob(<array_literal>)
+<new_target> = File(<array_literal>, <string_literal>)
+<new_target> = FormData()
+<new_target> = AbortController()
+<new_target> = TextEncoder()
+<new_target> = TextDecoder(<string_literal>)
+<new_target> = ReadableStream(<object_literal>)
+<new_target> = WritableStream(<object_literal>)
+<new_target> = TransformStream(<object_literal>)
+<new_target> = EventTarget()
+<new_target> = Event(<string_literal>)
+<new_target> = CustomEvent(<string_literal>, <object_literal>)
+<new_target> = DOMParser()
+<new_target> = XMLSerializer()
+<new_target> = MutationObserver(<arrow_func>)
+<new_target> = IntersectionObserver(<arrow_func>)
+<new_target> = ResizeObserver(<arrow_func>)
+<new_target> = PerformanceObserver(<arrow_func>)
+<new_target> = Worker(<string_literal>)
+<new_target> = SharedWorker(<string_literal>)
+<new_target> = BroadcastChannel(<string_literal>)
+<new_target> = MessageChannel()
+<new_target> = Int8Array(<int min=0 max=100>)
+<new_target> = Uint8Array(<int min=0 max=100>)
+<new_target> = Uint8ClampedArray(<int min=0 max=100>)
+<new_target> = Int16Array(<int min=0 max=100>)
+<new_target> = Uint16Array(<int min=0 max=100>)
+<new_target> = Int32Array(<int min=0 max=100>)
+<new_target> = Uint32Array(<int min=0 max=100>)
+<new_target> = Float32Array(<int min=0 max=100>)
+<new_target> = Float64Array(<int min=0 max=100>)
+<new_target> = BigInt64Array(<int min=0 max=100>)
+<new_target> = BigUint64Array(<int min=0 max=100>)
+
+# --- optional chaining ---
+<optional_chain_expr> = <primary_expr>?.<ident>
+<optional_chain_expr> = <primary_expr>?.(<args>)
+<optional_chain_expr> = <primary_expr>?.[<expr>]
+<optional_chain_expr> = <optional_chain_expr>?.<ident>
+<optional_chain_expr> = <optional_chain_expr>?.(<args>)
+<optional_chain_expr> = <optional_chain_expr>?.[<expr>]
+
+# --- tagged template ---
+<tagged_template> = <ident><template_literal>
+
+# --- meta properties ---
+<meta_property> = new.target
+<meta_property> = import.meta
+<meta_property> = import.meta.url
+<meta_property> = import.meta.resolve(<string_literal>)
+
+# --- arguments ---
+<args> = <assign_expr>
+<args> = <assign_expr>, <args>
+<args> = ...<assign_expr>
+<args> = ...<assign_expr>, <args>
+<args> =
+
+# =============================================================================
+# Primary expressions
+# =============================================================================
+<primary_expr> = <literal>
+<primary_expr> = <ident>
+<primary_expr> = <array_literal>
+<primary_expr> = <object_literal>
+<primary_expr> = <func_expr>
+<primary_expr> = <class_expr>
+<primary_expr> = <template_literal>
+<primary_expr> = <regex_literal>
+<primary_expr> = (<expr>)
+<primary_expr> = this
+<primary_expr> = <ident>
+
+# --- function expressions ---
+<func_expr> = function(<params>) <block_stmt>
+<func_expr> = function <ident>(<params>) <block_stmt>
+<func_expr> = function*(<params>) <block_stmt>
+<func_expr> = async function(<params>) <block_stmt>
+<func_expr> = async function*(<params>) <block_stmt>
+
+# --- class expressions ---
+<class_expr> = class <class_body>
+<class_expr> = class <ident> <class_body>
+<class_expr> = class extends <expr> <class_body>
+
+# --- expression statement ---
+<expr_stmt> = <expr>
+
+# =============================================================================
+# Literals
+# =============================================================================
+<literal> = <number_literal>
+<literal> = <string_literal>
+<literal> = <bool_literal>
+<literal> = <null_literal>
+<literal> = <undefined_literal>
+<literal> = <bigint_literal>
+<literal> = <symbol_expr>
+<literal> = <special_number>
+
+<null_literal> = null
+<undefined_literal> = undefined
+
+<bool_literal> = true
+<bool_literal> = false
+
+<special_number> = NaN
+<special_number> = Infinity
+<special_number> = -Infinity
+<special_number> = Number.MAX_SAFE_INTEGER
+<special_number> = Number.MIN_SAFE_INTEGER
+<special_number> = Number.MAX_VALUE
+<special_number> = Number.MIN_VALUE
+<special_number> = Number.EPSILON
+<special_number> = Number.POSITIVE_INFINITY
+<special_number> = Number.NEGATIVE_INFINITY
+
+# --- numbers ---
+<number_literal> = <int min=0 max=1000>
+<number_literal> = <float min=-100.0 max=100.0 precision=4>
+<number_literal> = 0x<hex len=4>
+<number_literal> = 0x<hex len=8>
+<number_literal> = 0o<int min=0 max=777>
+<number_literal> = 0b<int min=0 max=1><int min=0 max=1><int min=0 max=1><int min=0 max=1><int min=0 max=1><int min=0 max=1><int min=0 max=1><int min=0 max=1>
+<number_literal> = 0
+<number_literal> = -0
+<number_literal> = 1
+<number_literal> = -1
+<number_literal> = 2147483647
+<number_literal> = -2147483648
+<number_literal> = 4294967295
+<number_literal> = 9007199254740991
+<number_literal> = -9007199254740991
+<number_literal> = 1e<int min=-20 max=20>
+<number_literal> = <int min=1 max=9>.<int min=0 max=999>e<int min=-10 max=10>
+<number_literal> = 1_000_000
+<number_literal> = 0.1
+<number_literal> = 0.2
+<number_literal> = 0.3
+
+# --- BigInt ---
+<bigint_literal> = <int min=0 max=99999>n
+<bigint_literal> = 0n
+<bigint_literal> = 9007199254740992n
+<bigint_literal> = 0x<hex len=16>n
+
+# --- strings ---
+<string_literal> = "<string min=0 max=25>"
+<string_literal> = '<string min=0 max=25>'
+<string_literal> = "<escape_sequence>"
+<string_literal> = ""
+<string_literal> = ''
+
+<escape_sequence> = \n
+<escape_sequence> = \t
+<escape_sequence> = \r
+<escape_sequence> = \\
+<escape_sequence> = \"
+<escape_sequence> = \'
+<escape_sequence> = \0
+<escape_sequence> = \x<hex len=2>
+<escape_sequence> = \u<hex len=4>
+<escape_sequence> = \u{<hex len=5>}
+
+# --- template literals ---
+<template_literal> = `<string min=0 max=20>`
+<template_literal> = `<string min=0 max=10>${<expr>}<string min=0 max=10>`
+<template_literal> = `${<expr>}`
+<template_literal> = `${<expr>}${<expr>}`
+<template_literal> = `<string min=0 max=10>\n${<expr>}`
+
+# --- symbol ---
+<symbol_expr> = Symbol()
+<symbol_expr> = Symbol(<string_literal>)
+<symbol_expr> = Symbol.for(<string_literal>)
+<symbol_expr> = Symbol.iterator
+<symbol_expr> = Symbol.asyncIterator
+<symbol_expr> = Symbol.hasInstance
+<symbol_expr> = Symbol.toPrimitive
+<symbol_expr> = Symbol.toStringTag
+<symbol_expr> = Symbol.species
+<symbol_expr> = Symbol.isConcatSpreadable
+<symbol_expr> = Symbol.match
+<symbol_expr> = Symbol.replace
+<symbol_expr> = Symbol.search
+<symbol_expr> = Symbol.split
+<symbol_expr> = Symbol.unscopables
+<symbol_expr> = Symbol.dispose
+<symbol_expr> = Symbol.asyncDispose
+
+# --- regex ---
+<regex_literal> = /<regex_body>/<regex_flags>
+
+<regex_body> = <string min=1 max=20>
+<regex_body> = [a-zA-Z]+
+<regex_body> = [0-9]+
+<regex_body> = .+
+<regex_body> = .*?
+<regex_body> = \d+
+<regex_body> = \w+
+<regex_body> = \s+
+<regex_body> = \b\w+\b
+<regex_body> = ^.+$
+<regex_body> = (?:<string min=1 max=10>)
+<regex_body> = (?=<string min=1 max=10>)
+<regex_body> = (?!<string min=1 max=10>)
+<regex_body> = (?<lt>=<string min=1 max=10>)
+<regex_body> = (?<lt>!<string min=1 max=10>)
+<regex_body> = (?<lt><ident>><string min=1 max=10>)
+<regex_body> = \p{L}
+<regex_body> = \p{Script=Latin}
+
+<regex_flags> = <empty>
+<regex_flags> = g
+<regex_flags> = i
+<regex_flags> = m
+<regex_flags> = s
+<regex_flags> = u
+<regex_flags> = v
+<regex_flags> = y
+<regex_flags> = gi
+<regex_flags> = gim
+<regex_flags> = gims
+<regex_flags> = gu
+<regex_flags> = gv
+<regex_flags> = dgi
+
+# --- array literal ---
+<array_literal> = [<array_elements>]
+<array_literal> = []
+
+<array_elements> = <assign_expr>
+<array_elements> = <assign_expr>, <array_elements>
+<array_elements> = ...<assign_expr>
+<array_elements> = , <array_elements>
+<array_elements> = <assign_expr>,
+
+# --- object literal ---
+<object_literal> = {<object_properties>}
+<object_literal> = {}
+
+<object_properties> = <object_property>
+<object_properties> = <object_property>, <object_properties>
+
+<object_property> = <ident>: <assign_expr>
+<object_property> = <string_literal>: <assign_expr>
+<object_property> = <number_literal>: <assign_expr>
+<object_property> = [<assign_expr>]: <assign_expr>
+<object_property> = <ident>
+<object_property> = ...<assign_expr>
+<object_property> = <method_def>
+<object_property> = get <ident>() <block_stmt>
+<object_property> = set <ident>(<ident>) <block_stmt>
+<object_property> = async <ident>(<params>) <block_stmt>
+<object_property> = *<ident>(<params>) <block_stmt>
+<object_property> = async *<ident>(<params>) <block_stmt>
+<object_property> = __proto__: <assign_expr>
+
+# --- left-hand side for assignment ---
+<lhs_expr> = <ident>
+<lhs_expr> = <member_expr>
+
+# =============================================================================
+# Identifiers
+# =============================================================================
+<ident> = <oneof a b c d e f g i j k n x y z>
+<ident> = <oneof arr obj fn cb val key src dst buf tmp str num>
+<ident> = <oneof document window navigator location history>
+<ident> = <oneof console Math JSON Date RegExp Promise Proxy Reflect>
+<ident> = <oneof globalThis self top parent frames>
+<ident> = <oneof process module exports require __dirname __filename>
+<ident> = <string min=1 max=10 charset=lower>
+<ident> = _<string min=1 max=8 charset=lower>
+<ident> = $<string min=1 max=8 charset=lower>

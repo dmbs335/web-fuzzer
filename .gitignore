@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+.pytest_cache/
+
+# Profiling
+*.prof
+
+# Fuzzing output (large, regeneratable)
+results/
+test_*_output/
+
+# Temp files
+*.tmp
+tmp*.html
+
+# Node
+node_modules/
+
+# Rust / Cargo build artifacts
+**/target/
+
+# Compiled binaries
+targets/url_curl
+targets/url_curl.exe
+**/*.class
+**/*.jar
+**/*.exe
+
+# IDE / Editor
+.vscode/
+.idea/
+*.sw?
+
+# Claude Code session data
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

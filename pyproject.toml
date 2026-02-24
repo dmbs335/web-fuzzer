@@ -1,0 +1,19 @@
+[project]
+name = "webfuzzer"
+version = "0.1.0"
+description = "Grammar-based web fuzzing framework"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+redis = ["redis>=5.0.0"]
+
+[project.scripts]
+webfuzzer = "webfuzzer.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

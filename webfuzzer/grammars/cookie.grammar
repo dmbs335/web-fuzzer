@@ -1,0 +1,308 @@
+# =============================================================================
+# HTTP Cookie Grammar — RFC 6265bis (Cookies: HTTP State Management Mechanism)
+# Also covers: SameSite, __Host-/__Secure- prefixes, Priority,
+#              Partitioned, edge cases for parser differential testing
+# =============================================================================
+
+!root <set_cookie_header>
+!max_depth 6
+
+# =============================================================================
+# Set-Cookie header (server → client)
+# =============================================================================
+<set_cookie_header> = <cookie_name>=<cookie_value><cookie_attrs>
+<set_cookie_header> = <cookie_name>=<cookie_value>
+<set_cookie_header> = <prefixed_cookie_name>=<cookie_value><cookie_attrs>
+
+# =============================================================================
+# Cookie header (client → server)
+# =============================================================================
+<cookie_header> = <cookie_pair>
+<cookie_header> = <cookie_pair>; <cookie_header>
+
+<cookie_pair> = <cookie_name>=<cookie_value>
+
+# =============================================================================
+# Cookie name (RFC 6265bis §4.1.1 — token per RFC 7230)
+# Valid: any CHAR except CTLs, separators
+# =============================================================================
+<cookie_name> = <string min=1 max=32 charset=lower>
+<cookie_name> = <string min=1 max=16 charset=alphanumeric>
+<cookie_name> = <string min=3 max=12 charset=lower>_<string min=3 max=12 charset=lower>
+<cookie_name> = session
+<cookie_name> = sessionid
+<cookie_name> = JSESSIONID
+<cookie_name> = PHPSESSID
+<cookie_name> = csrftoken
+<cookie_name> = _csrf
+<cookie_name> = token
+<cookie_name> = auth
+<cookie_name> = sid
+<cookie_name> = id
+<cookie_name> = user
+<cookie_name> = lang
+<cookie_name> = theme
+<cookie_name> = _ga
+<cookie_name> = _gid
+<cookie_name> = _fbp
+
+# --- cookie name edge cases ---
+<cookie_name> = <string min=1 max=1 charset=lower>
+<cookie_name> = <string min=64 max=128 charset=alphanumeric>
+<cookie_name> = <string min=3 max=8 charset=lower>.<string min=3 max=8 charset=lower>
+<cookie_name> = $<string min=3 max=12 charset=lower>
+<cookie_name> = <string min=3 max=8 charset=lower>-<string min=3 max=8 charset=lower>
+
+# =============================================================================
+# Cookie name prefixes (RFC 6265bis §4.1.3)
+# =============================================================================
+<prefixed_cookie_name> = __Host-<string min=3 max=20 charset=lower>
+<prefixed_cookie_name> = __Secure-<string min=3 max=20 charset=lower>
+<prefixed_cookie_name> = __Host-session
+<prefixed_cookie_name> = __Secure-token
+<prefixed_cookie_name> = __Host-id
+<prefixed_cookie_name> = __Secure-csrf
+
+# Edge cases: incorrect prefix casing / partial prefix
+<prefixed_cookie_name> = __host-<string min=3 max=12 charset=lower>
+<prefixed_cookie_name> = __secure-<string min=3 max=12 charset=lower>
+<prefixed_cookie_name> = __HOST-<string min=3 max=12 charset=lower>
+<prefixed_cookie_name> = __SECURE-<string min=3 max=12 charset=lower>
+<prefixed_cookie_name> = __Host<string min=3 max=12 charset=lower>
+<prefixed_cookie_name> = __Secure<string min=3 max=12 charset=lower>
+
+# =============================================================================
+# Cookie value (RFC 6265bis §4.1.1)
+# cookie-value = *cookie-octet / ( DQUOTE *cookie-octet DQUOTE )
+# =============================================================================
+<cookie_value> = <string min=1 max=64 charset=alphanumeric>
+<cookie_value> = "<string min=1 max=64 charset=alphanumeric>"
+<cookie_value> = <string min=8 max=64 charset=hex>
+<cookie_value> = <base64_value>
+<cookie_value> = <jwt_like_value>
+<cookie_value> = <int min=0 max=999999999>
+<cookie_value> = true
+<cookie_value> = false
+<cookie_value> = <url_encoded_value>
+
+# Empty value edge case
+<cookie_value> =
+
+# Quoted value edge cases
+<cookie_value> = "<string min=1 max=32 charset=alphanumeric> <string min=1 max=32 charset=alphanumeric>"
+<cookie_value> = ""
+
+# Long value
+<cookie_value> = <string min=128 max=256 charset=alphanumeric>
+<cookie_value> = <string min=1024 max=2048 charset=alphanumeric>
+
+<base64_value> = <string min=20 max=44 charset=alphanumeric>==
+<base64_value> = <string min=20 max=44 charset=alphanumeric>=
+<base64_value> = <string min=22 max=44 charset=alphanumeric>
+
+<jwt_like_value> = <string min=20 max=40 charset=alphanumeric>.<string min=20 max=80 charset=alphanumeric>.<string min=20 max=44 charset=alphanumeric>
+
+<url_encoded_value> = <string min=3 max=10 charset=lower>%3D<string min=3 max=10 charset=alphanumeric>
+<url_encoded_value> = %22<string min=5 max=20 charset=alphanumeric>%22
+<url_encoded_value> = <string min=3 max=8 charset=lower>%26<string min=3 max=8 charset=lower>%3D<string min=3 max=8 charset=alphanumeric>
+
+# =============================================================================
+# Cookie attributes (RFC 6265bis §4.1.2)
+# =============================================================================
+<cookie_attrs> = <cookie_attr>
+<cookie_attrs> = <cookie_attr><cookie_attrs>
+
+<cookie_attr> = ; Expires=<cookie_date>
+<cookie_attr> = ; Max-Age=<max_age_value>
+<cookie_attr> = ; Domain=<domain_value>
+<cookie_attr> = ; Path=<path_value>
+<cookie_attr> = ; Secure
+<cookie_attr> = ; HttpOnly
+<cookie_attr> = ; SameSite=<samesite_value>
+<cookie_attr> = ; Partitioned
+<cookie_attr> = ; Priority=<priority_value>
+
+# Edge cases: varied whitespace and casing
+<cookie_attr> = ;Secure
+<cookie_attr> = ;  HttpOnly
+<cookie_attr> = ; secure
+<cookie_attr> = ; httponly
+<cookie_attr> = ; SECURE
+<cookie_attr> = ; HTTPONLY
+<cookie_attr> = ; samesite=<samesite_value>
+<cookie_attr> = ; SAMESITE=<samesite_value>
+<cookie_attr> = ; domain=<domain_value>
+<cookie_attr> = ; path=<path_value>
+<cookie_attr> = ; expires=<cookie_date>
+<cookie_attr> = ; max-age=<max_age_value>
+
+# Unknown attributes (should be ignored per spec)
+<cookie_attr> = ; <string min=3 max=15 charset=lower>=<string min=1 max=20 charset=alphanumeric>
+<cookie_attr> = ; <string min=3 max=15 charset=lower>
+
+# =============================================================================
+# Expires (RFC 6265bis §5.2.1 — subset of HTTP-date per RFC 7231)
+# =============================================================================
+<cookie_date> = <day_name>, <day> <month> <year> <time> GMT
+<cookie_date> = <day_name>, <day>-<month>-<short_year> <time> GMT
+
+# Obsolete but accepted formats
+<cookie_date> = <day_name> <month> <day> <time> <year>
+<cookie_date> = <day_name>, <day>-<month>-<year> <time> GMT
+
+# Edge case: epoch / far future / invalid
+<cookie_date> = Thu, 01 Jan 1970 00:00:00 GMT
+<cookie_date> = Fri, 31 Dec 9999 23:59:59 GMT
+<cookie_date> = Thu, 01 Dec 1994 16:00:00 GMT
+<cookie_date> = Sat, 01 Jan 2000 00:00:00 GMT
+
+<day_name> = Mon
+<day_name> = Tue
+<day_name> = Wed
+<day_name> = Thu
+<day_name> = Fri
+<day_name> = Sat
+<day_name> = Sun
+
+<day> = <int min=1 max=31>
+<day> = 01
+<day> = 15
+<day> = 31
+<day> = 00
+<day> = 32
+
+<month> = Jan
+<month> = Feb
+<month> = Mar
+<month> = Apr
+<month> = May
+<month> = Jun
+<month> = Jul
+<month> = Aug
+<month> = Sep
+<month> = Oct
+<month> = Nov
+<month> = Dec
+
+<year> = <int min=2020 max=2035>
+<year> = 1970
+<year> = 2000
+<year> = 2038
+<year> = 9999
+<year> = 0
+
+<short_year> = <int min=20 max=99>
+<short_year> = 00
+<short_year> = 70
+
+<time> = <int min=0 max=23>:<int min=0 max=59>:<int min=0 max=59>
+<time> = 00:00:00
+<time> = 23:59:59
+<time> = 12:00:00
+<time> = 25:61:61
+
+# =============================================================================
+# Max-Age (RFC 6265bis §5.2.2 — delta-seconds)
+# =============================================================================
+<max_age_value> = <int min=0 max=31536000>
+<max_age_value> = 0
+<max_age_value> = -1
+<max_age_value> = 1
+<max_age_value> = 3600
+<max_age_value> = 86400
+<max_age_value> = 604800
+<max_age_value> = 2592000
+<max_age_value> = 31536000
+<max_age_value> = 63072000
+<max_age_value> = 2147483647
+<max_age_value> = -2147483648
+<max_age_value> = 99999999999
+
+# =============================================================================
+# Domain (RFC 6265bis §5.2.3)
+# =============================================================================
+<domain_value> = <string min=3 max=12 charset=lower>.<tld>
+<domain_value> = .<string min=3 max=12 charset=lower>.<tld>
+<domain_value> = <string min=3 max=8 charset=lower>.<string min=3 max=8 charset=lower>.<tld>
+<domain_value> = .<string min=3 max=8 charset=lower>.<string min=3 max=8 charset=lower>.<tld>
+<domain_value> = localhost
+<domain_value> = .localhost
+<domain_value> = example.com
+<domain_value> = .example.com
+
+# Edge cases
+<domain_value> = .<tld>
+<domain_value> = .
+<domain_value> =
+<domain_value> = <string min=3 max=8 charset=lower>.<string min=3 max=8 charset=lower>.<string min=3 max=8 charset=lower>.<tld>
+<domain_value> = <int min=1 max=255>.<int min=0 max=255>.<int min=0 max=255>.<int min=0 max=255>
+
+<tld> = com
+<tld> = net
+<tld> = org
+<tld> = io
+<tld> = dev
+<tld> = co.uk
+<tld> = co.jp
+<tld> = <string min=2 max=6 charset=lower>
+
+# =============================================================================
+# Path (RFC 6265bis §5.2.4)
+# =============================================================================
+<path_value> = /
+<path_value> = /<string min=1 max=20 charset=lower>
+<path_value> = /<string min=1 max=10 charset=lower>/<string min=1 max=10 charset=lower>
+<path_value> = /<string min=1 max=10 charset=lower>/<string min=1 max=10 charset=lower>/<string min=1 max=10 charset=lower>
+<path_value> = /api
+<path_value> = /api/v1
+<path_value> = /admin
+<path_value> = /login
+<path_value> = /account
+
+# Edge cases
+<path_value> =
+<path_value> = /..
+<path_value> = /../
+<path_value> = /.
+<path_value> = //
+<path_value> = /<string min=1 max=10 charset=lower>;
+<path_value> = /<string min=1 max=10 charset=lower>?<string min=1 max=10 charset=lower>=<string min=1 max=10 charset=alphanumeric>
+
+# =============================================================================
+# SameSite (RFC 6265bis §5.2.7)
+# =============================================================================
+<samesite_value> = Strict
+<samesite_value> = Lax
+<samesite_value> = None
+
+# Edge cases
+<samesite_value> = strict
+<samesite_value> = lax
+<samesite_value> = none
+<samesite_value> = STRICT
+<samesite_value> = LAX
+<samesite_value> = NONE
+<samesite_value> = <string min=3 max=12 charset=lower>
+
+# =============================================================================
+# Priority (Chrome extension — not RFC but widely used)
+# =============================================================================
+<priority_value> = High
+<priority_value> = Medium
+<priority_value> = Low
+<priority_value> = high
+<priority_value> = medium
+<priority_value> = low
+
+# =============================================================================
+# Realistic full Set-Cookie patterns (weighted)
+# =============================================================================
+<set_cookie_header> = [weight=3] sessionid=<string min=32 max=64 charset=hex>; Path=/; HttpOnly; Secure; SameSite=Lax
+<set_cookie_header> = [weight=3] csrftoken=<string min=32 max=64 charset=alphanumeric>; Path=/; SameSite=Lax
+<set_cookie_header> = [weight=2] __Host-session=<string min=32 max=64 charset=hex>; Path=/; Secure; HttpOnly; SameSite=Strict
+<set_cookie_header> = [weight=2] __Secure-token=<string min=32 max=64 charset=alphanumeric>; Path=/; Secure; HttpOnly; SameSite=Strict
+<set_cookie_header> = [weight=2] <cookie_name>=<cookie_value>; Max-Age=<int min=3600 max=86400>; Path=/; HttpOnly; Secure
+<set_cookie_header> = [weight=2] <cookie_name>=<cookie_value>; Expires=<cookie_date>; Path=/; Domain=<domain_value>; HttpOnly; Secure; SameSite=None; Partitioned
+<set_cookie_header> = [weight=1] _ga=GA1.2.<int min=1000000000 max=9999999999>.<int min=1000000000 max=9999999999>; Expires=<cookie_date>; Path=/; Domain=.<string min=5 max=15 charset=lower>.<tld>
+<set_cookie_header> = [weight=1] preferences=<url_encoded_value>; Max-Age=31536000; Path=/; SameSite=Lax
+<set_cookie_header> = [weight=1] <cookie_name>=deleted; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/

