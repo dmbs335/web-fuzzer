@@ -678,3 +678,42 @@
 <uri> = [weight=2] <scheme>://127.0.0.1%00.<reg_name>/<path_segment>
 <uri> = [weight=1] <scheme>%00://<host>/<path_segment>
 <uri> = [weight=1] <scheme>://127.0.0.1:<port>%00/<path_segment>
+
+# ── Go net/url specific patterns ─────────────────────────────────────
+# Go rejects backslash and NULL but has unique opaque URI handling,
+# semicolon-in-path behavior, and no hex/octal IP normalization.
+
+# Opaque URIs — Go treats "scheme:opaque" differently from "scheme://authority"
+<uri> = [weight=2] <scheme>:127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>:<reg_name>@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>:///127.0.0.1/<path_segment>
+
+# Semicolons in path — Go splits path parameters on ';' before '?'
+<uri> = [weight=2] <scheme>://<host>/;@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://<host>/<path_segment>;../<path_segment>
+<uri> = [weight=2] <scheme>://<host>/<path_segment>;/<path_segment>
+
+# Dotted-hex octets — Go does NOT normalize 0x7f.0.0.1 to 127.0.0.1
+<uri> = [weight=2] <scheme>://0x7f.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://0x7f.0x00.0x00.0x01/<path_segment>
+<uri> = [weight=1] <scheme>://0177.0.0.1/<path_segment>
+
+# Mixed decimal/hex octets
+<uri> = [weight=1] <scheme>://127.0.0x00.1/<path_segment>
+<uri> = [weight=1] <scheme>://127.0x0.0.1/<path_segment>
+
+# Userinfo edge cases — Go strict vs others lenient
+<uri> = [weight=2] <scheme>://<reg_name>%40127.0.0.1@<host>/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1%40<reg_name>@<host>/<path_segment>
+
+# Double-slash after scheme — Go vs others authority detection
+<uri> = [weight=2] <scheme>:/<host>/<path_segment>
+<uri> = [weight=1] <scheme>:////127.0.0.1/<path_segment>
+
+# Query-in-authority confusion — Go strict query delimiter
+<uri> = [weight=2] <scheme>://<host>?@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1?<host>/<path_segment>
+
+# Fragment before authority — Go discards fragment early
+<uri> = [weight=2] <scheme>://<host>#@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1#<host>/<path_segment>
