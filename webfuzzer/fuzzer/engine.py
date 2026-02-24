@@ -105,6 +105,10 @@ class FuzzEngine:
         self._publisher = RedisPublisher()
         self._cmd_queue: queue.Queue[dict] = queue.Queue()
 
+        # Reusable thread pool for reference target execution (avoids
+        # per-iteration ThreadPoolExecutor creation/teardown overhead).
+        self._ref_pool: ThreadPoolExecutor | None = None
+
     def run(self) -> FuzzStats:
         """Execute the main fuzzing loop. Returns stats when done."""
         self._running = True
@@ -335,8 +339,11 @@ class FuzzEngine:
         if len(self.reference_targets) == 1:
             return [_run(self.reference_targets[0])]
 
-        with ThreadPoolExecutor(max_workers=len(self.reference_targets)) as pool:
-            return list(pool.map(_run, self.reference_targets))
+        if self._ref_pool is None:
+            self._ref_pool = ThreadPoolExecutor(
+                max_workers=len(self.reference_targets),
+            )
+        return list(self._ref_pool.map(_run, self.reference_targets))
 
     def _check_oracles(self, inp: Input, result: ExecutionResult,
                        mutator_name: str = "",
@@ -359,6 +366,8 @@ class FuzzEngine:
                 findings = [findings_or_one]
 
             for finding in findings:
+                if mutator_name:
+                    finding.metadata["mutator"] = mutator_name
                 finding.fingerprint = self.deduplicator.fingerprint(finding)
                 if not self.deduplicator.is_duplicate(finding):
                     self.deduplicator.register(finding)
@@ -462,6 +471,9 @@ class FuzzEngine:
 
     def _cleanup(self) -> None:
         print("", file=sys.stderr)  # newline after status line
+        if self._ref_pool is not None:
+            self._ref_pool.shutdown(wait=False)
+            self._ref_pool = None
         try:
             self.target.teardown()
         except Exception:
