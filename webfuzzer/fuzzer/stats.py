@@ -162,6 +162,7 @@ class FuzzStats:
             "findings_by_oracle": self.findings_by_oracle,
             "mutations_by_mutator": self.mutations_by_mutator,
             "new_coverage_by_mutator": self.new_coverage_by_mutator,
+            "findings_by_mutator": self.findings_by_mutator,
         }, indent=2)
 
     def save(self, path: Path) -> None:
