@@ -36,6 +36,7 @@ try:
     from webfuzzer.native import AVAILABLE as _NATIVE
     if _NATIVE:
         from webfuzzer.native import feature_set_bitmap as _n_set_feature
+        from webfuzzer.native import bitmap_count as _n_bitmap_count
     else:
         _NATIVE = False
 except ImportError:
@@ -79,7 +80,7 @@ class DiffCoverageCollector:
         out_hash = hashlib.sha256(result.stdout[:1024]).hexdigest()[:8]
         self._set_feature(bitmap, "primary_out", out_hash)
 
-        edge_count = sum(1 for b in bitmap if b)
+        edge_count = _n_bitmap_count(bitmap) if _NATIVE else sum(1 for b in bitmap if b)
         return CoverageMap(bitmap=bitmap, edge_count=edge_count)
 
     def collect_diff(
@@ -122,67 +123,73 @@ class DiffCoverageCollector:
         if raw_record is not None:
             raw_record.features.append(("exit_vec", exit_vec))
 
-        # Parse all outputs
+        # Parse all outputs and pre-normalise URL components
         parsed = [self._parse_url_json(primary_result)]
         for ref in ref_results:
             parsed.append(self._parse_url_json(ref))
         if raw_record is not None:
             raw_record.parsed_outputs = parsed
 
+        # Precompute normalised component values to avoid repeated
+        # str().strip().lower() in the inner loop.
+        normalised: list[dict[str, str] | None] = []
+        for d in parsed:
+            if d is None:
+                normalised.append(None)
+            else:
+                normalised.append({k: str(d.get(k, "")).strip().lower() for k in _URL_KEYS})
+
         n = len(ref_results)
+        _set = self._set_feature
 
         # Feature 2: Per-pair divergence signature
         div_count = 0
+        p_norm = normalised[0]
         for i in range(n):
-            p = parsed[0]
-            r = parsed[i + 1]
-            if p is not None and r is not None:
+            r_norm = normalised[i + 1]
+            if p_norm is not None and r_norm is not None:
                 diff_keys = sorted(
-                    k for k in _URL_KEYS
-                    if str(p.get(k, "")).strip().lower() != str(r.get(k, "")).strip().lower()
+                    k for k in _URL_KEYS if p_norm[k] != r_norm[k]
                 )
                 if diff_keys:
                     # L1+: cdiff hash (sorted key set → single feature)
                     ns_cdiff = f"cdiff_0_{i}"
                     val_cdiff = ",".join(diff_keys)
                     if level >= 1:
-                        self._set_feature(bitmap, ns_cdiff, val_cdiff)
+                        _set(bitmap, ns_cdiff, val_cdiff)
                     if raw_record is not None:
                         raw_record.features.append((ns_cdiff, val_cdiff))
 
                     # L2+: per-component individual bits
                     if level >= 2:
                         for k in diff_keys:
-                            self._set_feature(bitmap, f"comp_0_{i}_{k}", "1")
+                            _set(bitmap, f"comp_0_{i}_{k}", "1")
                     if raw_record is not None:
                         for k in diff_keys:
                             raw_record.features.append((f"comp_0_{i}_{k}", "1"))
 
                     # L3+: actual differing value hashes
-                    if level >= 3:
+                    if level >= 3 or raw_record is not None:
                         for k in diff_keys:
-                            pv = str(p.get(k, "")).strip().lower()
-                            rv = str(r.get(k, "")).strip().lower()
-                            vh = hashlib.sha256(f"{pv}|{rv}".encode()).hexdigest()[:8]
-                            self._set_feature(bitmap, f"val_0_{i}_{k}", vh)
-                    if raw_record is not None:
-                        for k in diff_keys:
-                            pv = str(p.get(k, "")).strip().lower()
-                            rv = str(r.get(k, "")).strip().lower()
-                            vh = hashlib.sha256(f"{pv}|{rv}".encode()).hexdigest()[:8]
-                            raw_record.features.append((f"val_0_{i}_{k}", vh))
+                            vh = hashlib.sha256(
+                                f"{p_norm[k]}|{r_norm[k]}".encode()
+                            ).hexdigest()[:8]
+                            if level >= 3:
+                                _set(bitmap, f"val_0_{i}_{k}", vh)
+                            if raw_record is not None:
+                                raw_record.features.append((f"val_0_{i}_{k}", vh))
 
                     div_count += 1
 
-            elif p is None and r is not None:
+            elif p_norm is None and r_norm is not None:
                 ns_pf = f"parse_0_{i}"
-                self._set_feature(bitmap, ns_pf, "primary_fail")
+                _set(bitmap, ns_pf, "primary_fail")
                 if raw_record is not None:
                     raw_record.features.append((ns_pf, "primary_fail"))
                 div_count += 1
-            elif p is not None and r is None:
+            elif p_norm is not None and r_norm is None:
                 ns_rf = f"parse_0_{i}"
-                self._set_feature(bitmap, ns_rf, "ref_fail")
+                _set(bitmap, ns_rf, "ref_fail")
                 if raw_record is not None:
                     raw_record.features.append((ns_rf, "ref_fail"))
                 div_count += 1
@@ -230,7 +237,7 @@ class DiffCoverageCollector:
             raw_record.features.append(("div_bucket", bucket))
             raw_record.div_count = div_count
 
-        edge_count = sum(1 for b in bitmap if b)
+        edge_count = _n_bitmap_count(bitmap) if _NATIVE else sum(1 for b in bitmap if b)
         return CoverageMap(bitmap=bitmap, edge_count=edge_count)
 
     def merge(self, a: CoverageMap, b: CoverageMap) -> CoverageMap:

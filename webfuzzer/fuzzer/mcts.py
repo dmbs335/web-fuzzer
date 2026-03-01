@@ -67,14 +67,35 @@ class UCBTable:
 
         For fully-visited rules, picks the arm with the highest UCB1 score.
         """
-        scores = [
-            self._ucb1_score(rule_name, i)
-            for i in range(num_productions)
-        ]
+        # Inline UCB1 computation to avoid per-arm function call overhead.
+        _stats = self._stats
+        rule_total = self._rule_visits.get(rule_name, 0)
+        _c = self.c
+        _log = math.log
+        _sqrt = math.sqrt
+        _inf = float("inf")
 
-        # Any unvisited arms?
-        unvisited = [i for i, s in enumerate(scores) if math.isinf(s)]
-        if unvisited:
+        unvisited = []
+        scores = []
+        has_unvisited = False
+
+        if rule_total == 0:
+            # No visits to this rule at all — all arms are unvisited.
+            return self._rng.choices(
+                range(num_productions), weights=production_weights, k=1,
+            )[0] if sum(production_weights) > 0 else self._rng.randrange(num_productions)
+
+        log_total = _log(rule_total)
+
+        for i in range(num_productions):
+            arm = _stats.get((rule_name, i))
+            if arm is None or arm.visits == 0:
+                unvisited.append(i)
+                has_unvisited = True
+            else:
+                scores.append((i, arm.total_reward / arm.visits + _c * _sqrt(log_total / arm.visits)))
+
+        if has_unvisited:
             weights = [production_weights[i] for i in unvisited]
             total = sum(weights)
             if total > 0:
@@ -82,8 +103,8 @@ class UCBTable:
             return self._rng.choice(unvisited)
 
         # All visited — pick highest UCB1, break ties randomly.
-        max_score = max(scores)
-        best = [i for i, s in enumerate(scores) if abs(s - max_score) < 1e-9]
+        max_score = max(s for _, s in scores)
+        best = [i for i, s in scores if abs(s - max_score) < 1e-9]
         return self._rng.choice(best)
 
     def record_visit(self, rule_name: str, production_idx: int) -> None:

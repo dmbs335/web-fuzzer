@@ -72,22 +72,17 @@ class LinUCBScheduler:
 
         best_score = -float("inf")
         best_arms: list[int] = []
+        _sqrt = math.sqrt
+        _alpha = self.alpha
 
         for a in range(self._k):
             A_inv = self._A_inv[a]
             b = self._b[a]
 
-            # theta_a = A_inv @ b
             theta = _matvec(A_inv, b)
-
-            # exploitation: x^T theta
             exploit = _dot(x, theta)
-
-            # exploration: alpha * sqrt(x^T A_inv x)
             A_inv_x = _matvec(A_inv, x)
-            explore = self.alpha * math.sqrt(max(_dot(x, A_inv_x), 0.0))
-
-            score = exploit + explore
+            score = exploit + _alpha * _sqrt(max(_dot(x, A_inv_x), 0.0))
 
             if score > best_score + 1e-9:
                 best_score = score
@@ -227,8 +222,18 @@ def _identity(d: int) -> list[list[float]]:
 
 
 def _dot(a: list[float], b: list[float]) -> float:
+    if len(a) == _D:
+        return (a[0]*b[0] + a[1]*b[1] + a[2]*b[2] + a[3]*b[3]
+                + a[4]*b[4] + a[5]*b[5] + a[6]*b[6] + a[7]*b[7])
     return sum(ai * bi for ai, bi in zip(a, b))
 
 
 def _matvec(A: list[list[float]], x: list[float]) -> list[float]:
+    if len(x) == _D:
+        x0, x1, x2, x3, x4, x5, x6, x7 = x
+        return [
+            r[0]*x0 + r[1]*x1 + r[2]*x2 + r[3]*x3
+            + r[4]*x4 + r[5]*x5 + r[6]*x6 + r[7]*x7
+            for r in A
+        ]
     return [_dot(row, x) for row in A]

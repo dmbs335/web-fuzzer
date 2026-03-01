@@ -27,8 +27,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..corpus import MAP_SIZE, CoverageMap
-from .diff_coverage import DiffCoverageCollector
+from .diff_coverage import DiffCoverageCollector, _NATIVE
 from .feature_store import FeatureRecord, FeatureStore
+
+if _NATIVE:
+    from .diff_coverage import _n_bitmap_count
 
 if TYPE_CHECKING:
     from ..corpus import Corpus
@@ -283,7 +286,7 @@ class AdaptiveDiffCoverage:
             bucket = str(min(dc, 5)) if dc <= 5 else "5+"
         self._collector._set_feature(bitmap, "div_bucket", bucket)
 
-        edge_count = sum(1 for b in bitmap if b)
+        edge_count = _n_bitmap_count(bitmap) if _NATIVE else sum(1 for b in bitmap if b)
         return CoverageMap(bitmap=bitmap, edge_count=edge_count)
 
     @property
