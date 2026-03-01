@@ -150,6 +150,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--persistent", action="store_true",
         help="Use persistent target mode (keep subprocess alive, ~50x faster)",
     )
+    fuz.add_argument(
+        "--resume", action="store_true",
+        help="Resume from last checkpoint (requires --output-dir with existing checkpoint)",
+    )
+    fuz.add_argument(
+        "--checkpoint-interval", type=float, default=60.0,
+        help="Checkpoint save interval in seconds (default: 60)",
+    )
 
     # ── Exploration strategy flags ─────────────────────────────
     fuz.add_argument(
@@ -630,6 +638,8 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         reference_targets=reference_targets,
         seeds_dir=getattr(args, "seeds_dir", None),
         import_findings=getattr(args, "import_findings", None),
+        resume=getattr(args, "resume", False),
+        checkpoint_interval=getattr(args, "checkpoint_interval", 60.0),
     )
 
     print(f"Starting fuzzer: grammar={args.grammar}, target={args.target_cmd}",
@@ -654,6 +664,8 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         print(f"  Seeds dir: {args.seeds_dir}", file=sys.stderr)
     if getattr(args, "import_findings", None):
         print(f"  Import findings: {len(args.import_findings)} session dir(s)", file=sys.stderr)
+    if getattr(args, "resume", False):
+        print(f"  Resume: enabled (checkpoint interval: {getattr(args, 'checkpoint_interval', 60)}s)", file=sys.stderr)
     if args.count:
         print(f"  Max iterations: {args.count}", file=sys.stderr)
     if args.timeout:

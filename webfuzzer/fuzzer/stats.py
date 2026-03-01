@@ -42,6 +42,11 @@ class FuzzStats:
     findings_by_mutator: dict[str, int] = field(default_factory=dict)
     new_coverage_by_mutator: dict[str, int] = field(default_factory=dict)
 
+    # Per-strategy tracking (e.g., saml mutator's 50 strategies)
+    strategy_execs: dict[str, int] = field(default_factory=dict)
+    strategy_coverage: dict[str, int] = field(default_factory=dict)
+    strategy_findings: dict[str, int] = field(default_factory=dict)
+
     # Timing
     last_new_coverage_at: float = 0.0
     last_finding_at: float = 0.0
@@ -88,6 +93,21 @@ class FuzzStats:
             self.findings_by_mutator[mutator_name] = (
                 self.findings_by_mutator.get(mutator_name, 0) + 1
             )
+
+    def record_strategies(self, strategies: list[str]) -> None:
+        """Record which sub-strategies were applied in a mutation."""
+        for s in strategies:
+            self.strategy_execs[s] = self.strategy_execs.get(s, 0) + 1
+
+    def record_strategy_coverage(self, strategies: list[str]) -> None:
+        """Record that strategies led to new coverage."""
+        for s in strategies:
+            self.strategy_coverage[s] = self.strategy_coverage.get(s, 0) + 1
+
+    def record_strategy_finding(self, strategies: list[str]) -> None:
+        """Record that strategies led to a finding."""
+        for s in strategies:
+            self.strategy_findings[s] = self.strategy_findings.get(s, 0) + 1
 
     def update_corpus(self, size: int, total_bytes: int) -> None:
         self.corpus_size = size
@@ -146,6 +166,27 @@ class FuzzStats:
                 lines.append(f"    {mut:20s}: {count:8d} execs, {cov:6d} new cov")
             lines.append("")
 
+        if self.strategy_execs:
+            lines.append("  Strategy effectiveness:")
+            # Sort by findings desc, then coverage desc
+            ranked = sorted(
+                self.strategy_execs.keys(),
+                key=lambda s: (
+                    self.strategy_findings.get(s, 0),
+                    self.strategy_coverage.get(s, 0),
+                ),
+                reverse=True,
+            )
+            for s in ranked:
+                execs = self.strategy_execs[s]
+                cov = self.strategy_coverage.get(s, 0)
+                finds = self.strategy_findings.get(s, 0)
+                rate = (cov / execs * 100) if execs > 0 else 0
+                lines.append(
+                    f"    {s:35s}: {execs:6d} execs, {cov:4d} cov ({rate:5.1f}%), {finds:3d} finds"
+                )
+            lines.append("")
+
         lines.append("=" * 60)
         return "\n".join(lines)
 
@@ -163,6 +204,9 @@ class FuzzStats:
             "mutations_by_mutator": self.mutations_by_mutator,
             "new_coverage_by_mutator": self.new_coverage_by_mutator,
             "findings_by_mutator": self.findings_by_mutator,
+            "strategy_execs": self.strategy_execs,
+            "strategy_coverage": self.strategy_coverage,
+            "strategy_findings": self.strategy_findings,
         }, indent=2)
 
     def save(self, path: Path) -> None:
@@ -186,3 +230,61 @@ class FuzzStats:
                 "duration_ms": finding.result.duration_ms,
                 "metadata": finding.metadata,
             }, default=str, indent=2), encoding="utf-8")
+
+    # ── Checkpoint (full state save/restore) ──────────────────────
+
+    def to_checkpoint_dict(self) -> dict:
+        """Serialize stats state for checkpoint (excludes Finding objects)."""
+        return {
+            "total_iterations": self.total_iterations,
+            "total_executions": self.total_executions,
+            "total_edges": self.total_edges,
+            "peak_edges": self.peak_edges,
+            "total_findings": self.total_findings,
+            "unique_findings": self.unique_findings,
+            "corpus_size": self.corpus_size,
+            "corpus_bytes": self.corpus_bytes,
+            "findings_by_severity": self.findings_by_severity,
+            "findings_by_oracle": self.findings_by_oracle,
+            "mutations_by_mutator": self.mutations_by_mutator,
+            "findings_by_mutator": self.findings_by_mutator,
+            "new_coverage_by_mutator": self.new_coverage_by_mutator,
+            "strategy_execs": self.strategy_execs,
+            "strategy_coverage": self.strategy_coverage,
+            "strategy_findings": self.strategy_findings,
+            "coverage_over_time": self.coverage_over_time,
+            "elapsed_at_checkpoint": self.elapsed(),
+        }
+
+    def load_checkpoint_dict(self, d: dict, *, resumed_at: float | None = None) -> None:
+        """Restore stats state from checkpoint dict.
+
+        Time accounting: ``start_time`` is adjusted so that ``elapsed()``
+        returns the total wall-clock across sessions.
+        """
+        self.total_iterations = d.get("total_iterations", 0)
+        self.total_executions = d.get("total_executions", 0)
+        self.total_edges = d.get("total_edges", 0)
+        self.peak_edges = d.get("peak_edges", 0)
+        self.total_findings = d.get("total_findings", 0)
+        self.unique_findings = d.get("unique_findings", 0)
+        self.corpus_size = d.get("corpus_size", 0)
+        self.corpus_bytes = d.get("corpus_bytes", 0)
+        self.findings_by_severity = d.get("findings_by_severity", {})
+        self.findings_by_oracle = d.get("findings_by_oracle", {})
+        self.mutations_by_mutator = d.get("mutations_by_mutator", {})
+        self.findings_by_mutator = d.get("findings_by_mutator", {})
+        self.new_coverage_by_mutator = d.get("new_coverage_by_mutator", {})
+        self.strategy_execs = d.get("strategy_execs", {})
+        self.strategy_coverage = d.get("strategy_coverage", {})
+        self.strategy_findings = d.get("strategy_findings", {})
+        self.coverage_over_time = d.get("coverage_over_time", [])
+
+        # Adjust start_time so elapsed() is continuous across sessions
+        prev_elapsed = d.get("elapsed_at_checkpoint", 0.0)
+        now = resumed_at or time.time()
+        self.start_time = now - prev_elapsed
+
+        # Recompute exec/s
+        if prev_elapsed > 0:
+            self.executions_per_second = self.total_executions / prev_elapsed

@@ -1360,3 +1360,190 @@ class TestDiffE2EWithMockTargets:
         global_cov = CoverageMap()
         global_cov.update(cov1)
         assert global_cov.has_new_bits(cov2)  # divergent case adds new bits
+
+
+# ── Checkpoint tests ────────────────────────────────────────────
+
+
+class TestCorpusCheckpoint:
+    """Tests for corpus save_checkpoint / load_checkpoint."""
+
+    def _make_corpus(self) -> Corpus:
+        corpus = Corpus()
+        cov1 = CoverageMap()
+        cov1.bitmap[10] = 1
+        cov1.bitmap[20] = 3
+        seed1 = corpus.force_add(
+            Input(data=b"seed_one", metadata={"origin": "test"}), cov1,
+        )
+        seed1.energy = 2.5
+        seed1.exec_count = 42
+        seed1.depth = 3
+        seed1.priority_boost = 1.5
+        seed1.rare_branches = {10}
+
+        cov2 = CoverageMap()
+        cov2.bitmap[30] = 1
+        corpus.force_add(Input(data=b"seed_two"), cov2)
+        return corpus
+
+    def test_roundtrip(self, tmp_path):
+        """Save and load produces identical corpus state."""
+        original = self._make_corpus()
+        original.save_checkpoint(tmp_path / "ckpt")
+
+        restored = Corpus()
+        assert restored.load_checkpoint(tmp_path / "ckpt")
+
+        # Seed count
+        assert len(restored) == len(original)
+
+        # Global coverage bitmap
+        assert restored.global_coverage.edge_count == original.global_coverage.edge_count
+        assert restored.global_coverage.bitmap[10] == 1
+        assert restored.global_coverage.bitmap[20] == 3
+        assert restored.global_coverage.bitmap[30] == 1
+
+        # Edge freq
+        assert restored.edge_freq == original.edge_freq
+
+        # next_id
+        assert restored._next_id == original._next_id
+
+        # Seed data
+        s0 = restored.seeds[0]
+        assert s0.input.data == b"seed_one"
+        assert s0.input.metadata == {"origin": "test"}
+        assert s0.energy == 2.5
+        assert s0.exec_count == 42
+        assert s0.depth == 3
+        assert s0.priority_boost == 1.5
+        assert s0.rare_branches == {10}
+
+        s1 = restored.seeds[1]
+        assert s1.input.data == b"seed_two"
+
+    def test_load_returns_false_when_missing(self, tmp_path):
+        corpus = Corpus()
+        assert not corpus.load_checkpoint(tmp_path / "nonexistent")
+
+
+class TestStatsCheckpoint:
+    """Tests for stats to_checkpoint_dict / load_checkpoint_dict."""
+
+    def test_roundtrip(self):
+        from webfuzzer.fuzzer.stats import FuzzStats
+        import time
+
+        stats = FuzzStats()
+        stats.total_iterations = 1000
+        stats.total_executions = 5000
+        stats.total_edges = 42
+        stats.peak_edges = 45
+        stats.unique_findings = 3
+        stats.findings_by_severity = {"high": 2, "medium": 1}
+        stats.mutations_by_mutator = {"havoc": 3000, "grammar": 2000}
+        stats.new_coverage_by_mutator = {"havoc": 20, "grammar": 22}
+        stats.findings_by_mutator = {"havoc": 2, "grammar": 1}
+
+        d = stats.to_checkpoint_dict()
+
+        restored = FuzzStats()
+        restored.load_checkpoint_dict(d)
+
+        assert restored.total_iterations == 1000
+        assert restored.total_executions == 5000
+        assert restored.total_edges == 42
+        assert restored.peak_edges == 45
+        assert restored.unique_findings == 3
+        assert restored.findings_by_severity == {"high": 2, "medium": 1}
+        assert restored.mutations_by_mutator == {"havoc": 3000, "grammar": 2000}
+
+        # Elapsed time should be approximately continuous
+        assert abs(restored.elapsed() - stats.elapsed()) < 1.0
+
+
+class TestEngineCheckpoint:
+    """Integration test for engine checkpoint save/load cycle."""
+
+    def test_engine_checkpoint_roundtrip(self, tmp_path):
+        """Engine saves checkpoint on cleanup and resumes from it."""
+        from webfuzzer.fuzzer.engine import FuzzEngine, _DefaultDeduplicator
+
+        class DummyTarget:
+            def execute(self, inp):
+                return ExecutionResult(exit_code=0, stdout=inp.data)
+            def setup(self): pass
+            def teardown(self): pass
+            def is_alive(self): return True
+            def reset(self): pass
+
+        class DummySource:
+            def __init__(self):
+                self._i = 0
+            def generate(self):
+                self._i += 1
+                return Input(data=f"input_{self._i}".encode())
+
+        class DummyCoverage:
+            def collect(self, result):
+                cm = CoverageMap()
+                # Hash-based edge for variety
+                h = hash(result.stdout) % MAP_SIZE
+                cm.bitmap[h] = 1
+                cm.edge_count = 1
+                return cm
+            def merge(self, a, b): return a
+            def is_novel(self, existing, new):
+                return existing.has_new_bits(new)
+            def diff(self, old, new): return set()
+
+        output = tmp_path / "session"
+
+        # Run a short session
+        engine = FuzzEngine(
+            target=DummyTarget(),
+            input_source=DummySource(),
+            mutators=[],
+            oracles=[],
+            coverage=DummyCoverage(),
+            max_iterations=10,
+            initial_seed_count=5,
+            output_dir=output,
+            seed=42,
+        )
+        # Manually run parts to test checkpoint
+        engine._running = True
+        engine._setup()
+        engine._seed_corpus()
+        original_seeds = len(engine.corpus)
+        original_edges = engine.stats.total_edges
+        engine._save_checkpoint()
+        engine._cleanup()
+
+        # Verify checkpoint files exist
+        ckpt = output / "checkpoint"
+        assert (ckpt / "state.json").exists()
+        assert (ckpt / "corpus" / "coverage.bin").exists()
+        assert (ckpt / "corpus" / "state.json").exists()
+
+        # Resume
+        engine2 = FuzzEngine(
+            target=DummyTarget(),
+            input_source=DummySource(),
+            mutators=[],
+            oracles=[],
+            coverage=DummyCoverage(),
+            max_iterations=10,
+            initial_seed_count=5,
+            output_dir=output,
+            resume=True,
+            seed=42,
+        )
+        engine2._running = True
+        engine2._setup()
+        loaded = engine2._load_checkpoint()
+        assert loaded
+
+        assert len(engine2.corpus) == original_seeds
+        assert engine2.stats.total_edges == original_edges

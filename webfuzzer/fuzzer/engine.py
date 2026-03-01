@@ -78,6 +78,8 @@ class FuzzEngine:
         reference_targets: list[Target] | None = None,
         seeds_dir: Path | None = None,
         import_findings: list[Path] | None = None,
+        resume: bool = False,
+        checkpoint_interval: float = 60.0,
     ):
         self.target = target
         self.reference_targets: list[Target] = reference_targets or []
@@ -96,6 +98,8 @@ class FuzzEngine:
         self.status_interval = status_interval
         self.seeds_dir = seeds_dir
         self.import_findings = import_findings or []
+        self.resume = resume
+        self.checkpoint_interval = checkpoint_interval
 
         # Use defaults if not provided
         self.seed_scheduler: SeedScheduler = seed_scheduler or _DefaultSeedScheduler(self.rng)
@@ -104,7 +108,9 @@ class FuzzEngine:
 
         self._last_status_time = 0.0
         self._last_save_time = 0.0
+        self._last_checkpoint_time = 0.0
         self._running = False
+        self._resumed = False
         self._publisher = RedisPublisher()
         self._cmd_queue: queue.Queue[dict] = queue.Queue()
 
@@ -120,12 +126,21 @@ class FuzzEngine:
 
         try:
             self._setup()
-            self._seed_corpus()
+            if self.resume and self._load_checkpoint():
+                self._resumed = True
+                logger.info(
+                    "Resumed from checkpoint: %d seeds, %d edges, %d execs",
+                    len(self.corpus), self.stats.total_edges,
+                    self.stats.total_executions,
+                )
+            else:
+                self._seed_corpus()
             self._main_loop()
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
             self._publisher.publish_status("stopped")
         finally:
+            self._save_checkpoint()
             self._cleanup()
 
         return self.stats
@@ -269,6 +284,11 @@ class FuzzEngine:
             result = self._execute(mutated_input)
             self.stats.record_execution(mutator_name)
 
+            # Track per-strategy metrics (e.g., SAML mutator's 50 strategies)
+            strategies = mutated_input.metadata.get("strategies", [])
+            if strategies:
+                self.stats.record_strategies(strategies)
+
             # 4.5. Execute refs once (cached for coverage + oracles)
             ref_results = self._execute_references(mutated_input)
 
@@ -291,6 +311,8 @@ class FuzzEngine:
                         self.stats.record_new_coverage(
                             self.corpus.global_coverage.edge_count, mutator_name
                         )
+                        if strategies:
+                            self.stats.record_strategy_coverage(strategies)
                         self.stats.update_corpus(
                             len(self.corpus),
                             sum(len(s.input.data) for s in self.corpus.seeds),
@@ -311,6 +333,8 @@ class FuzzEngine:
                         )
             # 6. Check oracles
             found_crash = self._check_oracles(mutated_input, result, mutator_name, ref_results=ref_results)
+            if found_crash and strategies:
+                self.stats.record_strategy_finding(strategies)
 
             # 7. Update schedulers
             schedule_result = ScheduleResult(
@@ -344,8 +368,9 @@ class FuzzEngine:
             # 8. Process external commands (priority adjustments etc.)
             self._process_commands()
 
-            # 9. Status output
+            # 9. Status output + periodic checkpoint
             self._maybe_print_status()
+            self._maybe_save_checkpoint()
 
     def _collect_coverage(
         self, inp: Input, result: ExecutionResult,
@@ -582,7 +607,7 @@ class FuzzEngine:
 
     def _start_command_reader(self) -> None:
         """Start a daemon thread that reads JSON commands from stdin."""
-        if not sys.stdin or sys.stdin.closed:
+        if not sys.stdin or not hasattr(sys.stdin, 'closed') or sys.stdin.closed:
             return
 
         def _reader() -> None:
@@ -646,6 +671,104 @@ class FuzzEngine:
         if self._running:
             self._publisher.publish_status("completed")
         self._publisher.close()
+
+    # ── Checkpointing ──────────────────────────────────────────────
+
+    def _checkpoint_dir(self) -> Path | None:
+        """Return checkpoint directory path, or None if output_dir not set."""
+        if self.output_dir is None:
+            return None
+        return self.output_dir / "checkpoint"
+
+    def _save_checkpoint(self) -> None:
+        """Save full engine state to checkpoint directory."""
+        ckpt = self._checkpoint_dir()
+        if ckpt is None:
+            return
+
+        try:
+            # Corpus (seeds + global coverage bitmap)
+            self.corpus.save_checkpoint(ckpt / "corpus")
+
+            # Stats
+            state: dict = {
+                "stats": self.stats.to_checkpoint_dict(),
+                "rng_state": self.rng.getstate(),
+            }
+
+            # Deduplicator seen set
+            if isinstance(self.deduplicator, _DefaultDeduplicator):
+                state["dedup_seen"] = sorted(self.deduplicator._seen)
+
+            ckpt.mkdir(parents=True, exist_ok=True)
+            (ckpt / "state.json").write_text(
+                json.dumps(state, default=str), encoding="utf-8",
+            )
+            logger.debug(
+                "Checkpoint saved: %d seeds, %d edges",
+                len(self.corpus), self.stats.total_edges,
+            )
+        except Exception as e:
+            logger.warning("Failed to save checkpoint: %s", e)
+
+    def _load_checkpoint(self) -> bool:
+        """Load engine state from checkpoint. Returns True if loaded."""
+        ckpt = self._checkpoint_dir()
+        if ckpt is None:
+            return False
+
+        state_file = ckpt / "state.json"
+        if not state_file.exists():
+            return False
+
+        try:
+            # Corpus
+            if not self.corpus.load_checkpoint(ckpt / "corpus"):
+                return False
+
+            # State
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+
+            # Stats
+            self.stats.load_checkpoint_dict(state.get("stats", {}))
+
+            # RNG
+            rng_state = state.get("rng_state")
+            if rng_state is not None:
+                # JSON serializes tuples as lists; Random.setstate needs tuples
+                self.rng.setstate(_json_to_rng_state(rng_state))
+
+            # Deduplicator
+            dedup_seen = state.get("dedup_seen")
+            if dedup_seen and isinstance(self.deduplicator, _DefaultDeduplicator):
+                self.deduplicator._seen = set(dedup_seen)
+
+            return True
+        except Exception as e:
+            logger.warning("Failed to load checkpoint: %s", e)
+            return False
+
+    def _maybe_save_checkpoint(self) -> None:
+        """Save checkpoint periodically (every checkpoint_interval seconds)."""
+        if self.output_dir is None:
+            return
+        now = time.time()
+        if now - self._last_checkpoint_time >= self.checkpoint_interval:
+            self._last_checkpoint_time = now
+            self._save_checkpoint()
+
+
+def _json_to_rng_state(raw: list) -> tuple:
+    """Convert JSON-deserialized RNG state back to the tuple format
+    expected by random.Random.setstate().
+
+    JSON serializes tuples as lists, but Random.setstate() requires:
+        (version: int, internalstate: tuple[int, ...], gauss_next: float)
+    """
+    version = raw[0]
+    internal = tuple(raw[1])
+    gauss_next = raw[2]
+    return (version, internal, gauss_next)
 
 
 # ── Default implementations (minimal, used when user provides none) ──

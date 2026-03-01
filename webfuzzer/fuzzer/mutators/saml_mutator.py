@@ -458,6 +458,7 @@ class SamlMutator:
             self._assertion_count_bomb,           # 48  NEW
             self._go_encoding_xml_quirk,          # 49  NEW
         ]
+        self._strategy_names: list[str] = [fn.__name__.lstrip("_") for fn in self._strategies]
         self._weights: list[int] = [
             # S1: XSW (slightly reduced to make room)
             10, 8, 8, 7, 7, 5, 5, 5,
@@ -491,20 +492,27 @@ class SamlMutator:
             )
 
         num_ops = self.rng.choices([1, 2, 3], weights=[50, 35, 15], k=1)[0]
+        applied: list[str] = []
         for _ in range(num_ops):
-            strategy = self.rng.choices(
-                self._strategies, weights=self._weights, k=1
+            idx = self.rng.choices(
+                range(len(self._strategies)), weights=self._weights, k=1
             )[0]
+            strategy = self._strategies[idx]
             result = strategy(data)
             if result is not None and len(result) > 0:
                 data = result
+                applied.append(self._strategy_names[idx])
 
         if len(data) > MAX_OUTPUT_SIZE:
             data = data[:MAX_OUTPUT_SIZE]
 
         return Input(
             data=bytes(data),
-            metadata={**inp.metadata, "mutator": self.name},
+            metadata={
+                **inp.metadata,
+                "mutator": self.name,
+                "strategies": applied,
+            },
         )
 
     # ══════════════════════════════════════════════════════════════
