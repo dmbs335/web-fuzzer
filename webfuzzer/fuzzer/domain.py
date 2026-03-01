@@ -221,3 +221,45 @@ register(DomainProfile(
         "signature_valid", "subject", "issuer", "audience", "assertion_count",
     ),
 ))
+
+register(DomainProfile(
+    name="sanitizer",
+    comparison_keys=(
+        "has_script", "has_event_handler", "has_javascript_uri",
+        "has_data_uri", "has_svg", "has_math", "has_style",
+        "has_form", "has_base", "has_iframe", "has_object_embed",
+        "has_noscript", "empty_output",
+    ),
+    categories=(
+        "script_bypass",
+        "event_handler_bypass",
+        "javascript_uri_bypass",
+        "data_uri_bypass",
+        "iframe_bypass",
+        "object_embed_bypass",
+        "base_tag_bypass",
+        "namespace_divergence",
+        "structural_mutation",
+        "normalization_divergence",
+        "dom_clobbering",
+        "post_sanitization_gadget",
+    ),
+    field_category_map={
+        "has_script": ("script_bypass", Severity.CRITICAL),
+        "has_event_handler": ("event_handler_bypass", Severity.CRITICAL),
+        "has_javascript_uri": ("javascript_uri_bypass", Severity.CRITICAL),
+        "has_data_uri": ("data_uri_bypass", Severity.HIGH),
+        "has_iframe": ("iframe_bypass", Severity.HIGH),
+        "has_object_embed": ("object_embed_bypass", Severity.HIGH),
+        "has_base": ("base_tag_bypass", Severity.HIGH),
+        "has_svg": ("namespace_divergence", Severity.MEDIUM),
+        "has_math": ("namespace_divergence", Severity.MEDIUM),
+        "has_noscript": ("normalization_divergence", Severity.LOW),
+    },
+    field_priority=(
+        "has_script", "has_event_handler", "has_javascript_uri",
+        "has_data_uri", "has_iframe", "has_object_embed", "has_base",
+        "has_svg", "has_math", "has_style", "has_form", "has_noscript",
+        "empty_output",
+    ),
+))

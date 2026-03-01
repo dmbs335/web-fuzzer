@@ -111,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--oracle", default="crash,sanitizer",
-        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml)",
+        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml,sanitizer_diff)",
     )
     fuz.add_argument(
         "--initial-seeds", type=int, default=100,
@@ -205,6 +205,10 @@ _PERSISTENT_MODULE_MAP = {
     "targets/sanitizer_sanitize_html.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_sanitize_html_module.js"),
     "targets/sanitizer_jsxss.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_jsxss_module.js"),
     "targets/sanitizer_dompurify_mxss.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_dompurify_mxss_module.js"),
+    # Sanitizer differential targets
+    "targets/sanitizer_dompurify_diff.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_dompurify_diff_module.js"),
+    "targets/sanitizer_sanitize_html_diff.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_sanitize_html_diff_module.js"),
+    "targets/sanitizer_jsxss_diff.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_jsxss_diff_module.js"),
     "targets/url_node_whatwg.js": ("node targets/persistent_wrapper.js", "targets/url_node_whatwg_module.js"),
     "targets/url_node_legacy.js": ("node targets/persistent_wrapper.js", "targets/url_node_legacy_module.js"),
     "targets/url_python_urllib.py": ("python targets/persistent_wrapper.py", "targets/url_python_urllib_module.py"),
@@ -475,6 +479,7 @@ def _build_oracles(names: str) -> list:
         "mxss": lambda: MxssOracle(),
         "ssrf": lambda: SsrfOracle(),
         "saml": lambda: SamlOracle(),
+        "sanitizer_diff": lambda: None,  # placeholder — strategies injected via DiffOracle
     }
 
     oracles = []
@@ -585,7 +590,13 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         has_xss = any(getattr(o, "name", "") == "xss" for o in oracles)
         has_ssrf = any(getattr(o, "name", "") == "ssrf" for o in oracles)
         has_saml = any(getattr(o, "name", "") == "saml" for o in oracles)
-        if has_saml:
+        has_sanitizer_diff = any(o is None for o in oracles)  # sanitizer_diff placeholder
+        # Remove None placeholders from oracle list
+        oracles = [o for o in oracles if o is not None]
+        if has_sanitizer_diff:
+            from .fuzzer.oracles.sanitizer_diff_strategy import get_sanitizer_strategies
+            strategies = get_sanitizer_strategies()
+        elif has_saml:
             from .fuzzer.oracles.saml_diff_strategy import get_saml_strategies
             strategies = get_saml_strategies()
         elif has_ssrf:
