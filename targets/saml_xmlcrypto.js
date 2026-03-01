@@ -165,19 +165,23 @@ function verifySaml(xmlInput) {
   return JSON.stringify(result);
 }
 
-// -- Main --
-const inputPath = process.argv[2];
-if (!inputPath) {
-  process.stderr.write("Usage: node saml_xmlcrypto.js <input_file>\n");
-  process.exit(2);
-}
+module.exports = { verifySaml };
 
-try {
-  const input = fs.readFileSync(inputPath, "utf8");
-  const result = verifySaml(input);
-  process.stdout.write(result + "\n");
-  process.exit(0);
-} catch (err) {
-  process.stderr.write("REJECT: " + err.message + "\n");
-  process.exit(1);
+// -- Main (CLI only) --
+if (require.main === module) {
+  const inputPath = process.argv[2];
+  if (!inputPath) {
+    process.stderr.write("Usage: node saml_xmlcrypto.js <input_file>\n");
+    process.exit(2);
+  }
+
+  try {
+    const input = fs.readFileSync(inputPath, "utf8");
+    const result = verifySaml(input);
+    process.stdout.write(result + "\n");
+    process.exit(0);
+  } catch (err) {
+    process.stderr.write("REJECT: " + err.message + "\n");
+    process.exit(1);
+  }
 }
