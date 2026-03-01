@@ -1,5 +1,6 @@
 {
     "require": {
-        "onelogin/php-saml": "^4.3"
+        "onelogin/php-saml": "^4.3",
+        "ezyang/htmlpurifier": "^4.19"
     }
 }

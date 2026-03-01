@@ -225,6 +225,13 @@ _PERSISTENT_MODULE_MAP = {
     "targets/saml_python3saml.py": ("python targets/persistent_wrapper.py", "targets/saml_python3saml_module.py"),
     "targets/saml_rubysaml.rb": ("C:/Ruby32-x64/bin/ruby targets/persistent_wrapper.rb", "targets/saml_rubysaml_module.rb"),
     "targets/saml_phpsaml.php": ("C:/Users/dmbs3/AppData/Local/Microsoft/WinGet/Packages/PHP.PHP.8.3_Microsoft.Winget.Source_8wekyb3d8bbwe/php.exe targets/persistent_wrapper.php", "targets/saml_phpsaml_module.php"),
+    # Multi-language sanitizer differential targets
+    "targets/sanitizer_bleach_diff.py": ("python targets/persistent_wrapper.py", "targets/sanitizer_bleach_diff_module.py"),
+    "targets/sanitizer_nh3_diff.py": ("python targets/persistent_wrapper.py", "targets/sanitizer_nh3_diff_module.py"),
+    "targets/sanitizer_lxml_diff.py": ("python targets/persistent_wrapper.py", "targets/sanitizer_lxml_diff_module.py"),
+    "targets/sanitizer_sanitize_diff.rb": ("C:/Ruby32-x64/bin/ruby targets/persistent_wrapper.rb", "targets/sanitizer_sanitize_diff_module.rb"),
+    "targets/sanitizer_loofah_diff.rb": ("C:/Ruby32-x64/bin/ruby targets/persistent_wrapper.rb", "targets/sanitizer_loofah_diff_module.rb"),
+    "targets/sanitizer_htmlpurifier_diff.php": ("C:/Users/dmbs3/AppData/Local/Microsoft/WinGet/Packages/PHP.PHP.8.3_Microsoft.Winget.Source_8wekyb3d8bbwe/php.exe targets/persistent_wrapper.php", "targets/sanitizer_htmlpurifier_diff_module.php"),
     # Cookie targets
     "targets/cookie_python_stdlib.py": ("python targets/persistent_wrapper.py", "targets/cookie_python_stdlib_module.py"),
     "targets/cookie_node_setcookieparser.js": ("node targets/persistent_wrapper.js", "targets/cookie_node_setcookieparser_module.js"),
@@ -254,6 +261,10 @@ _NATIVE_PERSISTENT_MAP = {
     # SAML Rust target (quick-xml parser)
     "targets/saml_rust_xmlparser/target/release/saml_rust_xmlparser.exe": "targets/saml_rust_xmlparser/target/release/saml_rust_xmlparser.exe --persistent",
     "targets/saml_rust_xmlparser/target/release/saml_rust_xmlparser": "targets/saml_rust_xmlparser/target/release/saml_rust_xmlparser --persistent",
+    # Multi-language sanitizer (native binary protocol, no args = persistent)
+    "targets/sanitizer_bluemonday.exe": "targets/sanitizer_bluemonday.exe",
+    "targets/sanitizer_ammonia.exe": "targets/sanitizer_ammonia.exe",
+    "targets/rust-sanitizer/target/release/sanitizer_ammonia.exe": "targets/rust-sanitizer/target/release/sanitizer_ammonia.exe",
 }
 
 
