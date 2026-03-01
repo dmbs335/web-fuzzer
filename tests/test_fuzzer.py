@@ -120,6 +120,37 @@ class TestCorpus:
             s.feature_set for s in corpus.seeds
         )
 
+    def test_compact_removes_zero_contribution(self):
+        corpus = Corpus()
+        # Seed with features — should be kept
+        corpus.force_add(self._make_input(b"good"), self._make_coverage(1, 2))
+        # Seed without features — should be removed
+        corpus.force_add(self._make_input(b"empty"))
+        corpus.force_add(self._make_input(b"empty2"))
+        assert len(corpus) == 3
+        removed = corpus.compact(min_seeds=1)
+        assert removed == 2
+        assert len(corpus) == 1
+        assert corpus.seeds[0].input.data == b"good"
+
+    def test_compact_preserves_finding_seeds(self):
+        corpus = Corpus()
+        # Seed with finding but no features — should be kept
+        s = corpus.force_add(self._make_input(b"finder"))
+        s.finding_count = 1
+        # Seed with features
+        corpus.force_add(self._make_input(b"edges"), self._make_coverage(5))
+        # Truly empty seed
+        corpus.force_add(self._make_input(b"empty"))
+        removed = corpus.compact(min_seeds=1)
+        assert removed == 1  # only the empty one removed
+        assert len(corpus) == 2
+
+    def test_compact_noop_when_small(self):
+        corpus = Corpus()
+        corpus.force_add(self._make_input(b"s1"))
+        assert corpus.compact(min_seeds=50) == 0
+
     def test_save_and_load(self, tmp_path):
         corpus = Corpus()
         corpus.force_add(Input(data=b"hello", metadata={"x": 1}))

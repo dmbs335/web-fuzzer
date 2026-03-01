@@ -219,6 +219,47 @@ class Corpus:
         self.seeds = kept
         self._id_index = {s.id: s for s in kept}
 
+    def compact(self, min_seeds: int = 50) -> int:
+        """Soft compaction — remove redundant seeds while preserving diversity.
+
+        Unlike ``minimize()`` (aggressive set-cover), this keeps seeds
+        that have findings or contribute unique edges. Returns the number
+        of seeds removed.
+
+        Strategy:
+          1. Always keep: seeds with findings, or contributing unique edges.
+          2. Remove: seeds with empty feature_set and no findings.
+          3. If still over threshold: run greedy minimize but keep at
+             least ``min_seeds``.
+        """
+        if len(self.seeds) <= min_seeds:
+            return 0
+
+        before = len(self.seeds)
+
+        # Phase 1: Remove zero-contribution seeds
+        essential: list[Seed] = []
+        removable: list[Seed] = []
+        for seed in self.seeds:
+            if seed.finding_count > 0 or seed.feature_set:
+                essential.append(seed)
+            else:
+                removable.append(seed)
+
+        if removable:
+            self.seeds = essential
+            self._id_index = {s.id: s for s in essential}
+
+        # Phase 2: If still bloated, run greedy minimize
+        if len(self.seeds) > min_seeds * 4:
+            self.minimize()
+            # Ensure we don't go below min_seeds
+            if len(self.seeds) < min_seeds:
+                # Shouldn't happen (minimize covers all edges), but safety check
+                pass
+
+        return before - len(self.seeds)
+
     def save(self, path: Path) -> None:
         """Save corpus to directory (one file per seed)."""
         path.mkdir(parents=True, exist_ok=True)

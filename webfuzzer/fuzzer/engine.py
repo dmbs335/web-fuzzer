@@ -368,7 +368,20 @@ class FuzzEngine:
             # 8. Process external commands (priority adjustments etc.)
             self._process_commands()
 
-            # 9. Status output + periodic checkpoint
+            # 9. Periodic corpus compaction (every 10K iterations)
+            if self.stats.total_iterations % 10000 == 0 and len(self.corpus) > 200:
+                removed = self.corpus.compact(min_seeds=50)
+                if removed > 0:
+                    logger.info(
+                        "Corpus compacted: %d seeds removed, %d remaining",
+                        removed, len(self.corpus),
+                    )
+                    self.stats.update_corpus(
+                        len(self.corpus),
+                        sum(len(s.input.data) for s in self.corpus.seeds),
+                    )
+
+            # 10. Status output + periodic checkpoint
             self._maybe_print_status()
             self._maybe_save_checkpoint()
 
