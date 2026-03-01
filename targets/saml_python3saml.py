@@ -23,9 +23,10 @@ NSMAP = {"saml": SAML_NS, "ds": DS_NS}
 
 
 def _text(elem):
+    """Get full text content of an element, including text after comments/PIs."""
     if elem is None:
         return None
-    return (elem.text or "").strip() or None
+    return "".join(elem.itertext()).strip() or None
 
 
 def _normalize_sig_algo(algo):
