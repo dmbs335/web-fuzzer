@@ -249,6 +249,11 @@ _NATIVE_PERSISTENT_MAP = {
     # SAML Go target (crewjam/saml)
     "targets/saml_crewjam/saml_crewjam.exe": "targets/saml_crewjam/saml_crewjam.exe --persistent",
     "targets/saml_crewjam/saml_crewjam": "targets/saml_crewjam/saml_crewjam --persistent",
+    # SAML Java target (JDK javax.xml.crypto / Xerces)
+    "java -cp targets/saml_java_xmldsig SamlJavaXmldsig": "java -cp targets/saml_java_xmldsig SamlJavaXmldsig --persistent",
+    # SAML Rust target (quick-xml parser)
+    "targets/saml_rust_xmlparser/target/release/saml_rust_xmlparser.exe": "targets/saml_rust_xmlparser/target/release/saml_rust_xmlparser.exe --persistent",
+    "targets/saml_rust_xmlparser/target/release/saml_rust_xmlparser": "targets/saml_rust_xmlparser/target/release/saml_rust_xmlparser --persistent",
 }
 
 
