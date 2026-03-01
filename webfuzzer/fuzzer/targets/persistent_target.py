@@ -27,6 +27,17 @@ from pathlib import Path
 from ..protocols import ExecutionResult, Input
 
 
+def _read_nbytes(stream, n: int) -> bytes:
+    """Read exactly *n* bytes from an unbuffered stream."""
+    buf = b""
+    while len(buf) < n:
+        chunk = stream.read(n - len(buf))
+        if not chunk:
+            raise EOFError("Persistent target process died")
+        buf += chunk
+    return buf
+
+
 class PersistentTarget:
     """Fuzzing target using a persistent subprocess with binary protocol."""
 
@@ -49,6 +60,8 @@ class PersistentTarget:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             cwd=self.working_dir,
+            bufsize=0,  # Unbuffered: prevents Python BufferedReader readahead
+                        # that steals pipe data from Rust parallel_pipe_execute.
         )
         # Warmup: send a minimal request to ensure module is fully loaded.
         # This absorbs slow startup (Ruby ~800ms, Node ~300ms) so that
@@ -62,25 +75,18 @@ class PersistentTarget:
             header = struct.pack(">I", len(warmup_data))
             self._proc.stdin.write(header + warmup_data)
             self._proc.stdin.flush()
-            # Read response with generous timeout (5s for cold start)
-            resp_header = b""
-            t = threading.Thread(
-                target=lambda: resp_header.__class__.__init__(resp_header),  # unused
-                daemon=True,
-            )
-            # Simple blocking read with timeout thread
             result = [None]
+
             def _reader():
                 try:
-                    h = self._proc.stdout.read(4)
-                    if len(h) < 4:
-                        return
+                    h = _read_nbytes(self._proc.stdout, 4)
                     out_len = struct.unpack(">I", h)[0]
-                    self._proc.stdout.read(out_len)  # body
-                    self._proc.stdout.read(4)  # exit code
+                    _read_nbytes(self._proc.stdout, out_len)  # body
+                    _read_nbytes(self._proc.stdout, 4)  # exit code
                     result[0] = True
                 except Exception:
                     pass
+
             t = threading.Thread(target=_reader, daemon=True)
             t.start()
             t.join(timeout=5.0)  # 5s generous startup timeout
