@@ -17,32 +17,17 @@ from __future__ import annotations
 import random
 from typing import TYPE_CHECKING
 
+from ..domain import get_all_categories as _get_all_categories
 from ..protocols import ScheduleResult
 
 if TYPE_CHECKING:
     from ..corpus import Corpus, Seed
 
-# Bounded category enum — all possible values from SSRF/diff oracle strategies.
-CATEGORIES: list[str] = [
-    "ssrf_host_confusion",
-    "open_redirect",
-    "scheme_confusion",
-    "authority_confusion",
-    "path_traversal",
-    "port_confusion",
-    "path_confusion",
-    "query_confusion",
-    "fragment_confusion",
-    "accept_reject",
-    "accept_reject_host",
-    "accept_reject_scheme",
-    "output",
-    "timing",
-    "error_pattern",
-    "no_finding",
-]
+# Dynamic CATEGORIES — built from all registered DomainProfiles.
+# New domains auto-extend this list by calling domain.register().
+CATEGORIES: list[str] = _get_all_categories()
 
-MAX_REF_INDEX = 5
+MAX_REF_INDEX = 8
 
 # Cell coordinates: (category_idx, ref_idx)
 CellKey = tuple[int, int]

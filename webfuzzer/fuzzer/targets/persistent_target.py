@@ -47,9 +47,45 @@ class PersistentTarget:
             shell=True,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             cwd=self.working_dir,
         )
+        # Warmup: send a minimal request to ensure module is fully loaded.
+        # This absorbs slow startup (Ruby ~800ms, Node ~300ms) so that
+        # real requests can use the short timeout.
+        self._warmup()
+
+    def _warmup(self) -> None:
+        """Send a dummy request to let the process finish loading."""
+        warmup_data = b"<x/>"
+        try:
+            header = struct.pack(">I", len(warmup_data))
+            self._proc.stdin.write(header + warmup_data)
+            self._proc.stdin.flush()
+            # Read response with generous timeout (5s for cold start)
+            resp_header = b""
+            t = threading.Thread(
+                target=lambda: resp_header.__class__.__init__(resp_header),  # unused
+                daemon=True,
+            )
+            # Simple blocking read with timeout thread
+            result = [None]
+            def _reader():
+                try:
+                    h = self._proc.stdout.read(4)
+                    if len(h) < 4:
+                        return
+                    out_len = struct.unpack(">I", h)[0]
+                    self._proc.stdout.read(out_len)  # body
+                    self._proc.stdout.read(4)  # exit code
+                    result[0] = True
+                except Exception:
+                    pass
+            t = threading.Thread(target=_reader, daemon=True)
+            t.start()
+            t.join(timeout=5.0)  # 5s generous startup timeout
+        except Exception:
+            pass  # Warmup failure is non-fatal; target will restart on next use
 
     def teardown(self) -> None:
         if self._proc is not None:

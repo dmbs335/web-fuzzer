@@ -23,13 +23,46 @@ import json as _json
 from typing import TYPE_CHECKING
 
 from ..corpus import MAP_SIZE, CoverageMap
+from ..domain import get_all_key_sets as _get_all_key_sets
 from ..protocols import ExecutionResult, Target, Input
 
 if TYPE_CHECKING:
     from .feature_store import FeatureRecord
 
-# URL component keys used for structural diff hashing
+# Backward-compat constant (external code may reference this).
 _URL_KEYS = ("scheme", "userinfo", "host", "port", "path", "query", "fragment")
+
+
+def _diff_keys_for(parsed_primary: dict | None, parsed_ref: dict | None) -> tuple[str, ...]:
+    """Choose comparison keys based on what the output actually contains.
+
+    Strategy:
+      1. Check registered domain key sets (from DomainProfile registry).
+      2. Fallback: union of all string-valued keys from both outputs (sorted
+         for deterministic hashing). This makes diff coverage work for ANY
+         domain without explicit registration.
+    """
+    sample = parsed_primary or parsed_ref
+    if sample is None:
+        return _URL_KEYS
+
+    # Check registered domains (stable ordering per profile)
+    for domain_keys in _get_all_key_sets():
+        if any(k in sample for k in domain_keys):
+            return domain_keys
+
+    # Generic fallback: use all top-level keys present in either output.
+    # Only consider keys with scalar values (str, int, float, bool)
+    # to avoid comparing nested structures that hash poorly.
+    all_keys: set[str] = set()
+    for d in (parsed_primary, parsed_ref):
+        if d is not None:
+            for k, v in d.items():
+                if isinstance(v, (str, int, float, bool)):
+                    all_keys.add(k)
+    if all_keys:
+        return tuple(sorted(all_keys))
+    return _URL_KEYS
 
 # Native acceleration (optional)
 try:
@@ -130,6 +163,9 @@ class DiffCoverageCollector:
         if raw_record is not None:
             raw_record.parsed_outputs = parsed
 
+        # Detect which comparison keys to use (URL vs SAML)
+        cmp_keys = _diff_keys_for(parsed[0], parsed[1] if len(parsed) > 1 else None)
+
         # Precompute normalised component values to avoid repeated
         # str().strip().lower() in the inner loop.
         normalised: list[dict[str, str] | None] = []
@@ -137,7 +173,7 @@ class DiffCoverageCollector:
             if d is None:
                 normalised.append(None)
             else:
-                normalised.append({k: str(d.get(k, "")).strip().lower() for k in _URL_KEYS})
+                normalised.append({k: str(d.get(k, "")).strip().lower() for k in cmp_keys})
 
         n = len(ref_results)
         _set = self._set_feature
@@ -149,7 +185,7 @@ class DiffCoverageCollector:
             r_norm = normalised[i + 1]
             if p_norm is not None and r_norm is not None:
                 diff_keys = sorted(
-                    k for k in _URL_KEYS if p_norm[k] != r_norm[k]
+                    k for k in cmp_keys if p_norm[k] != r_norm[k]
                 )
                 if diff_keys:
                     # L1+: cdiff hash (sorted key set → single feature)

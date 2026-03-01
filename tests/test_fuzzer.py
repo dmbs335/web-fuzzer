@@ -1326,11 +1326,11 @@ class TestDiffE2EWithMockTargets:
         from webfuzzer.fuzzer.oracles.diff_oracle import DiffOracle
         from webfuzzer.fuzzer.coverage.diff_coverage import DiffCoverageCollector
 
-        call_count = {"n": 0}
+        # Use JSON outputs so DiffCoverage can detect field-level divergences
+        ref_json = b'{"scheme":"http","host":"example.com","path":"/"}'
 
         def ref_handler(inp: Input) -> ExecutionResult:
-            # Reference always returns "ref_output"
-            return ExecutionResult(exit_code=0, stdout=b"ref_output")
+            return ExecutionResult(exit_code=0, stdout=ref_json)
 
         ref = _MockTarget(ref_handler)
 
@@ -1341,21 +1341,22 @@ class TestDiffE2EWithMockTargets:
 
         # Case 1: same output — no finding, some coverage
         inp1 = Input(data=b"input1")
-        primary1 = ExecutionResult(exit_code=0, stdout=b"ref_output")
+        primary1 = ExecutionResult(exit_code=0, stdout=ref_json)
         assert oracle.check(inp1, primary1) is None
         cov1 = coverage.collect_diff(inp1, primary1)
         assert cov1.edge_count > 0
 
         # Case 2: different output — finding detected, different coverage
         inp2 = Input(data=b"input2")
-        primary2 = ExecutionResult(exit_code=0, stdout=b"different_output")
+        diff_json = b'{"scheme":"https","host":"evil.com","path":"/admin"}'
+        primary2 = ExecutionResult(exit_code=0, stdout=diff_json)
         finding = oracle.check(inp2, primary2)
         assert finding is not None
         assert finding.oracle_name == "differential"
         cov2 = coverage.collect_diff(inp2, primary2)
         assert cov2.edge_count > 0
 
-        # Coverage should be novel
+        # Coverage should be novel — divergent JSON fields produce new bitmap bits
         global_cov = CoverageMap()
         global_cov.update(cov1)
         assert global_cov.has_new_bits(cov2)  # divergent case adds new bits

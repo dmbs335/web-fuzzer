@@ -49,18 +49,27 @@ stdin.on("data", (chunk) => {
 
     let output = "";
     let exitCode = 0;
-    try {
-      if (useProcess) {
-        const result = mod.process(input);
-        output = result.output || "";
-        exitCode = result.exitCode || 0;
-      } else {
-        output = mod.sanitize(input);
-      }
-    } catch (err) {
-      output = "";
+
+    // Guard: reject inputs that can hang XML parsers (entity expansion, huge input)
+    const skip = input.length > 100000 ||
+      (input.includes("<!DOCTYPE") && /<!DOCTYPE[^>]*\[/.test(input));
+
+    if (skip) {
       exitCode = 1;
-      process.stderr.write(`Error: ${err.message}\n`);
+    } else {
+      try {
+        if (useProcess) {
+          const result = mod.process(input);
+          output = result.output || "";
+          exitCode = result.exitCode || 0;
+        } else {
+          output = mod.sanitize(input);
+        }
+      } catch (err) {
+        output = "";
+        exitCode = 1;
+        process.stderr.write(`Error: ${err.message}\n`);
+      }
     }
 
     const outBuf = Buffer.from(output, "utf8");
