@@ -103,15 +103,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--mutators", default="grammar,havoc",
-        help="Comma-separated mutator list (grammar,havoc,token,splice,dictionary,mxss,structural)",
+        help="Comma-separated mutator list (grammar,havoc,token,splice,dictionary,mxss,structural,saml)",
     )
     fuz.add_argument(
         "--scheduler", default="entropic",
-        help="Seed scheduler (random,entropic,ecofuzz,rare-branch)",
+        help="Seed scheduler (random,entropic,ecofuzz,rare-branch,map-elites)",
     )
     fuz.add_argument(
         "--oracle", default="crash,sanitizer",
-        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf)",
+        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml)",
     )
     fuz.add_argument(
         "--initial-seeds", type=int, default=100,
@@ -142,8 +142,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory of seed files to load into initial corpus",
     )
     fuz.add_argument(
+        "--import-findings", type=Path, nargs="+", default=None,
+        help="Import finding inputs from previous session directories as seeds "
+             "(e.g. --import-findings /path/to/session/53 /path/to/session/58)",
+    )
+    fuz.add_argument(
         "--persistent", action="store_true",
         help="Use persistent target mode (keep subprocess alive, ~50x faster)",
+    )
+
+    # ── Exploration strategy flags ─────────────────────────────
+    fuz.add_argument(
+        "--mcts", action="store_true",
+        help="Use MCTS-guided grammar derivation (UCB1 production selection)",
+    )
+    fuz.add_argument(
+        "--mcts-exploration", type=float, default=1.41,
+        help="MCTS exploration weight (UCB1 c parameter, default: 1.41)",
+    )
+    fuz.add_argument(
+        "--mutator-scheduler", default="random",
+        help="Mutator scheduler (random,mopt,darwin,linucb)",
+    )
+    fuz.add_argument(
+        "--linucb-alpha", type=float, default=1.0,
+        help="LinUCB exploration parameter (default: 1.0)",
+    )
+    fuz.add_argument(
+        "--adaptive-coverage", action="store_true",
+        help="Enable CEGAR-inspired adaptive coverage abstraction",
+    )
+    fuz.add_argument(
+        "--adaptive-level", type=int, default=1, choices=range(5),
+        help="Initial refinement level 0-4 (default: 1=coarse)",
+    )
+    fuz.add_argument(
+        "--adaptive-upper-pct", type=float, default=5.0,
+        help="Coarsen when corpus%% exceeds this threshold (default: 5.0)",
+    )
+    fuz.add_argument(
+        "--adaptive-check-interval", type=int, default=5000,
+        help="Check abstraction every N iterations (default: 5000)",
     )
 
     return parser
@@ -166,6 +205,14 @@ _PERSISTENT_MODULE_MAP = {
     "targets/url_curl.py": ("python targets/persistent_wrapper.py", "targets/url_curl_module.py"),
     "targets/url_php_parse_url.php": ("python targets/persistent_wrapper.py", "targets/url_php_parse_url_module.py"),
     "targets/url_wget.py": ("python targets/persistent_wrapper.py", "targets/url_wget_module.py"),
+    # SAML targets
+    "targets/saml_xmlcrypto.js": ("node targets/persistent_wrapper.js", "targets/saml_xmlcrypto_module.js"),
+    "targets/saml_samlify.js": ("node targets/persistent_wrapper.js", "targets/saml_samlify_module.js"),
+    "targets/saml_nodesaml.js": ("node targets/persistent_wrapper.js", "targets/saml_nodesaml_module.js"),
+    "targets/saml_signxml.py": ("python targets/persistent_wrapper.py", "targets/saml_signxml_module.py"),
+    "targets/saml_python3saml.py": ("python targets/persistent_wrapper.py", "targets/saml_python3saml_module.py"),
+    "targets/saml_rubysaml.rb": ("C:/Ruby32-x64/bin/ruby targets/persistent_wrapper.rb", "targets/saml_rubysaml_module.rb"),
+    "targets/saml_phpsaml.php": ("C:/Users/dmbs3/AppData/Local/Microsoft/WinGet/Packages/PHP.PHP.8.3_Microsoft.Winget.Source_8wekyb3d8bbwe/php.exe targets/persistent_wrapper.php", "targets/saml_phpsaml_module.php"),
 }
 
 # Targets with native persistent mode (binary protocol, no wrapper needed).
@@ -175,8 +222,15 @@ _NATIVE_PERSISTENT_MAP = {
     "java -cp targets/url_java_url UrlJavaUrl": "java -cp targets/url_java_url UrlJavaUrl --persistent",
     "targets/url_go_neturl/url_go_neturl.exe": "targets/url_go_neturl/url_go_neturl.exe --persistent",
     "targets/url_go_neturl/url_go_neturl": "targets/url_go_neturl/url_go_neturl --persistent",
+    "targets/url_go_net_url/url_go_net_url.exe": "targets/url_go_net_url/url_go_net_url.exe --persistent",
+    "targets/url_go_net_url/url_go_net_url": "targets/url_go_net_url/url_go_net_url --persistent",
+    "targets/url_rust_url/target/release/url_rust_url.exe": "targets/url_rust_url/target/release/url_rust_url.exe --persistent",
+    "targets/url_rust_url/target/release/url_rust_url": "targets/url_rust_url/target/release/url_rust_url --persistent",
     # Python wrapper maps to Go binary persistent mode
     "python targets/url_go_neturl.py": "targets/url_go_neturl/url_go_neturl.exe --persistent",
+    # SAML Go target (crewjam/saml)
+    "targets/saml_crewjam/saml_crewjam.exe": "targets/saml_crewjam/saml_crewjam.exe --persistent",
+    "targets/saml_crewjam/saml_crewjam": "targets/saml_crewjam/saml_crewjam --persistent",
 }
 
 
@@ -197,7 +251,11 @@ def _to_persistent_cmd(cmd: str) -> str | None:
     # Check native persistent mode first (e.g., Java targets with --persistent flag)
     base_cmd = cmd.replace(" {input}", "").strip()
     if base_cmd in _NATIVE_PERSISTENT_MAP:
-        return _NATIVE_PERSISTENT_MAP[base_cmd]
+        result = _NATIVE_PERSISTENT_MAP[base_cmd]
+        # Windows cmd.exe needs backslashes for relative executable paths
+        if sys.platform == "win32":
+            result = result.replace("/", "\\")
+        return result
 
     for script, (wrapper, module) in _PERSISTENT_MODULE_MAP.items():
         if script in cmd:
@@ -299,7 +357,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
 def _build_mutators(names: str, registry: GrammarRegistry,
                      grammar_name: str, rule: str | None,
                      seed: int | None,
-                     dict_file: Path | None = None) -> list:
+                     dict_file: Path | None = None,
+                     ucb_table=None) -> list:
     """Instantiate mutators from comma-separated names."""
     from .fuzzer.mutators.grammar_mutator import GrammarMutator
     from .fuzzer.mutators.havoc_mutator import HavocMutator
@@ -308,15 +367,17 @@ def _build_mutators(names: str, registry: GrammarRegistry,
     from .fuzzer.mutators.dictionary_mutator import DictionaryMutator
     from .fuzzer.mutators.mxss_mutator import MxssMutator
     from .fuzzer.mutators.structural_havoc_mutator import StructuralHavocMutator
+    from .fuzzer.mutators.saml_mutator import SamlMutator
 
     MUTATOR_MAP = {
-        "grammar": lambda: GrammarMutator(registry, grammar_name, rule, seed=seed),
+        "grammar": lambda: GrammarMutator(registry, grammar_name, rule, seed=seed, ucb_table=ucb_table),
         "havoc": lambda: HavocMutator(seed=seed),
         "token": lambda: TokenMutator(seed=seed),
         "splice": lambda: SpliceMutator(seed=seed),
         "dictionary": lambda: DictionaryMutator(seed=seed, dict_file=dict_file),
         "mxss": lambda: MxssMutator(seed=seed),
         "structural": lambda: StructuralHavocMutator(seed=seed),
+        "saml": lambda: SamlMutator(seed=seed),
     }
 
     mutators = []
@@ -347,10 +408,44 @@ def _build_scheduler(name: str, seed: int | None):
         "rare-branch": lambda: RareBranchScheduler(seed=seed),
     }
 
+    # MAP-Elites: compose with Entropic as primary.
+    if name == "map-elites":
+        from .fuzzer.schedulers.map_elites import MapElitesScheduler
+        from .fuzzer.schedulers.composite import CompositeScheduler
+        return CompositeScheduler(
+            primary=EntropicScheduler(seed=seed),
+            secondary=MapElitesScheduler(seed=seed),
+            p_secondary=0.3,
+            seed=seed,
+        )
+
     factory = SCHEDULER_MAP.get(name)
     if factory is None:
         print(f"Warning: Unknown scheduler {name!r}, using entropic.", file=sys.stderr)
         return EntropicScheduler(seed=seed)
+    return factory()
+
+
+def _build_mutator_scheduler(name: str, seed: int | None, **kwargs):
+    """Instantiate a mutator scheduler by name."""
+    if name == "random":
+        return None  # engine uses _DefaultMutatorScheduler
+
+    from .fuzzer.schedulers.mutation_scheduler import MOPTScheduler, DARWINScheduler
+    from .fuzzer.schedulers.linucb_scheduler import LinUCBScheduler
+
+    MUTATOR_SCHEDULER_MAP = {
+        "mopt": lambda: MOPTScheduler(seed=seed),
+        "darwin": lambda: DARWINScheduler(seed=seed),
+        "linucb": lambda: LinUCBScheduler(
+            alpha=kwargs.get("alpha", 1.0), seed=seed,
+        ),
+    }
+
+    factory = MUTATOR_SCHEDULER_MAP.get(name)
+    if factory is None:
+        print(f"Warning: Unknown mutator scheduler {name!r}, using random.", file=sys.stderr)
+        return None
     return factory()
 
 
@@ -362,6 +457,7 @@ def _build_oracles(names: str) -> list:
     from .fuzzer.oracles.xss_oracle import XssOracle
     from .fuzzer.oracles.mxss_oracle import MxssOracle
     from .fuzzer.oracles.ssrf_oracle import SsrfOracle
+    from .fuzzer.oracles.saml_oracle import SamlOracle
 
     ORACLE_MAP = {
         "crash": lambda: CrashOracle(),
@@ -370,6 +466,7 @@ def _build_oracles(names: str) -> list:
         "xss": lambda: XssOracle(),
         "mxss": lambda: MxssOracle(),
         "ssrf": lambda: SsrfOracle(),
+        "saml": lambda: SamlOracle(),
     }
 
     oracles = []
@@ -420,7 +517,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         from .fuzzer.targets.persistent_target import PersistentTarget
         pcmd = _to_persistent_cmd(args.target_cmd)
         if pcmd is not None:
-            target = PersistentTarget(pcmd)
+            target = PersistentTarget(pcmd, timeout_seconds=0.5)
         else:
             target = ProcessTarget(args.target_cmd)
     else:
@@ -434,26 +531,44 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         for cmd in diff_cmds:
             pcmd = _to_persistent_cmd(cmd)
             if pcmd is not None:
-                reference_targets.append(PersistentTarget(pcmd))
+                reference_targets.append(PersistentTarget(pcmd, timeout_seconds=0.5))
             else:
                 reference_targets.append(ProcessTarget(cmd))
     else:
         reference_targets = [ProcessTarget(cmd) for cmd in diff_cmds]
     is_diff_mode = len(reference_targets) > 0
 
+    # MCTS UCB table (shared between input source and grammar mutator)
+    ucb_table = None
+    if getattr(args, "mcts", False):
+        from .fuzzer.mcts import UCBTable
+        ucb_table = UCBTable(
+            exploration_weight=getattr(args, "mcts_exploration", 1.41),
+            seed=args.seed,
+        )
+
     # Input source
     input_source = GrammarInputSource(
         registry, args.grammar, args.rule, seed=args.seed,
+        ucb_table=ucb_table,
     )
 
     # Mutators
     mutators = _build_mutators(
         args.mutators, registry, args.grammar, args.rule, args.seed,
         dict_file=getattr(args, "dict_file", None),
+        ucb_table=ucb_table,
     )
 
     # Scheduler
     scheduler = _build_scheduler(args.scheduler, args.seed)
+
+    # Mutator scheduler
+    mutator_scheduler = _build_mutator_scheduler(
+        getattr(args, "mutator_scheduler", "random"),
+        args.seed,
+        alpha=getattr(args, "linucb_alpha", 1.0),
+    )
 
     # Oracles — auto-add DiffOracle in differential mode
     oracles = _build_oracles(args.oracle)
@@ -461,7 +576,11 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         # Use domain-specific strategies when specialized oracles are active
         has_xss = any(getattr(o, "name", "") == "xss" for o in oracles)
         has_ssrf = any(getattr(o, "name", "") == "ssrf" for o in oracles)
-        if has_ssrf:
+        has_saml = any(getattr(o, "name", "") == "saml" for o in oracles)
+        if has_saml:
+            from .fuzzer.oracles.saml_diff_strategy import get_saml_strategies
+            strategies = get_saml_strategies()
+        elif has_ssrf:
             from .fuzzer.oracles.ssrf_oracle import get_ssrf_strategies
             strategies = get_ssrf_strategies()
         elif has_xss:
@@ -476,7 +595,21 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
 
     # Coverage — use DiffCoverageCollector in differential mode
     if is_diff_mode:
-        coverage = DiffCoverageCollector(reference_targets=reference_targets)
+        if getattr(args, "adaptive_coverage", False):
+            from .fuzzer.coverage.adaptive_coverage import (
+                AdaptiveDiffCoverage, AdaptiveConfig, RefinementLevel,
+            )
+            adaptive_config = AdaptiveConfig(
+                initial_level=RefinementLevel(getattr(args, "adaptive_level", 1)),
+                check_interval=getattr(args, "adaptive_check_interval", 5000),
+                upper_corpus_pct=getattr(args, "adaptive_upper_pct", 5.0),
+            )
+            coverage = AdaptiveDiffCoverage(
+                reference_targets=reference_targets,
+                config=adaptive_config,
+            )
+        else:
+            coverage = DiffCoverageCollector(reference_targets=reference_targets)
     else:
         coverage = ResponseCoverageCollector()
 
@@ -488,6 +621,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         oracles=oracles,
         coverage=coverage,
         seed_scheduler=scheduler,
+        mutator_scheduler=mutator_scheduler,
         max_iterations=args.count,
         max_time_seconds=args.timeout,
         initial_seed_count=args.initial_seeds,
@@ -495,6 +629,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         output_dir=args.output_dir,
         reference_targets=reference_targets,
         seeds_dir=getattr(args, "seeds_dir", None),
+        import_findings=getattr(args, "import_findings", None),
     )
 
     print(f"Starting fuzzer: grammar={args.grammar}, target={args.target_cmd}",
@@ -506,10 +641,19 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
             print(f"    ref[{i}]: {cmd}", file=sys.stderr)
     print(f"  Mutators: {', '.join(m.name for m in mutators)}", file=sys.stderr)
     print(f"  Scheduler: {args.scheduler}", file=sys.stderr)
+    print(f"  Mutator scheduler: {getattr(args, 'mutator_scheduler', 'random')}", file=sys.stderr)
     print(f"  Oracles: {', '.join(o.name for o in oracles)}", file=sys.stderr)
+    if getattr(args, "mcts", False):
+        expl = getattr(args, "mcts_exploration", 1.41)
+        print(f"  MCTS: enabled (c={expl})", file=sys.stderr)
+    if getattr(args, "adaptive_coverage", False):
+        lvl = getattr(args, "adaptive_level", 1)
+        print(f"  Adaptive coverage: L{lvl} (CEGAR)", file=sys.stderr)
     print(f"  Initial seeds: {args.initial_seeds}", file=sys.stderr)
     if getattr(args, "seeds_dir", None):
         print(f"  Seeds dir: {args.seeds_dir}", file=sys.stderr)
+    if getattr(args, "import_findings", None):
+        print(f"  Import findings: {len(args.import_findings)} session dir(s)", file=sys.stderr)
     if args.count:
         print(f"  Max iterations: {args.count}", file=sys.stderr)
     if args.timeout:

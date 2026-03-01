@@ -20,9 +20,13 @@ from __future__ import annotations
 
 import hashlib
 import json as _json
+from typing import TYPE_CHECKING
 
 from ..corpus import MAP_SIZE, CoverageMap
 from ..protocols import ExecutionResult, Target, Input
+
+if TYPE_CHECKING:
+    from .feature_store import FeatureRecord
 
 # URL component keys used for structural diff hashing
 _URL_KEYS = ("scheme", "userinfo", "host", "port", "path", "query", "fragment")
@@ -81,11 +85,21 @@ class DiffCoverageCollector:
     def collect_diff(
         self, inp: Input, primary_result: ExecutionResult,
         ref_results: list[ExecutionResult] | None = None,
+        level: int = 1,
+        raw_record: "FeatureRecord | None" = None,
     ) -> CoverageMap:
         """Collect coverage based on divergence across all targets.
 
-        If ref_results is provided, uses cached results instead of
-        re-executing reference targets.
+        Args:
+            ref_results: Pre-computed reference results (skips re-execution).
+            level: Refinement level (0–4) for CEGAR adaptive coverage.
+                0 = minimal (exit_vec + div_bucket only)
+                1 = coarse (+ per-pair cdiff hash) — default
+                2 = component (+ per-component individual bits)
+                3 = values (+ actual differing value hashes)
+                4 = full (+ status_vec + error patterns)
+            raw_record: If provided, ALL features at ALL levels are appended
+                to it for later re-hashing by :class:`AdaptiveDiffCoverage`.
         """
         bitmap = bytearray(self.map_size)
 
@@ -99,24 +113,25 @@ class DiffCoverageCollector:
                 except Exception:
                     ref_results.append(ExecutionResult(exit_code=-999))
 
-        # Feature 1: Exit code class vector
+        # Feature 1: Exit code class vector (L0+, always)
         exit_classes = [self._exit_class(primary_result)]
         for ref in ref_results:
             exit_classes.append(self._exit_class(ref))
         exit_vec = ",".join(str(c) for c in exit_classes)
         self._set_feature(bitmap, "exit_vec", exit_vec)
+        if raw_record is not None:
+            raw_record.features.append(("exit_vec", exit_vec))
 
         # Parse all outputs
         parsed = [self._parse_url_json(primary_result)]
         for ref in ref_results:
             parsed.append(self._parse_url_json(ref))
+        if raw_record is not None:
+            raw_record.parsed_outputs = parsed
 
         n = len(ref_results)
 
-        # Feature 2: Per-pair divergence signature (coarse)
-        # Hash the SET of differing components per pair as ONE feature,
-        # not one feature per component.  This collapses the feature space
-        # from 7*n individual bits to n composite features.
+        # Feature 2: Per-pair divergence signature
         div_count = 0
         for i in range(n):
             p = parsed[0]
@@ -127,39 +142,93 @@ class DiffCoverageCollector:
                     if str(p.get(k, "")).strip().lower() != str(r.get(k, "")).strip().lower()
                 )
                 if diff_keys:
-                    self._set_feature(bitmap, f"cdiff_0_{i}", ",".join(diff_keys))
+                    # L1+: cdiff hash (sorted key set → single feature)
+                    ns_cdiff = f"cdiff_0_{i}"
+                    val_cdiff = ",".join(diff_keys)
+                    if level >= 1:
+                        self._set_feature(bitmap, ns_cdiff, val_cdiff)
+                    if raw_record is not None:
+                        raw_record.features.append((ns_cdiff, val_cdiff))
+
+                    # L2+: per-component individual bits
+                    if level >= 2:
+                        for k in diff_keys:
+                            self._set_feature(bitmap, f"comp_0_{i}_{k}", "1")
+                    if raw_record is not None:
+                        for k in diff_keys:
+                            raw_record.features.append((f"comp_0_{i}_{k}", "1"))
+
+                    # L3+: actual differing value hashes
+                    if level >= 3:
+                        for k in diff_keys:
+                            pv = str(p.get(k, "")).strip().lower()
+                            rv = str(r.get(k, "")).strip().lower()
+                            vh = hashlib.sha256(f"{pv}|{rv}".encode()).hexdigest()[:8]
+                            self._set_feature(bitmap, f"val_0_{i}_{k}", vh)
+                    if raw_record is not None:
+                        for k in diff_keys:
+                            pv = str(p.get(k, "")).strip().lower()
+                            rv = str(r.get(k, "")).strip().lower()
+                            vh = hashlib.sha256(f"{pv}|{rv}".encode()).hexdigest()[:8]
+                            raw_record.features.append((f"val_0_{i}_{k}", vh))
+
                     div_count += 1
+
             elif p is None and r is not None:
-                self._set_feature(bitmap, f"parse_0_{i}", "primary_fail")
+                ns_pf = f"parse_0_{i}"
+                self._set_feature(bitmap, ns_pf, "primary_fail")
+                if raw_record is not None:
+                    raw_record.features.append((ns_pf, "primary_fail"))
                 div_count += 1
             elif p is not None and r is None:
-                self._set_feature(bitmap, f"parse_0_{i}", "ref_fail")
+                ns_rf = f"parse_0_{i}"
+                self._set_feature(bitmap, ns_rf, "ref_fail")
+                if raw_record is not None:
+                    raw_record.features.append((ns_rf, "ref_fail"))
                 div_count += 1
 
             # Exit code divergence
             if exit_classes[0] != exit_classes[i + 1]:
-                self._set_feature(bitmap, f"div_exit_0_{i}", "1")
+                ns_de = f"div_exit_0_{i}"
+                self._set_feature(bitmap, ns_de, "1")
+                if raw_record is not None:
+                    raw_record.features.append((ns_de, "1"))
                 if div_count == 0:
                     div_count += 1
 
-        # Feature 3: Status code vector (HTTP targets)
+        # Feature 3: Status code vector (L4+ only)
         status_codes = [primary_result.metadata.get("status_code")]
         for ref in ref_results:
             status_codes.append(ref.metadata.get("status_code"))
         if any(s is not None for s in status_codes):
             status_vec = ",".join(str(s or "?") for s in status_codes)
-            self._set_feature(bitmap, "status_vec", status_vec)
+            if level >= 4:
+                self._set_feature(bitmap, "status_vec", status_vec)
+            if raw_record is not None:
+                raw_record.features.append(("status_vec", status_vec))
 
-        # Feature 4: Error pattern divergence
+        # Feature 4: Error pattern divergence (L4+ only)
         p_has_err = bool(primary_result.stderr)
         for i, ref in enumerate(ref_results):
             r_has_err = bool(ref.stderr)
             if p_has_err != r_has_err:
-                self._set_feature(bitmap, f"div_err_0_{i}", "1")
+                ns_err = f"div_err_0_{i}"
+                if level >= 4:
+                    self._set_feature(bitmap, ns_err, "1")
+                if raw_record is not None:
+                    raw_record.features.append((ns_err, "1"))
 
-        # Feature 5: Divergence count bucket (coarse)
-        bucket = "0" if div_count == 0 else "1" if div_count == 1 else "2-3" if div_count <= 3 else "4+"
+        # Feature 5: Divergence count bucket (L0+, granularity varies)
+        if level <= 1:
+            bucket = "0" if div_count == 0 else "1+"
+        elif level <= 3:
+            bucket = "0" if div_count == 0 else "1" if div_count == 1 else "2-3" if div_count <= 3 else "4+"
+        else:
+            bucket = str(min(div_count, 5)) if div_count <= 5 else "5+"
         self._set_feature(bitmap, "div_bucket", bucket)
+        if raw_record is not None:
+            raw_record.features.append(("div_bucket", bucket))
+            raw_record.div_count = div_count
 
         edge_count = sum(1 for b in bitmap if b)
         return CoverageMap(bitmap=bitmap, edge_count=edge_count)

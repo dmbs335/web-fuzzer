@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from .corpus import Corpus, CoverageMap, Seed
 from .coverage.diff_coverage import DiffCoverageCollector
+from .coverage.adaptive_coverage import AdaptiveDiffCoverage
 from .protocols import (
     CoverageCollector,
     Deduplicator,
@@ -76,6 +77,7 @@ class FuzzEngine:
         status_interval: float = 5.0,
         reference_targets: list[Target] | None = None,
         seeds_dir: Path | None = None,
+        import_findings: list[Path] | None = None,
     ):
         self.target = target
         self.reference_targets: list[Target] = reference_targets or []
@@ -93,6 +95,7 @@ class FuzzEngine:
         self.output_dir = output_dir
         self.status_interval = status_interval
         self.seeds_dir = seeds_dir
+        self.import_findings = import_findings or []
 
         # Use defaults if not provided
         self.seed_scheduler: SeedScheduler = seed_scheduler or _DefaultSeedScheduler(self.rng)
@@ -145,6 +148,34 @@ class FuzzEngine:
         """Generate initial seeds and populate the corpus."""
         file_seed_count = 0
 
+        # Phase 0: Import finding inputs from previous sessions
+        if self.import_findings:
+            imported = 0
+            for session_dir in self.import_findings:
+                findings_dir = session_dir / "findings"
+                if not findings_dir.is_dir():
+                    logger.warning("No findings dir in %s", session_dir)
+                    continue
+                for fd in sorted(findings_dir.iterdir()):
+                    input_f = fd / "input"
+                    if not input_f.is_file():
+                        continue
+                    try:
+                        data = input_f.read_bytes()
+                        if data:
+                            inp = Input(data=data)
+                            result = self._execute(inp)
+                            ref_results = self._execute_references(inp)
+                            cov = self._collect_coverage(inp, result, ref_results=ref_results)
+                            self.corpus.force_add(inp, cov)
+                            self._check_oracles(inp, result, mutator_name="file_seed", ref_results=ref_results)
+                            self.stats.record_execution("file_seed")
+                            imported += 1
+                            file_seed_count += 1
+                    except Exception as e:
+                        logger.warning("Failed to import finding %s: %s", input_f, e)
+            logger.info("Imported %d finding inputs from %d session(s)", imported, len(self.import_findings))
+
         # Phase 1: Load file-based seeds if seeds_dir is provided
         if self.seeds_dir and self.seeds_dir.is_dir():
             seed_files = sorted(self.seeds_dir.iterdir())
@@ -177,9 +208,21 @@ class FuzzEngine:
             ref_results = self._execute_references(inp)
             cov = self._collect_coverage(inp, result, ref_results=ref_results)
 
+            # Check novelty BEFORE force_add (which merges into global coverage)
+            is_novel = bool(
+                cov and self.coverage
+                and self.coverage.is_novel(self.corpus.global_coverage, cov)
+            )
             self.corpus.force_add(inp, cov)
-            self._check_oracles(inp, result, mutator_name="seed", ref_results=ref_results)
+            found_crash = self._check_oracles(inp, result, mutator_name="seed", ref_results=ref_results)
             self.stats.record_execution("seed")
+
+            # MCTS feedback: backpropagate to grammar UCB1 table
+            if hasattr(self.input_source, 'update'):
+                self.input_source.update(inp, ScheduleResult(
+                    found_new_coverage=is_novel,
+                    found_crash=found_crash,
+                ))
 
         self.stats.update_corpus(
             len(self.corpus),
@@ -266,7 +309,6 @@ class FuzzEngine:
                             energy=new_seed.energy,
                             metadata=mutated_input.metadata,
                         )
-
             # 6. Check oracles
             found_crash = self._check_oracles(mutated_input, result, mutator_name, ref_results=ref_results)
 
@@ -276,9 +318,28 @@ class FuzzEngine:
                 found_crash=found_crash,
                 execution_time_ms=result.duration_ms,
                 new_edges=new_edges,
+                finding_metadata=self._last_finding_metadata,
             )
             self.seed_scheduler.update(seed, schedule_result)
             self.mutator_scheduler.update(mutator, schedule_result)
+
+            # 7.5 MCTS feedback: backpropagate to grammar UCB1 table
+            if hasattr(self.input_source, 'update') and (is_novel or found_crash):
+                self.input_source.update(mutated_input, schedule_result)
+
+            # 7.6 CEGAR adaptive coverage check
+            if isinstance(self.coverage, AdaptiveDiffCoverage):
+                self.coverage.notify_execution()
+                if is_novel:
+                    self.coverage.notify_new_coverage(self.stats.total_iterations)
+                if self.coverage.check_and_adapt(self.corpus):
+                    self.stats.update_corpus(
+                        len(self.corpus),
+                        sum(len(s.input.data) for s in self.corpus.seeds),
+                    )
+                    self.stats.record_new_coverage(
+                        self.corpus.global_coverage.edge_count,
+                    )
 
             # 8. Process external commands (priority adjustments etc.)
             self._process_commands()
@@ -290,9 +351,16 @@ class FuzzEngine:
         self, inp: Input, result: ExecutionResult,
         ref_results: list[ExecutionResult] | None = None,
     ) -> CoverageMap | None:
-        """Collect coverage, dispatching to diff coverage if applicable."""
+        """Collect coverage, dispatching to diff/adaptive coverage if applicable."""
         if self.coverage is None:
             return None
+        if isinstance(self.coverage, AdaptiveDiffCoverage):
+            # Adaptive wrapper needs seed_id for FeatureStore.
+            # During seeding (corpus.add not yet called) seed_id is corpus._next_id.
+            seed_id = self.corpus._next_id
+            return self.coverage.collect_diff(
+                inp, result, ref_results=ref_results, seed_id=seed_id,
+            )
         if isinstance(self.coverage, DiffCoverageCollector):
             return self.coverage.collect_diff(inp, result, ref_results=ref_results)
         return self.coverage.collect(result)
@@ -390,7 +458,7 @@ class FuzzEngine:
                 raise RuntimeError("Could not obtain pipe handles")
             handles.append(ph)
 
-        timeout_ms = int(self.reference_targets[0].timeout_seconds * 1000)
+        timeout_ms = int(max(t.timeout_seconds for t in self.reference_targets) * 1000)
 
         # Call Rust — GIL released during I/O
         raw_results = parallel_pipe_execute(handles, inp.data, timeout_ms)
@@ -401,6 +469,8 @@ class FuzzEngine:
             if error is not None:
                 target = self.reference_targets[i]
                 assert isinstance(target, PersistentTarget)
+                logger.warning("Ref[%d] error (%s): %s (%.0fms)",
+                               i, target.command[:60], error, duration_ms)
                 target.teardown()
                 results.append(ExecutionResult(
                     exit_code=-1,
@@ -420,8 +490,13 @@ class FuzzEngine:
     def _check_oracles(self, inp: Input, result: ExecutionResult,
                        mutator_name: str = "",
                        ref_results: list[ExecutionResult] | None = None) -> bool:
-        """Run all oracles. Returns True if any finding was recorded."""
+        """Run all oracles. Returns True if any finding was recorded.
+
+        Side-effect: populates ``self._last_finding_metadata`` with
+        metadata dicts for each unique finding (used by MAP-Elites).
+        """
         found = False
+        self._last_finding_metadata: list[dict] = []
         for oracle in self.oracles:
             # DiffOracle.check_with_refs returns list[Finding]
             if ref_results is not None and hasattr(oracle, 'check_with_refs'):
@@ -458,6 +533,13 @@ class FuzzEngine:
                         "Finding: [%s] %s (oracle=%s)",
                         finding.severity.value, finding.title, finding.oracle_name,
                     )
+                    # Collect metadata for MAP-Elites scheduler.
+                    self._last_finding_metadata.append({
+                        "category": finding.metadata.get("category", ""),
+                        "ref_index": finding.metadata.get("ref_index", 0),
+                        "severity": finding.severity.value,
+                        "strategy": finding.metadata.get("strategy", ""),
+                    })
                     found = True
         return found
 
@@ -615,45 +697,37 @@ class _DefaultDeduplicator:
         self._seen: set[str] = set()
 
     def fingerprint(self, finding: Finding) -> str:
-        import hashlib
-        h = hashlib.sha256()
-        h.update(finding.oracle_name.encode())
-        h.update(finding.severity.value.encode())
-        h.update(str(finding.result.exit_code).encode())
-        h.update(finding.result.stderr[:256])
-
         meta = finding.metadata or {}
 
-        # Strategy name (exit_code, output, ssrf, timing, error_pattern)
-        if "strategy" in meta:
-            h.update(meta["strategy"].encode())
+        # Build key string directly — no hashing needed, string IS the fingerprint
+        parts = [
+            finding.oracle_name,
+            finding.severity.value,
+            str(finding.result.exit_code),
+            meta.get("strategy", ""),
+            str(meta.get("ref_index", "")),
+            meta.get("category", ""),
+        ]
 
-        # Which reference target triggered the finding
-        if "ref_index" in meta:
-            h.update(str(meta["ref_index"]).encode())
+        df = meta.get("diff_fields")
+        if df:
+            parts.append(",".join(sorted(df)))
 
-        # SSRF-specific category (host_confusion, scheme_confusion, etc.)
-        if "category" in meta:
-            h.update(meta["category"].encode())
+        pi = meta.get("primary_internal")
+        if pi is not None:
+            parts.append(f"pi={pi}")
+        ri = meta.get("ref_internal")
+        if ri is not None:
+            parts.append(f"ri={ri}")
 
-        # Set of JSON fields that differ (computed by SSRF/output strategy)
-        if "diff_fields" in meta:
-            h.update(",".join(sorted(meta["diff_fields"])).encode())
+        pe = meta.get("primary_exit")
+        re_ = meta.get("ref_exit")
+        if pe is not None and re_ is not None:
+            parts.append(f"p={pe},r={re_}")
 
-        # For host confusion: internal vs external classification
-        # (not exact host — same class of bypass should dedup)
-        if "primary_internal" in meta:
-            h.update(f"pi={meta['primary_internal']}".encode())
-        if "ref_internal" in meta:
-            h.update(f"ri={meta['ref_internal']}".encode())
+        return "|".join(parts)
 
-        # For accept/reject: direction matters
-        if "primary_exit" in meta and "ref_exit" in meta:
-            h.update(f"p={meta['primary_exit']},r={meta['ref_exit']}".encode())
-
-        return h.hexdigest()[:16]
-
-    def is_duplicate(self, finding: Finding) -> bool:
+    def is_duplicate(self, finding: Finding) -> str:
         return finding.fingerprint in self._seen
 
     def register(self, finding: Finding) -> None:

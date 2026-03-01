@@ -20,6 +20,7 @@ from ..protocols import Input
 if TYPE_CHECKING:
     from ...core.registry import GrammarRegistry
     from ..corpus import Seed
+    from ..mcts import UCBTable
 
 
 class GrammarMutator:
@@ -37,14 +38,15 @@ class GrammarMutator:
         grammar_name: str,
         rule_name: str | None = None,
         seed: int | None = None,
+        ucb_table: "UCBTable | None" = None,
     ) -> None:
         self.registry = registry
         self.grammar_name = grammar_name
         self.rule_name = rule_name
         self.rng = random.Random(seed)
-        self.tree_gen = TreeGenerator(registry, seed=seed)
+        self.tree_gen = TreeGenerator(registry, seed=seed, ucb_table=ucb_table)
         self._input_source = GrammarInputSource(
-            registry, grammar_name, rule_name, seed=seed
+            registry, grammar_name, rule_name, seed=seed, ucb_table=ucb_table,
         )
 
         self._strategies = [
