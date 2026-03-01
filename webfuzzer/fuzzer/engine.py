@@ -863,7 +863,7 @@ class _DefaultDeduplicator:
 
         return "|".join(parts)
 
-    def is_duplicate(self, finding: Finding) -> str:
+    def is_duplicate(self, finding: Finding) -> bool:
         return finding.fingerprint in self._seen
 
     def register(self, finding: Finding) -> None:
