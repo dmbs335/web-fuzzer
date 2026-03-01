@@ -25,14 +25,20 @@ from ..protocols import ExecutionResult, Finding, Input, Severity
 
 
 def _parse_sanitizer_output(stdout: bytes) -> dict | None:
-    """Parse JSON output from a sanitizer target."""
+    """Parse JSON output from a sanitizer target.
+
+    Tolerant of partial results: if any security signal key is present
+    we accept the output even if ``error`` is set.
+    """
     if not stdout:
         return None
     try:
         data = json.loads(stdout.strip())
-        if isinstance(data, dict) and "error" in data and data.get("error"):
+        if not isinstance(data, dict):
             return None
-        if isinstance(data, dict) and ("sanitized" in data or "empty_output" in data):
+        # Accept if any recognised key is present (even with error)
+        _KNOWN = {"sanitized", "empty_output", "has_script", "has_event_handler"}
+        if any(k in data for k in _KNOWN):
             return data
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
@@ -219,6 +225,8 @@ class SanitizerNamespaceDivergenceStrategy:
                 "only_primary": sorted(only_primary),
                 "only_ref": sorted(only_ref),
                 "ref_index": ref_index,
+                "primary_sanitized": (p.get("sanitized") or "")[:500],
+                "ref_sanitized": (r.get("sanitized") or "")[:500],
                 "input_preview": _input_preview(inp),
             },
         )
@@ -295,6 +303,8 @@ class SanitizerStructuralMutationStrategy:
                 "only_primary": sorted(only_primary),
                 "only_ref": sorted(only_ref),
                 "ref_index": ref_index,
+                "primary_sanitized": (p.get("sanitized") or "")[:500],
+                "ref_sanitized": (r.get("sanitized") or "")[:500],
                 "input_preview": _input_preview(inp),
             },
         )
@@ -358,6 +368,8 @@ class SanitizerDomClobberingStrategy:
                 "primary_clobber_elems": sorted(p_elems & _CLOBBER_ELEMENTS),
                 "ref_clobber_elems": sorted(r_elems & _CLOBBER_ELEMENTS),
                 "ref_index": ref_index,
+                "primary_sanitized": (p.get("sanitized") or "")[:500],
+                "ref_sanitized": (r.get("sanitized") or "")[:500],
                 "input_preview": _input_preview(inp),
             },
         )

@@ -261,6 +261,50 @@ class DiffCoverageCollector:
                 if raw_record is not None:
                     raw_record.features.append((ns_err, "1"))
 
+        # Feature 6: List-field set divergence (elements_kept, attributes_kept)
+        # Provides richer coverage signal for sanitizer targets where
+        # boolean comparison_keys saturate quickly.
+        p_parsed = parsed[0]
+        if p_parsed is not None and "elements_kept" in p_parsed:
+            for i in range(n):
+                r_parsed_i = parsed[i + 1]
+                if r_parsed_i is None or "elements_kept" not in r_parsed_i:
+                    continue
+                # Element set divergence
+                p_elems = frozenset(
+                    str(e) for e in p_parsed.get("elements_kept", [])
+                )
+                r_elems = frozenset(
+                    str(e) for e in r_parsed_i.get("elements_kept", [])
+                )
+                if p_elems != r_elems:
+                    elem_sig = hashlib.sha256(
+                        f"{sorted(p_elems)}|{sorted(r_elems)}".encode()
+                    ).hexdigest()[:8]
+                    if level >= 1:
+                        _set(bitmap, f"elem_div_0_{i}", elem_sig)
+                    if raw_record is not None:
+                        raw_record.features.append(
+                            (f"elem_div_0_{i}", elem_sig)
+                        )
+                # Attribute set divergence
+                p_attrs = frozenset(
+                    str(a) for a in p_parsed.get("attributes_kept", [])
+                )
+                r_attrs = frozenset(
+                    str(a) for a in r_parsed_i.get("attributes_kept", [])
+                )
+                if p_attrs != r_attrs:
+                    attr_sig = hashlib.sha256(
+                        f"{sorted(p_attrs)}|{sorted(r_attrs)}".encode()
+                    ).hexdigest()[:8]
+                    if level >= 1:
+                        _set(bitmap, f"attr_div_0_{i}", attr_sig)
+                    if raw_record is not None:
+                        raw_record.features.append(
+                            (f"attr_div_0_{i}", attr_sig)
+                        )
+
         # Feature 5: Divergence count bucket (L0+, granularity varies)
         if level <= 1:
             bucket = "0" if div_count == 0 else "1+"

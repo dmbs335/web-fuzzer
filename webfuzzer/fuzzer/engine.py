@@ -464,21 +464,16 @@ class FuzzEngine:
         return list(self._ref_pool.map(_run, self.reference_targets))
 
     def _can_use_rust_pipes(self) -> bool:
-        """Check if Rust parallel pipe execution is available and applicable."""
-        if not hasattr(self, '_rust_pipes_checked'):
-            from webfuzzer.native import RUST_EXTENSION
-            from .targets.persistent_target import PersistentTarget
-            self._rust_pipes_ok = (
-                RUST_EXTENSION
-                and len(self.reference_targets) > 1
-                and all(isinstance(t, PersistentTarget)
-                        for t in self.reference_targets)
-            )
-            self._rust_pipes_checked = True
-            if self._rust_pipes_ok:
-                logger.info("Using Rust parallel_pipe_execute for %d targets",
-                            len(self.reference_targets))
-        return self._rust_pipes_ok
+        """Check if Rust parallel pipe execution is available and applicable.
+
+        Currently disabled: Rust raw pipe I/O conflicts with Python's
+        buffered warmup reads on the same pipe handles, causing reference
+        targets to return empty stdout.  Python ThreadPoolExecutor is used
+        instead (still fast enough at ~50 exec/s with 7 reference targets).
+        TODO: Re-enable after implementing handle-level isolation (dup pipe
+        fds after warmup, or pass raw fds directly to Rust).
+        """
+        return False
 
     def _execute_references_rust(self, inp: Input) -> list[ExecutionResult]:
         """Execute all reference targets via Rust parallel_pipe_execute."""
@@ -848,6 +843,26 @@ class _DefaultDeduplicator:
         df = meta.get("diff_fields")
         if df:
             parts.append(",".join(sorted(df)))
+
+        # Sanitizer output signature — distinguish findings with same
+        # category but different sanitized outputs.
+        ps = meta.get("primary_sanitized", "")
+        rs = meta.get("ref_sanitized", "")
+        if ps or rs:
+            import hashlib
+            sig = hashlib.sha256(
+                f"{ps[:200]}|{rs[:200]}".encode()
+            ).hexdigest()[:8]
+            parts.append(f"out={sig}")
+
+        # Namespace/structural element sets — different element
+        # divergence patterns produce distinct fingerprints.
+        op = meta.get("only_primary")
+        orr = meta.get("only_ref")
+        if op:
+            parts.append(f"op={','.join(sorted(op))}")
+        if orr:
+            parts.append(f"or={','.join(sorted(orr))}")
 
         pi = meta.get("primary_internal")
         if pi is not None:

@@ -103,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--mutators", default="grammar,havoc",
-        help="Comma-separated mutator list (grammar,havoc,token,splice,dictionary,mxss,structural,saml)",
+        help="Comma-separated mutator list (grammar,havoc,token,splice,dictionary,mxss,structural,saml,cookie)",
     )
     fuz.add_argument(
         "--scheduler", default="entropic",
@@ -111,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--oracle", default="crash,sanitizer",
-        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml,sanitizer_diff)",
+        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml,cookie,sanitizer_diff)",
     )
     fuz.add_argument(
         "--initial-seeds", type=int, default=100,
@@ -225,6 +225,12 @@ _PERSISTENT_MODULE_MAP = {
     "targets/saml_python3saml.py": ("python targets/persistent_wrapper.py", "targets/saml_python3saml_module.py"),
     "targets/saml_rubysaml.rb": ("C:/Ruby32-x64/bin/ruby targets/persistent_wrapper.rb", "targets/saml_rubysaml_module.rb"),
     "targets/saml_phpsaml.php": ("C:/Users/dmbs3/AppData/Local/Microsoft/WinGet/Packages/PHP.PHP.8.3_Microsoft.Winget.Source_8wekyb3d8bbwe/php.exe targets/persistent_wrapper.php", "targets/saml_phpsaml_module.php"),
+    # Cookie targets
+    "targets/cookie_python_stdlib.py": ("python targets/persistent_wrapper.py", "targets/cookie_python_stdlib_module.py"),
+    "targets/cookie_node_setcookieparser.js": ("node targets/persistent_wrapper.js", "targets/cookie_node_setcookieparser_module.js"),
+    "targets/cookie_node_toughcookie.js": ("node targets/persistent_wrapper.js", "targets/cookie_node_toughcookie_module.js"),
+    "targets/cookie_node_cookie.js": ("node targets/persistent_wrapper.js", "targets/cookie_node_cookie_module.js"),
+    "targets/cookie_ruby_webrick.rb": ("C:/Ruby32-x64/bin/ruby targets/persistent_wrapper.rb", "targets/cookie_ruby_webrick_module.rb"),
 }
 
 # Targets with native persistent mode (binary protocol, no wrapper needed).
@@ -380,6 +386,7 @@ def _build_mutators(names: str, registry: GrammarRegistry,
     from .fuzzer.mutators.mxss_mutator import MxssMutator
     from .fuzzer.mutators.structural_havoc_mutator import StructuralHavocMutator
     from .fuzzer.mutators.saml_mutator import SamlMutator
+    from .fuzzer.mutators.cookie_mutator import CookieMutator
 
     MUTATOR_MAP = {
         "grammar": lambda: GrammarMutator(registry, grammar_name, rule, seed=seed, ucb_table=ucb_table),
@@ -390,6 +397,7 @@ def _build_mutators(names: str, registry: GrammarRegistry,
         "mxss": lambda: MxssMutator(seed=seed),
         "structural": lambda: StructuralHavocMutator(seed=seed),
         "saml": lambda: SamlMutator(seed=seed),
+        "cookie": lambda: CookieMutator(seed=seed),
     }
 
     mutators = []
@@ -470,6 +478,7 @@ def _build_oracles(names: str) -> list:
     from .fuzzer.oracles.mxss_oracle import MxssOracle
     from .fuzzer.oracles.ssrf_oracle import SsrfOracle
     from .fuzzer.oracles.saml_oracle import SamlOracle
+    from .fuzzer.oracles.cookie_oracle import CookieOracle
 
     ORACLE_MAP = {
         "crash": lambda: CrashOracle(),
@@ -479,6 +488,7 @@ def _build_oracles(names: str) -> list:
         "mxss": lambda: MxssOracle(),
         "ssrf": lambda: SsrfOracle(),
         "saml": lambda: SamlOracle(),
+        "cookie": lambda: CookieOracle(),
         "sanitizer_diff": lambda: None,  # placeholder — strategies injected via DiffOracle
     }
 
@@ -590,6 +600,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         has_xss = any(getattr(o, "name", "") == "xss" for o in oracles)
         has_ssrf = any(getattr(o, "name", "") == "ssrf" for o in oracles)
         has_saml = any(getattr(o, "name", "") == "saml" for o in oracles)
+        has_cookie = any(getattr(o, "name", "") == "cookie" for o in oracles)
         has_sanitizer_diff = any(o is None for o in oracles)  # sanitizer_diff placeholder
         # Remove None placeholders from oracle list
         oracles = [o for o in oracles if o is not None]
@@ -599,6 +610,9 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         elif has_saml:
             from .fuzzer.oracles.saml_diff_strategy import get_saml_strategies
             strategies = get_saml_strategies()
+        elif has_cookie:
+            from .fuzzer.oracles.cookie_diff_strategy import get_cookie_strategies
+            strategies = get_cookie_strategies()
         elif has_ssrf:
             from .fuzzer.oracles.ssrf_oracle import get_ssrf_strategies
             strategies = get_ssrf_strategies()
@@ -618,11 +632,21 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
             from .fuzzer.coverage.adaptive_coverage import (
                 AdaptiveDiffCoverage, AdaptiveConfig, RefinementLevel,
             )
-            adaptive_config = AdaptiveConfig(
-                initial_level=RefinementLevel(getattr(args, "adaptive_level", 1)),
-                check_interval=getattr(args, "adaptive_check_interval", 5000),
-                upper_corpus_pct=getattr(args, "adaptive_upper_pct", 5.0),
-            )
+            # Sanitizer domain: start at L2 with faster refinement
+            # (boolean comparison_keys saturate L1 quickly)
+            if has_sanitizer_diff:
+                adaptive_config = AdaptiveConfig(
+                    initial_level=RefinementLevel.L2_COMPONENT,
+                    stagnation_window=5000,
+                    check_interval=getattr(args, "adaptive_check_interval", 5000),
+                    upper_corpus_pct=getattr(args, "adaptive_upper_pct", 5.0),
+                )
+            else:
+                adaptive_config = AdaptiveConfig(
+                    initial_level=RefinementLevel(getattr(args, "adaptive_level", 1)),
+                    check_interval=getattr(args, "adaptive_check_interval", 5000),
+                    upper_corpus_pct=getattr(args, "adaptive_upper_pct", 5.0),
+                )
             coverage = AdaptiveDiffCoverage(
                 reference_targets=reference_targets,
                 config=adaptive_config,

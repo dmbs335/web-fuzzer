@@ -130,9 +130,20 @@ class TestParseOutput:
     def test_unrelated_json(self):
         assert _parse_sanitizer_output(b'{"foo": "bar"}') is None
 
-    def test_error_output_returns_none(self):
+    def test_error_with_known_key_still_parses(self):
+        """Error present but known keys exist → parse succeeds (partial result)."""
         data = json.dumps({"error": "parse failed", "empty_output": True}).encode()
+        assert _parse_sanitizer_output(data) is not None
+
+    def test_error_only_returns_none(self):
+        """Error without any known key → None."""
+        data = json.dumps({"error": "parse failed"}).encode()
         assert _parse_sanitizer_output(data) is None
+
+    def test_partial_with_security_signal(self):
+        """Partial output with has_script → parse succeeds."""
+        data = json.dumps({"has_script": True, "error": "timeout"}).encode()
+        assert _parse_sanitizer_output(data) is not None
 
 
 # ── SanitizerBypassStrategy tests ─────────────────────────────
@@ -251,6 +262,8 @@ class TestNamespaceDivergenceStrategy:
         assert finding.severity == Severity.HIGH
         assert finding.metadata["category"] == "namespace_divergence"
         assert "svg" in finding.metadata["only_primary"]
+        assert "primary_sanitized" in finding.metadata
+        assert "ref_sanitized" in finding.metadata
 
     def test_ref_keeps_math_primary_strips(self, strategy):
         """Reference keeps math, primary strips -> HIGH."""
