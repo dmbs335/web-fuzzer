@@ -24,44 +24,40 @@ function getText(elem) {
   return t || null;
 }
 
+/**
+ * Find the assertion targeted by the signature's Reference URI.
+ * Falls back to the first assertion if no matching reference found.
+ */
+function findSignedAssertion(doc) {
+  const refs = doc.getElementsByTagNameNS(DS_NS, "Reference");
+  const assertions = doc.getElementsByTagNameNS(SAML_NS, "Assertion");
+  for (let i = 0; i < refs.length; i++) {
+    const uri = refs[i].getAttribute("URI") || "";
+    if (uri.startsWith("#")) {
+      const targetId = uri.substring(1);
+      for (let j = 0; j < assertions.length; j++) {
+        if (assertions[j].getAttribute("ID") === targetId) {
+          return assertions[j];
+        }
+      }
+    }
+  }
+  return assertions.length > 0 ? assertions[0] : null;
+}
+
 function verifySaml(xmlInput) {
   const { DOMParser } = require("@xmldom/xmldom");
   const doc = new DOMParser().parseFromString(xmlInput, "text/xml");
 
   let signatureValid = false;
   let signatureError = null;
-  let samlifyResult = null;
 
   try {
     const samlify = require("samlify");
-    // Disable schema validation to focus on signature verification
     samlify.setSchemaValidator({
       validate: () => Promise.resolve("skipped"),
     });
 
-    const idp = samlify.IdentityProvider({
-      metadata: null,
-      isAssertionEncrypted: false,
-      signingCert: IDP_CERT,
-      wantLogoutRequestSigned: false,
-    });
-
-    const sp = samlify.ServiceProvider({
-      entityID: "https://sp.example.com",
-      assertionConsumerService: [
-        {
-          Location: "https://sp.example.com/acs",
-          Binding: "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
-        },
-      ],
-    });
-
-    // Base64 encode the input for samlify
-    const b64 = Buffer.from(xmlInput, "utf8").toString("base64");
-
-    // Synchronous-style: samlify returns a Promise
-    // We'll try direct XML verification approach instead
-    const { extract } = require("samlify/build/src/extractor");
     const { verifySignature } = require("samlify/build/src/libsaml");
 
     try {
@@ -70,7 +66,6 @@ function verifySaml(xmlInput) {
       signatureError = e.message;
     }
   } catch (e) {
-    // samlify not installed or API changed — fall back to xml-crypto
     signatureError = "samlify unavailable: " + e.message;
     try {
       const { SignedXml } = require("xml-crypto");
@@ -92,26 +87,43 @@ function verifySaml(xmlInput) {
     }
   }
 
-  // Extract SAML fields
+  // Extract SAML fields from the signed assertion (not from full document)
   const assertions = doc.getElementsByTagNameNS(SAML_NS, "Assertion");
-  const nameIDs = doc.getElementsByTagNameNS(SAML_NS, "NameID");
-  const issuers = doc.getElementsByTagNameNS(SAML_NS, "Issuer");
-  const audiences = doc.getElementsByTagNameNS(SAML_NS, "Audience");
+  const signedAssertion = findSignedAssertion(doc);
 
+  let subject = null, subjectFormat = null, issuer = null, audience = null;
   const attributes = {};
-  const attrElems = doc.getElementsByTagNameNS(SAML_NS, "Attribute");
-  for (let i = 0; i < attrElems.length; i++) {
-    const name = attrElems[i].getAttribute("Name");
-    const vals = attrElems[i].getElementsByTagNameNS(
-      SAML_NS,
-      "AttributeValue"
-    );
-    if (name && vals.length > 0) {
-      attributes[name] =
-        vals.length === 1
-          ? getText(vals[0])
-          : Array.from({ length: vals.length }, (_, j) => getText(vals[j]));
+
+  if (signedAssertion) {
+    const nameIDs = signedAssertion.getElementsByTagNameNS(SAML_NS, "NameID");
+    if (nameIDs.length > 0) {
+      subject = getText(nameIDs[0]);
+      subjectFormat = nameIDs[0].getAttribute("Format");
     }
+
+    const issuers = signedAssertion.getElementsByTagNameNS(SAML_NS, "Issuer");
+    issuer = issuers.length > 0 ? getText(issuers[0]) : null;
+
+    const audiences = signedAssertion.getElementsByTagNameNS(SAML_NS, "Audience");
+    audience = audiences.length > 0 ? getText(audiences[0]) : null;
+
+    const attrElems = signedAssertion.getElementsByTagNameNS(SAML_NS, "Attribute");
+    for (let i = 0; i < attrElems.length; i++) {
+      const name = attrElems[i].getAttribute("Name");
+      const vals = attrElems[i].getElementsByTagNameNS(SAML_NS, "AttributeValue");
+      if (name && vals.length > 0) {
+        attributes[name] =
+          vals.length === 1
+            ? getText(vals[0])
+            : Array.from({ length: vals.length }, (_, j) => getText(vals[j]));
+      }
+    }
+  }
+
+  // Response-level issuer as fallback
+  if (!issuer) {
+    const respIssuers = doc.getElementsByTagNameNS(SAML_NS, "Issuer");
+    if (respIssuers.length > 0) issuer = getText(respIssuers[0]);
   }
 
   const sigMethods = doc.getElementsByTagNameNS(DS_NS, "SignatureMethod");
@@ -127,11 +139,10 @@ function verifySaml(xmlInput) {
   return JSON.stringify({
     signature_valid: signatureValid,
     signature_error: signatureError,
-    subject: nameIDs.length > 0 ? getText(nameIDs[0]) : null,
-    subject_format:
-      nameIDs.length > 0 ? nameIDs[0].getAttribute("Format") : null,
-    issuer: issuers.length > 0 ? getText(issuers[0]) : null,
-    audience: audiences.length > 0 ? getText(audiences[0]) : null,
+    subject: subject,
+    subject_format: subjectFormat || null,
+    issuer: issuer,
+    audience: audience,
     attributes,
     assertion_count: assertions.length,
     algorithms,

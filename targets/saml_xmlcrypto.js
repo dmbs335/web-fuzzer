@@ -58,6 +58,27 @@ function extractAlgorithms(doc) {
   return result;
 }
 
+/**
+ * Find the assertion targeted by the signature's Reference URI.
+ * Falls back to the first assertion if no matching reference found.
+ */
+function findSignedAssertion(doc) {
+  const refs = doc.getElementsByTagNameNS(DS_NS, "Reference");
+  const assertions = doc.getElementsByTagNameNS(SAML_NS, "Assertion");
+  for (let i = 0; i < refs.length; i++) {
+    const uri = refs[i].getAttribute("URI") || "";
+    if (uri.startsWith("#")) {
+      const targetId = uri.substring(1);
+      for (let j = 0; j < assertions.length; j++) {
+        if (assertions[j].getAttribute("ID") === targetId) {
+          return assertions[j];
+        }
+      }
+    }
+  }
+  return assertions.length > 0 ? assertions[0] : null;
+}
+
 function verifySaml(xmlInput) {
   const doc = new DOMParser().parseFromString(xmlInput, "text/xml");
 
@@ -88,40 +109,55 @@ function verifySaml(xmlInput) {
     signatureError = "No Signature element found";
   }
 
-  // Extract SAML fields
+  // Extract SAML fields from the signed assertion (not from full document)
   const assertions = doc.getElementsByTagNameNS(SAML_NS, "Assertion");
-  const nameIDs = doc.getElementsByTagNameNS(SAML_NS, "NameID");
-  const issuers = doc.getElementsByTagNameNS(SAML_NS, "Issuer");
-  const audiences = doc.getElementsByTagNameNS(SAML_NS, "Audience");
+  const signedAssertion = findSignedAssertion(doc);
 
-  // Attributes
+  let subject = null, subjectFormat = null, issuer = null, audience = null;
   const attributes = {};
-  const attrElems = doc.getElementsByTagNameNS(SAML_NS, "Attribute");
-  for (let i = 0; i < attrElems.length; i++) {
-    const name = attrElems[i].getAttribute("Name");
-    const vals = attrElems[i].getElementsByTagNameNS(
-      SAML_NS,
-      "AttributeValue"
-    );
-    if (name && vals.length > 0) {
-      if (vals.length === 1) {
-        attributes[name] = getText(vals[0]);
-      } else {
-        const arr = [];
-        for (let j = 0; j < vals.length; j++) arr.push(getText(vals[j]));
-        attributes[name] = arr;
+
+  if (signedAssertion) {
+    const nameIDs = signedAssertion.getElementsByTagNameNS(SAML_NS, "NameID");
+    if (nameIDs.length > 0) {
+      subject = getText(nameIDs[0]);
+      subjectFormat = nameIDs[0].getAttribute("Format");
+    }
+
+    const issuers = signedAssertion.getElementsByTagNameNS(SAML_NS, "Issuer");
+    issuer = issuers.length > 0 ? getText(issuers[0]) : null;
+
+    const audiences = signedAssertion.getElementsByTagNameNS(SAML_NS, "Audience");
+    audience = audiences.length > 0 ? getText(audiences[0]) : null;
+
+    const attrElems = signedAssertion.getElementsByTagNameNS(SAML_NS, "Attribute");
+    for (let i = 0; i < attrElems.length; i++) {
+      const name = attrElems[i].getAttribute("Name");
+      const vals = attrElems[i].getElementsByTagNameNS(SAML_NS, "AttributeValue");
+      if (name && vals.length > 0) {
+        if (vals.length === 1) {
+          attributes[name] = getText(vals[0]);
+        } else {
+          const arr = [];
+          for (let j = 0; j < vals.length; j++) arr.push(getText(vals[j]));
+          attributes[name] = arr;
+        }
       }
     }
+  }
+
+  // Response-level issuer as fallback
+  if (!issuer) {
+    const respIssuers = doc.getElementsByTagNameNS(SAML_NS, "Issuer");
+    if (respIssuers.length > 0) issuer = getText(respIssuers[0]);
   }
 
   const result = {
     signature_valid: signatureValid,
     signature_error: signatureError,
-    subject: nameIDs.length > 0 ? getText(nameIDs[0]) : null,
-    subject_format:
-      nameIDs.length > 0 ? nameIDs[0].getAttribute("Format") : null,
-    issuer: issuers.length > 0 ? getText(issuers[0]) : null,
-    audience: audiences.length > 0 ? getText(audiences[0]) : null,
+    subject: subject,
+    subject_format: subjectFormat || null,
+    issuer: issuer,
+    audience: audience,
     attributes: attributes,
     assertion_count: assertions.length,
     algorithms: extractAlgorithms(doc),

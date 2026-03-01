@@ -53,26 +53,60 @@ def verify_saml(xml_input)
     signature_error = e.message[0..500]
   end
 
-  # Extract fields using REXML (same parser ruby-saml uses internally)
+  # Extract fields from the signed assertion (not full document)
   doc = REXML::Document.new(xml_input)
 
-  assertions = REXML::XPath.match(doc, '//saml:Assertion',
-    'saml' => SAML_NS)
-  name_ids = REXML::XPath.match(doc, '//saml:NameID',
-    'saml' => SAML_NS)
-  issuers = REXML::XPath.match(doc, '//saml:Issuer',
-    'saml' => SAML_NS)
-  audiences = REXML::XPath.match(doc, '//saml:Audience',
-    'saml' => SAML_NS)
+  assertions = REXML::XPath.match(doc, '//saml:Assertion', 'saml' => SAML_NS)
 
-  # Attributes
+  # Find signed assertion by matching Reference URI to Assertion ID
+  signed_assertion = nil
+  REXML::XPath.each(doc, '//ds:Reference', 'ds' => DS_NS) do |ref|
+    uri = ref.attributes['URI'] || ''
+    if uri.start_with?('#')
+      target_id = uri[1..]
+      assertions.each do |a|
+        if a.attributes['ID'] == target_id
+          signed_assertion = a
+          break
+        end
+      end
+      break if signed_assertion
+    end
+  end
+  signed_assertion ||= assertions[0]
+
+  subject = nil
+  subject_format = nil
+  issuer = nil
+  audience = nil
   attributes = {}
-  REXML::XPath.each(doc, '//saml:Attribute', 'saml' => SAML_NS) do |attr|
-    name = attr.attributes['Name']
-    vals = REXML::XPath.match(attr, 'saml:AttributeValue', 'saml' => SAML_NS)
-      .map { |v| v.text&.strip }
-      .compact
-    attributes[name] = vals.length == 1 ? vals[0] : vals if name && !vals.empty?
+
+  if signed_assertion
+    name_ids = REXML::XPath.match(signed_assertion, './/saml:NameID', 'saml' => SAML_NS)
+    unless name_ids.empty?
+      subject = name_ids[0].text&.strip
+      subject_format = name_ids[0].attributes['Format']
+    end
+
+    issuers = REXML::XPath.match(signed_assertion, 'saml:Issuer', 'saml' => SAML_NS)
+    issuer = issuers[0].text&.strip unless issuers.empty?
+
+    audiences = REXML::XPath.match(signed_assertion, './/saml:Audience', 'saml' => SAML_NS)
+    audience = audiences[0].text&.strip unless audiences.empty?
+
+    REXML::XPath.each(signed_assertion, './/saml:Attribute', 'saml' => SAML_NS) do |attr|
+      name = attr.attributes['Name']
+      vals = REXML::XPath.match(attr, 'saml:AttributeValue', 'saml' => SAML_NS)
+        .map { |v| v.text&.strip }
+        .compact
+      attributes[name] = vals.length == 1 ? vals[0] : vals if name && !vals.empty?
+    end
+  end
+
+  # Response-level issuer as fallback
+  unless issuer
+    resp_issuers = REXML::XPath.match(doc, '//saml:Issuer', 'saml' => SAML_NS)
+    issuer = resp_issuers[0].text&.strip unless resp_issuers.empty?
   end
 
   # Algorithms
@@ -103,10 +137,10 @@ def verify_saml(xml_input)
   {
     signature_valid: signature_valid,
     signature_error: signature_error,
-    subject: name_ids.empty? ? nil : name_ids[0].text&.strip,
-    subject_format: name_ids.empty? ? nil : name_ids[0].attributes['Format'],
-    issuer: issuers.empty? ? nil : issuers[0].text&.strip,
-    audience: audiences.empty? ? nil : audiences[0].text&.strip,
+    subject: subject,
+    subject_format: subject_format,
+    issuer: issuer,
+    audience: audience,
     attributes: attributes,
     assertion_count: assertions.length,
     algorithms: algorithms,

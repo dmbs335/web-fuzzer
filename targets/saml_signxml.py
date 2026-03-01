@@ -78,6 +78,18 @@ def _extract_algorithms(root):
     return result
 
 
+def _find_signed_assertion(doc, assertions):
+    """Find the assertion targeted by the signature's Reference URI."""
+    for ref in doc.iter("{%s}Reference" % DS_NS):
+        uri = ref.get("URI", "")
+        if uri.startswith("#"):
+            target_id = uri[1:]
+            for assertion in assertions:
+                if assertion.get("ID") == target_id:
+                    return assertion
+    return assertions[0] if assertions else None
+
+
 def verify_saml(xml_input: str) -> str:
     """Verify SAML Response and return structured JSON."""
     try:
@@ -109,43 +121,52 @@ def verify_saml(xml_input: str) -> str:
     # Extract SAML fields from the document (verified or original)
     doc = verified_root if verified_root is not None else root
 
-    # Assertions
-    assertions = doc.findall(".//saml:Assertion", NSMAP)
-    if not assertions:
-        # Try without namespace (some docs use default ns)
-        assertions = doc.findall(".//{%s}Assertion" % SAML_NS)
-
+    # Assertions — check if doc itself is an Assertion (signxml returns signed element)
+    assertions = doc.findall(".//{%s}Assertion" % SAML_NS)
+    doc_tag = doc.tag if hasattr(doc, 'tag') else ""
+    if doc_tag == "{%s}Assertion" % SAML_NS or doc_tag == "Assertion":
+        if doc not in assertions:
+            assertions.insert(0, doc)
     assertion_count = len(assertions)
 
-    # Subject / NameID
-    name_id_elem = doc.find(".//saml:NameID", NSMAP)
-    if name_id_elem is None:
-        name_id_elem = doc.find(".//{%s}NameID" % SAML_NS)
-    subject = _text(name_id_elem)
-    subject_format = name_id_elem.get("Format") if name_id_elem is not None else None
+    # Find the assertion targeted by the signature's Reference URI
+    signed_assertion = _find_signed_assertion(doc, assertions)
 
-    # Issuer
-    issuer_elem = doc.find(".//saml:Issuer", NSMAP)
-    if issuer_elem is None:
-        issuer_elem = doc.find(".//{%s}Issuer" % SAML_NS)
-    issuer = _text(issuer_elem)
-
-    # Audience
-    audience_elem = doc.find(".//saml:Audience", NSMAP)
-    if audience_elem is None:
-        audience_elem = doc.find(".//{%s}Audience" % SAML_NS)
-    audience = _text(audience_elem)
-
-    # Attributes
+    subject = None
+    subject_format = None
+    issuer = None
+    audience = None
     attributes = {}
-    for attr_elem in doc.findall(".//saml:Attribute", NSMAP):
-        attr_name = attr_elem.get("Name", "")
-        values = []
-        for val in attr_elem.findall("saml:AttributeValue", NSMAP):
-            if val.text:
-                values.append(val.text.strip())
-        if attr_name and values:
-            attributes[attr_name] = values[0] if len(values) == 1 else values
+
+    if signed_assertion is not None:
+        # Extract from signed assertion only
+        name_id_elem = signed_assertion.find("{%s}Subject/{%s}NameID" % (SAML_NS, SAML_NS))
+        if name_id_elem is None:
+            name_id_elem = signed_assertion.find(".//{%s}NameID" % SAML_NS)
+        subject = _text(name_id_elem)
+        subject_format = name_id_elem.get("Format") if name_id_elem is not None else None
+
+        issuer_elem = signed_assertion.find("{%s}Issuer" % SAML_NS)
+        issuer = _text(issuer_elem)
+
+        audience_elem = signed_assertion.find(".//{%s}Audience" % SAML_NS)
+        audience = _text(audience_elem)
+
+        for attr_elem in signed_assertion.findall(".//{%s}Attribute" % SAML_NS):
+            attr_name = attr_elem.get("Name", "")
+            values = []
+            for val in attr_elem.findall("{%s}AttributeValue" % SAML_NS):
+                if val.text:
+                    values.append(val.text.strip())
+            if attr_name and values:
+                attributes[attr_name] = values[0] if len(values) == 1 else values
+
+    # Response-level issuer as fallback
+    if not issuer:
+        issuer_elem = doc.find("{%s}Issuer" % SAML_NS)
+        if issuer_elem is None:
+            issuer_elem = doc.find(".//{%s}Issuer" % SAML_NS)
+        issuer = _text(issuer_elem)
 
     # Algorithms
     algorithms = _extract_algorithms(doc)

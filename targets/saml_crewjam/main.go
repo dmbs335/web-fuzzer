@@ -112,6 +112,26 @@ func findAllByTag(el *etree.Element, tag string) []*etree.Element {
 	return results
 }
 
+// findSignedAssertion finds the assertion targeted by the signature's Reference URI.
+// Falls back to the first assertion if no matching reference found.
+func findSignedAssertion(root *etree.Element, assertions []*etree.Element) *etree.Element {
+	for _, ref := range findAllByTag(root, "Reference") {
+		uri := ref.SelectAttrValue("URI", "")
+		if len(uri) > 1 && uri[0] == '#' {
+			targetID := uri[1:]
+			for _, a := range assertions {
+				if a.SelectAttrValue("ID", "") == targetID {
+					return a
+				}
+			}
+		}
+	}
+	if len(assertions) > 0 {
+		return assertions[0]
+	}
+	return nil
+}
+
 func verifySAML(xmlInput string) (string, int) {
 	result := SAMLResult{
 		Attributes: make(map[string]string),
@@ -140,9 +160,11 @@ func verifySAML(xmlInput string) (string, int) {
 	assertions := findAllByTag(root, "Assertion")
 	result.AssertionCount = len(assertions)
 
-	// Extract fields from first assertion
-	if len(assertions) > 0 {
-		a := assertions[0]
+	// Find the assertion targeted by the signature's Reference URI
+	a := findSignedAssertion(root, assertions)
+
+	// Extract fields from signed assertion
+	if a != nil {
 
 		// Issuer
 		issuerEl := findChildNS(a, "", "Issuer")

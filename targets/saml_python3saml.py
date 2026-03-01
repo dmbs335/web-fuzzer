@@ -70,6 +70,18 @@ def _extract_algorithms(root):
     return result
 
 
+def _find_signed_assertion(root, assertions):
+    """Find the assertion targeted by the signature's Reference URI."""
+    for ref in root.iter("{%s}Reference" % DS_NS):
+        uri = ref.get("URI", "")
+        if uri.startswith("#"):
+            target_id = uri[1:]
+            for assertion in assertions:
+                if assertion.get("ID") == target_id:
+                    return assertion
+    return assertions[0] if assertions else None
+
+
 def verify_saml(xml_input: str) -> str:
     """Verify SAML Response using python3-saml and return structured JSON."""
     xml_bytes = xml_input.encode("utf-8") if isinstance(xml_input, str) else xml_input
@@ -144,29 +156,52 @@ def verify_saml(xml_input: str) -> str:
     except Exception as e:
         signature_error = str(e)[:500]
 
-    # Extract fields from original XML
+    # Extract fields from the signed assertion (not full document)
     assertions = root.findall(".//{%s}Assertion" % SAML_NS)
-    name_id = root.find(".//{%s}NameID" % SAML_NS)
-    issuer = root.find(".//{%s}Issuer" % SAML_NS)
-    audience = root.find(".//{%s}Audience" % SAML_NS)
+    signed_assertion = _find_signed_assertion(root, assertions)
 
+    subject = None
+    subject_format = None
+    issuer = None
+    audience = None
     attributes = {}
-    for attr in root.findall(".//{%s}Attribute" % SAML_NS):
-        name = attr.get("Name", "")
-        vals = []
-        for v in attr.findall("{%s}AttributeValue" % SAML_NS):
-            if v.text:
-                vals.append(v.text.strip())
-        if name and vals:
-            attributes[name] = vals[0] if len(vals) == 1 else vals
+
+    if signed_assertion is not None:
+        name_id = signed_assertion.find("{%s}Subject/{%s}NameID" % (SAML_NS, SAML_NS))
+        if name_id is None:
+            name_id = signed_assertion.find(".//{%s}NameID" % SAML_NS)
+        subject = _text(name_id)
+        subject_format = name_id.get("Format") if name_id is not None else None
+
+        issuer_elem = signed_assertion.find("{%s}Issuer" % SAML_NS)
+        issuer = _text(issuer_elem)
+
+        audience_elem = signed_assertion.find(".//{%s}Audience" % SAML_NS)
+        audience = _text(audience_elem)
+
+        for attr in signed_assertion.findall(".//{%s}Attribute" % SAML_NS):
+            name = attr.get("Name", "")
+            vals = []
+            for v in attr.findall("{%s}AttributeValue" % SAML_NS):
+                if v.text:
+                    vals.append(v.text.strip())
+            if name and vals:
+                attributes[name] = vals[0] if len(vals) == 1 else vals
+
+    # Response-level issuer as fallback
+    if not issuer:
+        issuer_elem = root.find("{%s}Issuer" % SAML_NS)
+        if issuer_elem is None:
+            issuer_elem = root.find(".//{%s}Issuer" % SAML_NS)
+        issuer = _text(issuer_elem)
 
     result = {
         "signature_valid": signature_valid,
         "signature_error": signature_error,
-        "subject": _text(name_id),
-        "subject_format": name_id.get("Format") if name_id is not None else None,
-        "issuer": _text(issuer),
-        "audience": _text(audience),
+        "subject": subject,
+        "subject_format": subject_format,
+        "issuer": issuer,
+        "audience": audience,
         "attributes": attributes,
         "assertion_count": len(assertions),
         "algorithms": _extract_algorithms(root),

@@ -87,33 +87,62 @@ function verifySaml($xmlInput) {
     // Assertions
     $assertions = $xpath->query('//saml:Assertion');
 
-    // NameID
-    $nameIds = $xpath->query('//saml:NameID');
-    $subject = $nameIds->length > 0 ? getText($nameIds->item(0)) : null;
-    $subjectFormat = $nameIds->length > 0 ? $nameIds->item(0)->getAttribute('Format') : null;
+    // Find signed assertion by matching Reference URI to Assertion ID
+    $signedAssertion = null;
+    $refs = $xpath->query('//ds:Reference');
+    foreach ($refs as $ref) {
+        $uri = $ref->getAttribute('URI') ?: '';
+        if (str_starts_with($uri, '#')) {
+            $targetId = substr($uri, 1);
+            foreach ($assertions as $a) {
+                if ($a->getAttribute('ID') === $targetId) {
+                    $signedAssertion = $a;
+                    break 2;
+                }
+            }
+        }
+    }
+    if ($signedAssertion === null && $assertions->length > 0) {
+        $signedAssertion = $assertions->item(0);
+    }
 
-    // Issuer
-    $issuers = $xpath->query('//saml:Issuer');
-    $issuer = $issuers->length > 0 ? getText($issuers->item(0)) : null;
-
-    // Audience
-    $audiences = $xpath->query('//saml:Audience');
-    $audience = $audiences->length > 0 ? getText($audiences->item(0)) : null;
-
-    // Attributes
+    $subject = null;
+    $subjectFormat = null;
+    $issuer = null;
+    $audience = null;
     $attributes = [];
-    $attrElems = $xpath->query('//saml:Attribute');
-    foreach ($attrElems as $attr) {
-        $name = $attr->getAttribute('Name');
-        $vals = [];
-        $valueElems = $xpath->query('saml:AttributeValue', $attr);
-        foreach ($valueElems as $v) {
-            $text = trim($v->textContent);
-            if ($text) $vals[] = $text;
+
+    if ($signedAssertion !== null) {
+        // Extract from signed assertion only
+        $nameIds = $xpath->query('.//saml:NameID', $signedAssertion);
+        $subject = $nameIds->length > 0 ? getText($nameIds->item(0)) : null;
+        $subjectFormat = $nameIds->length > 0 ? $nameIds->item(0)->getAttribute('Format') : null;
+
+        $issuers = $xpath->query('saml:Issuer', $signedAssertion);
+        $issuer = $issuers->length > 0 ? getText($issuers->item(0)) : null;
+
+        $audiences = $xpath->query('.//saml:Audience', $signedAssertion);
+        $audience = $audiences->length > 0 ? getText($audiences->item(0)) : null;
+
+        $attrElems = $xpath->query('.//saml:Attribute', $signedAssertion);
+        foreach ($attrElems as $attr) {
+            $name = $attr->getAttribute('Name');
+            $vals = [];
+            $valueElems = $xpath->query('saml:AttributeValue', $attr);
+            foreach ($valueElems as $v) {
+                $text = trim($v->textContent);
+                if ($text) $vals[] = $text;
+            }
+            if ($name && !empty($vals)) {
+                $attributes[$name] = count($vals) === 1 ? $vals[0] : $vals;
+            }
         }
-        if ($name && !empty($vals)) {
-            $attributes[$name] = count($vals) === 1 ? $vals[0] : $vals;
-        }
+    }
+
+    // Response-level issuer as fallback
+    if ($issuer === null) {
+        $respIssuers = $xpath->query('//saml:Issuer');
+        $issuer = $respIssuers->length > 0 ? getText($respIssuers->item(0)) : null;
     }
 
     // Algorithms
