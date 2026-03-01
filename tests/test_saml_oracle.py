@@ -238,16 +238,112 @@ class TestIssuerConfusion:
 
 
 class TestGetSamlStrategies:
-    def test_returns_five_strategies(self):
+    def test_includes_default_and_saml_strategies(self):
         strategies = get_saml_strategies()
-        assert len(strategies) == 5
+        # 5 default (exit_code, output, status_code, timing, error_pattern)
+        # + 5 SAML (saml_bypass, saml_algorithm, saml_issuer, saml_encoding, saml_transform)
+        assert len(strategies) == 10
 
     def test_strategy_names(self):
         strategies = get_saml_strategies()
         names = {s.name for s in strategies}
-        assert names == {"saml_bypass", "saml_algorithm", "saml_issuer", "saml_encoding", "saml_transform"}
+        # Must include both default and SAML-specific strategies
+        assert "exit_code" in names, "ExitCodeStrategy missing from SAML strategies"
+        assert "output" in names, "OutputStrategy missing from SAML strategies"
+        assert "saml_bypass" in names
+        assert "saml_algorithm" in names
+        assert "saml_encoding" in names
+        assert "saml_transform" in names
 
     def test_all_have_compare(self):
         for s in get_saml_strategies():
             assert hasattr(s, "compare")
             assert callable(s.compare)
+
+
+# ── Regression tests for gating fixes ──────────────────────────
+
+
+INVALID_DIFF_SUBJECT = {
+    **INVALID_SAML,
+    "subject": "evil@attacker.com",
+    "assertion_count": 1,
+}
+
+
+class TestAssertionCountWithoutSignature:
+    """Regression: assertion_count_divergence must fire WITHOUT signature_valid.
+
+    Session 116 produced 0 differential findings because the
+    (p_valid or r_valid) gate suppressed all assertion count
+    differences from grammar-generated (unsigned) SAML inputs.
+    """
+
+    def test_count_divergence_both_sig_false(self):
+        """Both reject sig but different counts -> HIGH finding."""
+        strategy = SamlDiffStrategy()
+        inp = Input(data=b"<saml>test</saml>")
+        primary = _make_result({**INVALID_SAML, "assertion_count": 1})
+        reference = _make_result({**INVALID_SAML, "assertion_count": 2})
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.severity == Severity.HIGH
+        assert finding.metadata["category"] == "assertion_count_divergence"
+
+    def test_count_divergence_zero_vs_nonzero(self):
+        """ref sees 0 assertions, primary sees 1 -> finding."""
+        strategy = SamlDiffStrategy()
+        inp = Input(data=b"<saml>test</saml>")
+        primary = _make_result({**INVALID_SAML, "assertion_count": 1})
+        reference = _make_result({**INVALID_SAML, "assertion_count": 0})
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.metadata["category"] == "assertion_count_divergence"
+
+    def test_count_both_zero_no_finding(self):
+        """Both see 0 assertions -> no finding."""
+        strategy = SamlDiffStrategy()
+        inp = Input(data=b"<saml>test</saml>")
+        primary = _make_result({**INVALID_SAML, "assertion_count": 0})
+        reference = _make_result({**INVALID_SAML, "assertion_count": 0})
+        assert strategy.compare(inp, primary, reference, ref_index=0) is None
+
+
+class TestSubjectExtractionDivergence:
+    """Regression: subject differences must be detected even without valid sig.
+
+    When parsers extract different NameIDs from the same XML
+    (regardless of signature status), it indicates a structural
+    parsing differential that is prerequisite for XSW attacks.
+    """
+
+    def test_different_subjects_sig_false(self):
+        """Both sig=false but different subjects -> MEDIUM."""
+        strategy = SamlDiffStrategy()
+        inp = Input(data=b"<saml>test</saml>")
+        primary = _make_result({**INVALID_SAML, "subject": "user@example.com"})
+        reference = _make_result(INVALID_DIFF_SUBJECT)
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.severity == Severity.MEDIUM
+        assert finding.metadata["category"] == "subject_extraction_divergence"
+
+    def test_same_subject_sig_false_no_finding(self):
+        """Both sig=false and same subject -> no finding from subject check."""
+        strategy = SamlDiffStrategy()
+        inp = Input(data=b"<saml>test</saml>")
+        primary = _make_result(INVALID_SAML)
+        reference = _make_result(INVALID_SAML)
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is None
+
+    def test_subject_confusion_still_critical_when_both_valid(self):
+        """Both sig=true + different subjects -> still CRITICAL (not MEDIUM)."""
+        strategy = SamlDiffStrategy()
+        inp = Input(data=b"<saml>test</saml>")
+        primary = _make_result(VALID_SAML)
+        reference = _make_result(VALID_ADMIN)
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.severity == Severity.CRITICAL
+        assert finding.metadata["category"] == "subject_confusion"

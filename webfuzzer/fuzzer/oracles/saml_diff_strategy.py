@@ -144,6 +144,32 @@ class SamlDiffStrategy:
                     },
                 )
 
+        # ── MEDIUM: Subject extraction divergence (sig not required) ──
+        # Different subject extraction = parsers interpret DOM differently.
+        # Prerequisite for XSW attacks; lower severity than subject_confusion
+        # because signatures are not validated.
+        if p_subject and r_subject and p_subject.lower() != r_subject.lower():
+            return Finding(
+                title=(
+                    f"SAML Subject Extraction Divergence: "
+                    f"primary='{p_subject}' vs ref[{ref_index}]='{r_subject}'"
+                ),
+                severity=Severity.MEDIUM,
+                input=inp,
+                result=primary,
+                oracle_name="differential",
+                metadata={
+                    "strategy": self.name,
+                    "category": "subject_extraction_divergence",
+                    "primary_subject": p_subject,
+                    "ref_subject": r_subject,
+                    "primary_valid": p_valid,
+                    "ref_valid": r_valid,
+                    "ref_index": ref_index,
+                    "input_preview": _input_preview(inp),
+                },
+            )
+
         # ── HIGH: Attribute confusion ──
         if p_valid and r_valid:
             p_attrs = p.get("attributes") or {}
@@ -170,11 +196,13 @@ class SamlDiffStrategy:
                 )
 
         # ── Assertion count divergence ──
-        # Only report when at least one side accepts signature (XSW indicator).
-        # Both sig=FALSE → pure parser noise, skip entirely.
+        # Report when parsers see different numbers of assertions.
+        # This is an XSW indicator even without valid signature — different
+        # assertion counts mean different DOM interpretation, which is the
+        # prerequisite for signature wrapping attacks.
         p_count = p.get("assertion_count", 0)
         r_count = r.get("assertion_count", 0)
-        if p_count != r_count and (p_count > 0 or r_count > 0) and (p_valid or r_valid):
+        if p_count != r_count and (p_count > 0 or r_count > 0):
             return Finding(
                 title=(
                     f"SAML Assertion Count Divergence: "
@@ -516,11 +544,15 @@ class SamlTransformConfusionStrategy:
 
 
 def get_saml_strategies() -> list:
-    """Return all SAML differential strategies.
+    """Return DEFAULT + SAML differential strategies.
 
-    Intended to be composed with DiffOracle's existing strategies.
+    Includes ExitCodeStrategy (accept/reject mismatch) and OutputStrategy
+    (JSON field diff) from defaults alongside SAML-specific strategies.
+    This ensures exit code divergences and output field differences are
+    detected even when SAML-specific conditions don't trigger.
     """
-    return [
+    from .diff_oracle import DEFAULT_STRATEGIES
+    return list(DEFAULT_STRATEGIES) + [
         SamlDiffStrategy(),
         SamlAlgorithmConfusionStrategy(),
         SamlIssuerConfusionStrategy(),
