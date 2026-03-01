@@ -63,7 +63,7 @@ class AdaptiveConfig:
 # Namespace prefixes active at each level.
 _LEVEL_PREFIXES: dict[int, set[str]] = {
     0: {"exit_vec", "div_exit", "parse"},
-    1: {"exit_vec", "div_exit", "parse", "cdiff", "elem_div", "attr_div"},
+    1: {"exit_vec", "div_exit", "parse", "cdiff"},
     2: {"exit_vec", "div_exit", "parse", "cdiff", "elem_div", "attr_div", "comp"},
     3: {"exit_vec", "div_exit", "parse", "cdiff", "elem_div", "attr_div", "comp", "val"},
     4: {"exit_vec", "div_exit", "parse", "cdiff", "elem_div", "attr_div", "comp", "val", "status_vec", "div_err"},

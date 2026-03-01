@@ -844,25 +844,20 @@ class _DefaultDeduplicator:
         if df:
             parts.append(",".join(sorted(df)))
 
-        # Sanitizer output signature — distinguish findings with same
-        # category but different sanitized outputs.
-        ps = meta.get("primary_sanitized", "")
-        rs = meta.get("ref_sanitized", "")
-        if ps or rs:
-            import hashlib
-            sig = hashlib.sha256(
-                f"{ps[:200]}|{rs[:200]}".encode()
-            ).hexdigest()[:8]
-            parts.append(f"out={sig}")
-
         # Namespace/structural element sets — different element
         # divergence patterns produce distinct fingerprints.
+        # (Avoids output hash which creates too-granular dedup.)
         op = meta.get("only_primary")
         orr = meta.get("only_ref")
         if op:
             parts.append(f"op={','.join(sorted(op))}")
         if orr:
             parts.append(f"or={','.join(sorted(orr))}")
+
+        # Bypass signal — differentiates has_script vs has_event_handler etc.
+        sig = meta.get("signal")
+        if sig:
+            parts.append(f"sig={sig}")
 
         pi = meta.get("primary_internal")
         if pi is not None:

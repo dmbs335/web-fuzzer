@@ -281,7 +281,7 @@ class DiffCoverageCollector:
                     elem_sig = hashlib.sha256(
                         f"{sorted(p_elems)}|{sorted(r_elems)}".encode()
                     ).hexdigest()[:8]
-                    if level >= 1:
+                    if level >= 2:
                         _set(bitmap, f"elem_div_0_{i}", elem_sig)
                     if raw_record is not None:
                         raw_record.features.append(
@@ -298,7 +298,7 @@ class DiffCoverageCollector:
                     attr_sig = hashlib.sha256(
                         f"{sorted(p_attrs)}|{sorted(r_attrs)}".encode()
                     ).hexdigest()[:8]
-                    if level >= 1:
+                    if level >= 2:
                         _set(bitmap, f"attr_div_0_{i}", attr_sig)
                     if raw_record is not None:
                         raw_record.features.append(
