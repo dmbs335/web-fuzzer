@@ -40,6 +40,10 @@ targets/url_curl.exe
 # Claude Code session data
 .claude/
 
+# Documentation / PoC
+docs/
+poc/
+
 # OS
 .DS_Store
 Thumbs.db
