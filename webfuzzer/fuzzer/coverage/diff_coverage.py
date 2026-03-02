@@ -11,6 +11,9 @@ Features hashed into the bitmap (coarse-grained to prevent corpus explosion):
   3. Status code vector (for HTTP targets)
   4. Error pattern divergence
   5. Divergence count bucket (0, 1, 2-3, 4+)
+  6. Element/attribute set divergence for sanitizer targets:
+     6a. Element-class divergence (L2+): security-relevant category membership
+     6b. Raw element/attribute set divergence (L3+): full set hash
 
 This guides the fuzzer toward inputs that trigger *differential*
 behavior — exactly what differential fuzzing needs.
@@ -31,6 +34,33 @@ if TYPE_CHECKING:
 
 # Backward-compat constant (external code may reference this).
 _URL_KEYS = ("scheme", "userinfo", "host", "port", "path", "query", "fragment")
+
+# Security-relevant element classes for sanitizer coverage (L2 ecat features).
+# Classifying individual elements into categories prevents corpus explosion
+# from unique element-set combinations while preserving security-meaningful
+# divergence signals.
+_ELEMENT_CLASSES: dict[str, frozenset[str]] = {
+    "scripting": frozenset({
+        "script", "noscript", "template",
+    }),
+    "namespace": frozenset({
+        "svg", "math", "foreignobject", "annotation-xml",
+        "desc", "title", "mtext", "mi", "mo", "mn", "mglyph",
+    }),
+    "dangerous": frozenset({
+        "iframe", "object", "embed", "applet", "base", "form",
+    }),
+    "media": frozenset({
+        "img", "video", "audio", "source", "picture", "canvas",
+    }),
+    "style": frozenset({
+        "style", "link",
+    }),
+    "structural": frozenset({
+        "div", "span", "p", "table", "tr", "td", "th",
+        "li", "ul", "ol", "dl", "dt", "dd",
+    }),
+}
 
 
 def _diff_keys_for(parsed_primary: dict | None, parsed_ref: dict | None) -> tuple[str, ...]:
@@ -264,41 +294,65 @@ class DiffCoverageCollector:
         # Feature 6: List-field set divergence (elements_kept, attributes_kept)
         # Provides richer coverage signal for sanitizer targets where
         # boolean comparison_keys saturate quickly.
+        #
+        # Two tiers:
+        #   L2 — ecat (element-class divergence): groups elements into
+        #         security-relevant categories, yielding ~6 stable bits
+        #         per pair instead of a unique hash per element set.
+        #   L3 — elem_div / attr_div (raw set hash): full SHA256 of the
+        #         exact element/attribute sets for maximum resolution.
         p_parsed = parsed[0]
         if p_parsed is not None and "elements_kept" in p_parsed:
             for i in range(n):
                 r_parsed_i = parsed[i + 1]
                 if r_parsed_i is None or "elements_kept" not in r_parsed_i:
                     continue
-                # Element set divergence
+                # Build element sets (shared by both tiers)
                 p_elems = frozenset(
-                    str(e) for e in p_parsed.get("elements_kept", [])
+                    str(e).lower() for e in p_parsed.get("elements_kept", [])
                 )
                 r_elems = frozenset(
-                    str(e) for e in r_parsed_i.get("elements_kept", [])
+                    str(e).lower() for e in r_parsed_i.get("elements_kept", [])
                 )
+
+                # ── Feature 6a: Element-class divergence (L2+) ──
+                # Hash per security category: does one sanitizer keep
+                # elements in this class while the other strips them?
+                if p_elems != r_elems:
+                    for cat_name, cat_elems in _ELEMENT_CLASSES.items():
+                        p_has = bool(p_elems & cat_elems)
+                        r_has = bool(r_elems & cat_elems)
+                        if p_has != r_has:
+                            ns_ecat = f"ecat_0_{i}_{cat_name}"
+                            val_ecat = f"{p_has}|{r_has}"
+                            if level >= 2:
+                                _set(bitmap, ns_ecat, val_ecat)
+                            if raw_record is not None:
+                                raw_record.features.append((ns_ecat, val_ecat))
+
+                # ── Feature 6b: Raw element set divergence (L3+) ──
                 if p_elems != r_elems:
                     elem_sig = hashlib.sha256(
                         f"{sorted(p_elems)}|{sorted(r_elems)}".encode()
                     ).hexdigest()[:8]
-                    if level >= 2:
+                    if level >= 3:
                         _set(bitmap, f"elem_div_0_{i}", elem_sig)
                     if raw_record is not None:
                         raw_record.features.append(
                             (f"elem_div_0_{i}", elem_sig)
                         )
-                # Attribute set divergence
+                # ── Feature 6c: Raw attribute set divergence (L3+) ──
                 p_attrs = frozenset(
-                    str(a) for a in p_parsed.get("attributes_kept", [])
+                    str(a).lower() for a in p_parsed.get("attributes_kept", [])
                 )
                 r_attrs = frozenset(
-                    str(a) for a in r_parsed_i.get("attributes_kept", [])
+                    str(a).lower() for a in r_parsed_i.get("attributes_kept", [])
                 )
                 if p_attrs != r_attrs:
                     attr_sig = hashlib.sha256(
                         f"{sorted(p_attrs)}|{sorted(r_attrs)}".encode()
                     ).hexdigest()[:8]
-                    if level >= 2:
+                    if level >= 3:
                         _set(bitmap, f"attr_div_0_{i}", attr_sig)
                     if raw_record is not None:
                         raw_record.features.append(

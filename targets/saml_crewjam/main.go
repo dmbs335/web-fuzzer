@@ -77,6 +77,20 @@ func shortenAlgo(uri string) string {
 	return uri
 }
 
+// allText returns the concatenation of all CharData children, matching
+// Go encoding/xml ",chardata" unmarshal behavior used by the real
+// crewjam/saml library.  etree's Element.Text() only returns the first
+// CharData child, which truncates at comments/PIs.
+func allText(el *etree.Element) string {
+	var sb strings.Builder
+	for _, child := range el.Child {
+		if cd, ok := child.(*etree.CharData); ok {
+			sb.WriteString(cd.Data)
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
 // findChildNS finds the first child element with matching namespace+tag.
 func findChildNS(el *etree.Element, space, tag string) *etree.Element {
 	for _, child := range el.ChildElements() {
@@ -173,13 +187,13 @@ func verifySAML(xmlInput string) (string, int) {
 		// Issuer
 		issuerEl := findChildNS(a, "", "Issuer")
 		if issuerEl != nil {
-			v := issuerEl.Text()
+			v := allText(issuerEl)
 			result.Issuer = &v
 		} else {
 			// Try Response-level Issuer
 			respIssuer := findChildNS(root, "", "Issuer")
 			if respIssuer != nil {
-				v := respIssuer.Text()
+				v := allText(respIssuer)
 				result.Issuer = &v
 			}
 		}
@@ -189,7 +203,7 @@ func verifySAML(xmlInput string) (string, int) {
 		if subject != nil {
 			nameID := findChildNS(subject, "", "NameID")
 			if nameID != nil {
-				v := nameID.Text()
+				v := allText(nameID)
 				result.Subject = &v
 				format := nameID.SelectAttrValue("Format", "")
 				if format != "" {
@@ -205,7 +219,7 @@ func verifySAML(xmlInput string) (string, int) {
 			if audRestrict != nil {
 				audience := findChildNS(audRestrict, "", "Audience")
 				if audience != nil {
-					v := audience.Text()
+					v := allText(audience)
 					result.Audience = &v
 				}
 			}
@@ -220,7 +234,7 @@ func verifySAML(xmlInput string) (string, int) {
 				}
 				attrVal := findChildNS(attr, "", "AttributeValue")
 				if attrVal != nil {
-					result.Attributes[name] = attrVal.Text()
+					result.Attributes[name] = allText(attrVal)
 				}
 			}
 		}

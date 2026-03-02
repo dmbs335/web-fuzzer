@@ -1,14 +1,15 @@
 /**
- * DOMPurify mXSS detection target (process mode).
+ * DOMPurify combined mXSS + diff target (process mode).
  *
  * Usage: node sanitizer_dompurify_mxss.js <input_file>
- * Output: JSON with sanitized, reparsed, resanitized, and diff flags.
+ * Output: JSON with security signals + mXSS detection fields.
  */
 "use strict";
 
 const fs = require("fs");
 const { JSDOM } = require("jsdom");
 const DOMPurify = require("dompurify");
+const { buildResult } = require("./sanitizer_diff_common");
 
 const inputPath = process.argv[2];
 if (!inputPath) {
@@ -22,17 +23,16 @@ try {
   const purify = DOMPurify(window);
 
   const clean = purify.sanitize(html);
+  const result = buildResult(clean);
+
   const dom2 = new JSDOM(`<body>${clean}</body>`);
   const reparsed = dom2.window.document.body.innerHTML;
   const clean2 = purify.sanitize(clean);
 
-  const result = {
-    sanitized: clean,
-    reparsed,
-    resanitized: clean2,
-    mxss: clean !== reparsed,
-    idempotency: clean !== clean2,
-  };
+  result.reparsed = reparsed;
+  result.resanitized = clean2;
+  result.mxss = clean !== reparsed;
+  result.idempotency = clean !== clean2;
 
   process.stdout.write(JSON.stringify(result));
 } catch (err) {

@@ -1,0 +1,1 @@
+__Secure-token=xyz789; Path=/; Secure; HttpOnly; SameSite=Strict

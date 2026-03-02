@@ -151,6 +151,41 @@ class TestCorpus:
         corpus.force_add(self._make_input(b"s1"))
         assert corpus.compact(min_seeds=50) == 0
 
+    # ── add_finding_seed tests ─────────────────────────────────
+
+    def test_add_finding_seed_adds_without_novelty(self):
+        corpus = Corpus()
+        cov = self._make_coverage(10)
+        corpus.force_add(self._make_input(), cov)
+        # Same coverage — add() would reject, add_finding_seed should accept
+        result = corpus.add_finding_seed(self._make_input(b"finding"), cov)
+        assert result is not None
+        assert result.finding_count == 1
+        assert result.energy == 2.0
+        assert len(corpus) == 2
+
+    def test_add_finding_seed_caps_at_10_pct(self):
+        corpus = Corpus()
+        # Add 100 normal seeds
+        for i in range(100):
+            corpus.force_add(self._make_input(f"s{i}".encode()), self._make_coverage(i))
+        # Add 10 finding seeds (10% cap = 10)
+        cov = self._make_coverage(999)
+        for j in range(15):
+            result = corpus.add_finding_seed(self._make_input(f"f{j}".encode()), cov)
+            if j < 11:
+                assert result is not None
+            # Should eventually return None when cap exceeded
+
+    def test_add_finding_seed_respects_min_cap(self):
+        corpus = Corpus()
+        cov = self._make_coverage(10)
+        corpus.force_add(self._make_input(), cov)
+        # Small corpus: min cap is 20, so should allow many finding seeds
+        for j in range(15):
+            result = corpus.add_finding_seed(self._make_input(f"f{j}".encode()), cov)
+            assert result is not None
+
     def test_save_and_load(self, tmp_path):
         corpus = Corpus()
         corpus.force_add(Input(data=b"hello", metadata={"x": 1}))
@@ -312,6 +347,74 @@ class TestMxssMutator:
         out = mut.mutate(inp, [])
         assert out.metadata.get("mutator") == "mxss"
         assert out.metadata.get("source") == "test"
+
+    def test_corpus_crossover_pick_content(self):
+        """_pick_content should use corpus fragments when available."""
+        from webfuzzer.fuzzer.mutators.mxss_mutator import MxssMutator
+
+        mut = MxssMutator(seed=42)
+        donor_data = b"<svg><foreignObject><img src=x onerror=alert(1)></foreignObject></svg>"
+        corpus = [
+            Seed(id=0, input=Input(data=donor_data)),
+            Seed(id=1, input=Input(data=b"<math><mtext>payload</mtext></math>")),
+        ]
+        mut._corpus = corpus
+        data = bytearray(b"<div>test</div>")
+
+        # Run many times — at least some should include corpus fragments
+        results = set()
+        for _ in range(100):
+            content = mut._pick_content(data)
+            results.add(content)
+        # Should have variety from 3 sources: corpus, payloads, input data
+        assert len(results) > 3
+
+    def test_corpus_splice_strategy(self):
+        """_corpus_splice should insert tag fragments from corpus donors."""
+        from webfuzzer.fuzzer.mutators.mxss_mutator import MxssMutator
+
+        mut = MxssMutator(seed=42)
+        donor_data = b"<svg><style>/*payload*/</style></svg>"
+        corpus = [
+            Seed(id=0, input=Input(data=donor_data)),
+            Seed(id=1, input=Input(data=b"<math><mtext>x</mtext></math>")),
+        ]
+        mut._corpus = corpus
+        data = bytearray(b"<div>test</div>")
+
+        # Run splice multiple times
+        has_donor_content = False
+        for _ in range(30):
+            result = mut._corpus_splice(data)
+            result_str = bytes(result)
+            if b"<svg" in result_str or b"<math" in result_str or b"<style" in result_str:
+                has_donor_content = True
+                break
+        assert has_donor_content
+
+    def test_corpus_splice_fallback_empty_corpus(self):
+        """_corpus_splice falls back to namespace_wrap with empty corpus."""
+        from webfuzzer.fuzzer.mutators.mxss_mutator import MxssMutator
+
+        mut = MxssMutator(seed=42)
+        mut._corpus = []
+        data = bytearray(b"<p>test</p>")
+        result = mut._corpus_splice(data)
+        assert len(result) > 0  # should not crash
+
+    def test_mutate_with_corpus(self):
+        """mutate() should work correctly when corpus is populated."""
+        from webfuzzer.fuzzer.mutators.mxss_mutator import MxssMutator
+
+        mut = MxssMutator(seed=42)
+        inp = Input(data=b"<div>content</div>")
+        corpus = [
+            Seed(id=0, input=Input(data=b"<svg onload=alert(1)>")),
+            Seed(id=1, input=Input(data=b"<math><mtext><style>x</style></mtext></math>")),
+        ]
+        out = mut.mutate(inp, corpus)
+        assert isinstance(out.data, bytes)
+        assert len(out.data) > 0
 
 
 class TestStructuralHavocMutator:

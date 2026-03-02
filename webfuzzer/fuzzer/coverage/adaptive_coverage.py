@@ -4,8 +4,14 @@ Monitors corpus growth rate and coverage plateau signals, then
 automatically adjusts the abstraction level of the differential
 feature set:
 
-- **Coarsen** (level − 1) when corpus grows too fast (corpus% > upper_threshold).
-- **Refine**  (level + 1) when coverage stagnates for too long.
+- **Refine**  (level + 1) when corpus grows fast (interesting region found).
+- **Coarsen** (level − 1) when coverage stagnates (escape local optimum).
+
+Rationale for security fuzzing:
+  Rapid corpus growth signals an interesting region being explored —
+  refining increases resolution to distinguish valuable variants.
+  Stagnation signals a local optimum — coarsening merges similar
+  seeds and opens exploration to new regions.
 
 After each transition, the existing corpus is re-hashed from stored raw
 feature data — no re-execution needed.
@@ -14,8 +20,8 @@ Refinement levels (coarsest → finest):
 
   L0  exit_vec + div_bucket{0,1+} only
   L1  + per-pair cdiff hash (current default)
-  L2  + per-component individual bits
-  L3  + actual differing value hashes
+  L2  + per-component bits + element-class divergence (ecat)
+  L3  + raw element/attribute set hashes + value hashes
   L4  + status_vec + error_divergence
 """
 
@@ -61,12 +67,17 @@ class AdaptiveConfig:
 
 
 # Namespace prefixes active at each level.
+#
+# L2 uses "ecat" (element-class divergence) — security-category membership
+# bits that prevent corpus explosion from unique element-set combinations.
+# The raw elem_div/attr_div hashes (per-element-set SHA256) are deferred
+# to L3 where fine-grained resolution is appropriate.
 _LEVEL_PREFIXES: dict[int, set[str]] = {
     0: {"exit_vec", "div_exit", "parse"},
     1: {"exit_vec", "div_exit", "parse", "cdiff"},
-    2: {"exit_vec", "div_exit", "parse", "cdiff", "elem_div", "attr_div", "comp"},
-    3: {"exit_vec", "div_exit", "parse", "cdiff", "elem_div", "attr_div", "comp", "val"},
-    4: {"exit_vec", "div_exit", "parse", "cdiff", "elem_div", "attr_div", "comp", "val", "status_vec", "div_err"},
+    2: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp"},
+    3: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp", "elem_div", "attr_div", "val"},
+    4: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp", "elem_div", "attr_div", "val", "status_vec", "div_err"},
 }
 
 
@@ -146,6 +157,12 @@ class AdaptiveDiffCoverage:
         """Check whether abstraction level should change.
 
         Returns ``True`` if a transition occurred.
+
+        Strategy (security fuzzing CEGAR):
+          - Rapid corpus growth => REFINE (increase detail to distinguish
+            valuable variants in the interesting region).
+          - Stagnation => COARSEN (reduce detail to merge similar seeds
+            and escape local optima).
         """
         if (self._total_execs - self._last_check_iter) < self.config.check_interval:
             return False
@@ -153,25 +170,25 @@ class AdaptiveDiffCoverage:
             self._last_check_iter = self._total_execs
             return False
 
-        # Signal 1: corpus growing too fast → coarsen.
-        if self._should_coarsen(corpus):
-            if self.level > self.config.min_level:
-                new_level = RefinementLevel(self.level - 1)
+        # Signal 1: corpus growing fast → refine (more detail).
+        if self._is_rapid_growth(corpus):
+            if self.level < self.config.max_level:
+                new_level = RefinementLevel(self.level + 1)
                 corpus_pct = (len(corpus) / max(self._total_execs, 1)) * 100
                 self._transition(
                     corpus, new_level,
-                    f"corpus_pct={corpus_pct:.2f}% > {self.config.upper_corpus_pct}%",
+                    f"rapid_growth: corpus_pct={corpus_pct:.2f}% > {self.config.upper_corpus_pct}% => refine",
                 )
                 return True
 
-        # Signal 2: coverage stagnating → refine.
-        if self._should_refine(corpus):
-            if self.level < self.config.max_level:
-                new_level = RefinementLevel(self.level + 1)
+        # Signal 2: coverage stagnating → coarsen (escape local optimum).
+        if self._is_stagnating(corpus):
+            if self.level > self.config.min_level:
+                new_level = RefinementLevel(self.level - 1)
                 stag = self._total_execs - self._last_new_coverage_iter
                 self._transition(
                     corpus, new_level,
-                    f"stagnation={stag} iters",
+                    f"stagnation={stag} iters => coarsen",
                 )
                 return True
 
@@ -182,13 +199,15 @@ class AdaptiveDiffCoverage:
 
     # ── Private helpers ──────────────────────────────────────────
 
-    def _should_coarsen(self, corpus: Corpus) -> bool:
+    def _is_rapid_growth(self, corpus: Corpus) -> bool:
+        """Detect when corpus is growing rapidly (interesting region)."""
         if self._total_execs < 1000:
             return False
         corpus_pct = (len(corpus) / self._total_execs) * 100
         return corpus_pct > self.config.upper_corpus_pct
 
-    def _should_refine(self, corpus: Corpus) -> bool:
+    def _is_stagnating(self, corpus: Corpus) -> bool:
+        """Detect when coverage has stagnated (stuck in local optimum)."""
         iters_since = self._total_execs - self._last_new_coverage_iter
         if iters_since < self.config.stagnation_window:
             return False
@@ -265,13 +284,19 @@ class AdaptiveDiffCoverage:
         for namespace, value in record.features:
             # Extract prefix: "cdiff_0_1" → "cdiff", "exit_vec" → "exit_vec"
             prefix = namespace.split("_")[0] if "_" in namespace else namespace
-            # Special case: "div_exit_0_1" → "div_exit", "div_err_0_1" → "div_err"
+            # Special case: multi-word prefixes
             if namespace.startswith("div_exit"):
                 prefix = "div_exit"
             elif namespace.startswith("div_err"):
                 prefix = "div_err"
             elif namespace.startswith("status_vec"):
                 prefix = "status_vec"
+            elif namespace.startswith("elem_div"):
+                prefix = "elem_div"
+            elif namespace.startswith("attr_div"):
+                prefix = "attr_div"
+            elif namespace.startswith("ecat"):
+                prefix = "ecat"
 
             if prefix in active:
                 self._collector._set_feature(bitmap, namespace, value)

@@ -1,0 +1,1 @@
+auth=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk; Path=/; HttpOnly; Secure; SameSite=Strict

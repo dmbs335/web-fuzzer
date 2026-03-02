@@ -18,6 +18,8 @@ Taxonomy sections mapped to strategies:
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 import random
 from typing import TYPE_CHECKING
@@ -26,6 +28,71 @@ from ..protocols import Input
 
 if TYPE_CHECKING:
     from ..corpus import Seed
+
+_log = logging.getLogger(__name__)
+
+# ── Post-mutation re-signing infrastructure ──────────────────────
+#
+# Group B strategies modify signed content (NameID, Audience, etc.)
+# and NEED re-signing so parsers don't reject at sig-check boundary.
+#
+# Group A strategies that modify Signature internals (S3/S4/S7) would
+# have their effects undone by re-signing, so they BLOCK it.
+
+_FIXTURES_DIR = os.path.join(
+    os.path.dirname(__file__), os.pardir, os.pardir, os.pardir,
+    "targets", "saml_fixtures",
+)
+
+# Strategy indices that benefit from re-signing (modify signed content)
+_NEEDS_RESIGN: frozenset[int] = frozenset({
+    # S2: parser differentials that modify Assertion tag/content
+    8,   # attr_pollution
+    10,  # namespace_redeclaration
+    13,  # namespace_undeclare
+    14,  # processing_instruction_inject
+    17,  # namespace_prefix_remap
+    # S6: protocol-level (modify Assertion internals)
+    36,  # nameid_spoof
+    37,  # audience_bypass
+    38,  # timestamp_manipulation
+    39,  # issuer_spoof
+    40,  # subject_confirmation_bypass
+    41,  # condition_manipulation
+    42,  # attribute_injection
+    # S8: Go quirk (adds attrs to Assertion)
+    49,  # go_encoding_xml_quirk
+    # H: newly discovered (modify NameID/Issuer text)
+    55,  # unicode_normalization
+    56,  # null_byte_inject
+    # I: extraction divergence (modify NameID structure)
+    58,  # nameid_mixed_content
+    59,  # multi_nameid
+})
+
+# Strategy indices that modify Signature internals — re-sign would undo them
+_BLOCKS_RESIGN: frozenset[int] = frozenset({
+    # S3: canonicalization/transform
+    19,  # comment_inject_digest
+    20,  # comment_inject_sigvalue
+    21,  # transform_chain_inject
+    22,  # transform_remove_enveloped
+    23,  # reference_uri_empty
+    24,  # reference_uri_xpointer
+    25,  # c14n_method_swap
+    # S4: signature validation bypass
+    26,  # sig_strip_all
+    27,  # sig_strip_assertion
+    28,  # algo_downgrade
+    29,  # hmac_confusion
+    30,  # duplicate_reference
+    31,  # keyinfo_confusion
+    32,  # signedinfo_manipulation
+    # S7: crypto infrastructure
+    43,  # golden_saml_self_signed
+    # G4: void c14n with precomputed digest
+    53,  # void_c14n_precomputed_digest
+})
 
 # ── Evil NameID values for injection ─────────────────────────────
 
@@ -501,6 +568,114 @@ def _find_element_span(
     return (m_open.start(), m_close.end())
 
 
+# ── Lazy-loaded re-signing state (module-level singleton) ────────
+# Avoids repeated key reads and signer construction per mutation.
+
+_resign_key: bytes | None = None
+_resign_cert: bytes | None = None
+_resign_signer: object | None = None
+_resign_init_failed: bool = False
+
+_SAML_NS = "urn:oasis:names:tc:SAML:2.0:assertion"
+_DS_NS = "http://www.w3.org/2000/09/xmldsig#"
+
+
+def _get_signer():
+    """Return a cached (key_pem, cert_pem, XMLSigner) tuple, or None."""
+    global _resign_key, _resign_cert, _resign_signer, _resign_init_failed
+    if _resign_init_failed:
+        return None
+    if _resign_signer is not None:
+        return _resign_key, _resign_cert, _resign_signer
+
+    try:
+        key_path = os.path.join(_FIXTURES_DIR, "idp_key.pem")
+        cert_path = os.path.join(_FIXTURES_DIR, "idp_cert.pem")
+        with open(key_path, "rb") as f:
+            _resign_key = f.read()
+        with open(cert_path, "rb") as f:
+            _resign_cert = f.read()
+
+        from signxml import XMLSigner
+        from signxml.algorithms import (
+            CanonicalizationMethod,
+            DigestAlgorithm,
+            SignatureConstructionMethod,
+            SignatureMethod,
+        )
+
+        _resign_signer = XMLSigner(
+            method=SignatureConstructionMethod.enveloped,
+            signature_algorithm=SignatureMethod.RSA_SHA256,
+            digest_algorithm=DigestAlgorithm.SHA256,
+            c14n_algorithm=CanonicalizationMethod.EXCLUSIVE_XML_CANONICALIZATION_1_0,
+        )
+        _log.debug("SAML re-signing initialized (IdP key loaded)")
+        return _resign_key, _resign_cert, _resign_signer
+    except Exception:
+        _resign_init_failed = True
+        _log.debug("SAML re-signing unavailable (key/signxml not found)", exc_info=True)
+        return None
+
+
+def _resign_assertion_bytes(data: bytes) -> bytes | None:
+    """Re-sign the first Assertion in *data* with the test IdP key.
+
+    Returns re-signed XML bytes, or None if re-signing fails (malformed
+    XML, missing Assertion, signxml error, etc.).  Callers should fall
+    back to the unsigned mutant on None.
+    """
+    ctx = _get_signer()
+    if ctx is None:
+        return None
+
+    key_pem, cert_pem, signer = ctx
+
+    try:
+        from lxml import etree
+
+        # Parse — recover=True tolerates some malformation from mutations
+        parser = etree.XMLParser(recover=True, resolve_entities=False)
+        root = etree.fromstring(data, parser=parser)
+        if root is None:
+            return None
+
+        # Find assertion (namespaced or fallback to local name)
+        assertion = root.find(f"{{{_SAML_NS}}}Assertion")
+        if assertion is None:
+            # Try without namespace (namespace_prefix_remap may change prefix)
+            for elem in root.iter():
+                local = etree.QName(elem.tag).localname if isinstance(elem.tag, str) else ""
+                if local == "Assertion":
+                    assertion = elem
+                    break
+        if assertion is None:
+            return None
+
+        # Strip existing Signature from assertion before re-signing
+        for sig in list(assertion):
+            if isinstance(sig.tag, str):
+                local = etree.QName(sig.tag).localname
+                if local == "Signature":
+                    assertion.remove(sig)
+
+        # Sign
+        signed_assertion = signer.sign(assertion, key=key_pem, cert=cert_pem)
+
+        # Replace original assertion with signed version
+        parent = assertion.getparent()
+        if parent is None:
+            return None
+        idx = list(parent).index(assertion)
+        parent.remove(assertion)
+        parent.insert(idx, signed_assertion)
+
+        return etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+    except Exception:
+        # Mutation may have produced unparseable XML — that's fine
+        return None
+
+
 class SamlMutator:
     """SAML signature bypass taxonomy-driven mutator.
 
@@ -629,6 +804,7 @@ class SamlMutator:
 
         num_ops = self.rng.choices([1, 2, 3], weights=[50, 35, 15], k=1)[0]
         applied: list[str] = []
+        applied_indices: list[int] = []
         for _ in range(num_ops):
             idx = self.rng.choices(
                 range(len(self._strategies)), weights=self._weights, k=1
@@ -638,9 +814,28 @@ class SamlMutator:
             if result is not None and len(result) > 0:
                 data = result
                 applied.append(self._strategy_names[idx])
+                applied_indices.append(idx)
 
         if len(data) > MAX_OUTPUT_SIZE:
             data = data[:MAX_OUTPUT_SIZE]
+
+        # ── Post-mutation re-signing ─────────────────────────────
+        # If any applied strategy modifies signed content (Group B)
+        # and no strategy modifies Signature internals (would be
+        # undone by re-signing), re-sign the Assertion to produce
+        # a valid signature over the mutated content.  This lets the
+        # fuzzer explore post-validation parser behaviour (NameID
+        # extraction, attribute handling, etc.) instead of getting
+        # stuck at the signature-check boundary.
+        resigned = False
+        idx_set = frozenset(applied_indices)
+        needs = idx_set & _NEEDS_RESIGN
+        blocks = idx_set & _BLOCKS_RESIGN
+        if needs and not blocks:
+            resigned_data = _resign_assertion_bytes(bytes(data))
+            if resigned_data is not None:
+                data = bytearray(resigned_data)
+                resigned = True
 
         return Input(
             data=bytes(data),
@@ -648,6 +843,7 @@ class SamlMutator:
                 **inp.metadata,
                 "mutator": self.name,
                 "strategies": applied,
+                "resigned": resigned,
             },
         )
 

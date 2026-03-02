@@ -1,0 +1,1 @@
+__Host-cookie=value; Path=/; Secure; Partitioned; SameSite=None

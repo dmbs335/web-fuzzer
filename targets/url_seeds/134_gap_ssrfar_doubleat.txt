@@ -1,0 +1,1 @@
+http://safe.com@169.254.169.254@external.com/latest/meta-data/

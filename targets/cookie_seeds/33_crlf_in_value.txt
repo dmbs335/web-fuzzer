@@ -1,0 +1,1 @@
+session=abc%0d%0aSet-Cookie: evil=injected; Path=/

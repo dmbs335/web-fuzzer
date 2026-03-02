@@ -392,6 +392,7 @@ class MxssMutator:
         self.rng = random.Random(seed)
         # Strategies ordered by taxonomy section — weights reflect
         # historical CVE frequency and combinatorial potential
+        self._corpus: list[Seed] = []  # set by mutate() each call
         self._strategies = [
             # §1 Namespace switching (dominant bypass class)
             self._namespace_wrap,              # §1-1  weight: 14
@@ -422,6 +423,8 @@ class MxssMutator:
             # Encoding / coercion
             self._entity_double_decode,        # §4    weight: 2
             self._serializer_coercion,         #       weight: 1
+            # Corpus crossover
+            self._corpus_splice,               #       weight: 8
         ]
         self._weights = [
             14, 8, 8, 6,   # §1 namespace switching
@@ -433,9 +436,11 @@ class MxssMutator:
             3,              # §7 gadgets
             10,             # CDATA attr injection (proven effective)
             2, 1,           # encoding/coercion
+            8,              # corpus splice (cross-pollination)
         ]
 
     def mutate(self, inp: Input, corpus: list[Seed]) -> Input:
+        self._corpus = corpus
         data = bytearray(inp.data)
         if len(data) < 4:
             data = bytearray(self.rng.choice(XSS_PAYLOADS))
@@ -699,10 +704,55 @@ class MxssMutator:
     def _pick_content(self, data: bytearray) -> bytes:
         """Pick content for template substitution.
 
-        Uses either a fragment of the input or a payload from the pool.
+        Distribution: 20% corpus fragment, 20% XSS payload, 60% input fragment.
+        Corpus fragments enable cross-pollination of structural patterns
+        between different interesting inputs discovered during fuzzing.
         """
-        if self.rng.random() < 0.4 or len(data) < 4:
+        r = self.rng.random()
+        # 20% — corpus fragment (cross-pollination)
+        if r < 0.2 and self._corpus and len(self._corpus) > 1:
+            donor = self.rng.choice(self._corpus)
+            donor_data = donor.input.data
+            if len(donor_data) >= 4:
+                max_len = min(len(donor_data), 500)
+                start = self.rng.randint(0, max(len(donor_data) - max_len, 0))
+                return donor_data[start : start + max_len]
+        # 20% — XSS payload pool (or fallback for short inputs)
+        if r < 0.4 or len(data) < 4:
             return self.rng.choice(XSS_PAYLOADS)
+        # 60% — fragment of current input
         max_len = min(len(data), 500)
         start = self.rng.randint(0, max(len(data) - max_len, 0))
         return bytes(data[start : start + max_len])
+
+    def _corpus_splice(self, data: bytearray) -> bytearray:
+        """Splice a tag fragment from a random corpus seed into current input.
+
+        Finds an opening tag boundary in a donor seed and inserts the
+        fragment at a random position. Enables structural crossover —
+        combining interesting tag patterns from different corpus entries.
+        Falls back to namespace_wrap when corpus is insufficient.
+        """
+        if not self._corpus or len(self._corpus) < 2:
+            return self._namespace_wrap(data)
+
+        donor = self.rng.choice(self._corpus)
+        donor_data = donor.input.data
+
+        # Find opening tag boundaries in donor
+        tag_starts = [
+            i for i in range(len(donor_data) - 1)
+            if donor_data[i:i + 1] == b"<" and donor_data[i + 1:i + 2] != b"/"
+        ]
+        if not tag_starts:
+            return self._namespace_wrap(data)
+
+        frag_start = self.rng.choice(tag_starts)
+        frag_end = min(
+            frag_start + self.rng.randint(50, 500), len(donor_data)
+        )
+        fragment = donor_data[frag_start:frag_end]
+
+        # Insert at a random position in current data
+        pos = self.rng.randint(0, max(len(data), 1))
+        return bytearray(bytes(data[:pos]) + fragment + bytes(data[pos:]))

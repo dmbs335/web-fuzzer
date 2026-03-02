@@ -603,6 +603,22 @@ class SamlAlgorithmDowngradeStrategy:
         accepting = "primary" if p_valid else f"ref[{ref_index}]"
         acc_data = p if p_valid else r
 
+        # ── False-positive guard: verify the ACCEPTING library actually
+        # uses the weak algorithm.  In XSW scenarios, the weak-algorithm
+        # indicator (e.g. "hmac-sha256") may appear in a non-validated
+        # evil assertion while the accepting library validates a different
+        # assertion signed with RSA-SHA256.  Checking the accepting
+        # library's *reported* algorithm avoids this false positive.
+        if triggered_category == "hmac_confusion":
+            acc_algos = acc_data.get("algorithms") or {}
+            acc_sig = (acc_algos.get("signature") or "").lower()
+            if acc_sig and "hmac" not in acc_sig:
+                # Accepting library reports a non-HMAC algorithm (e.g.
+                # rsa-sha256).  The HMAC indicator in the input is in a
+                # different scope — let SamlDiffStrategy handle this as
+                # a regular signature_bypass.
+                return None
+
         severity = (
             Severity.CRITICAL if triggered_category == "hmac_confusion"
             else Severity.HIGH
@@ -685,6 +701,28 @@ class SamlKeyInfoPrecedenceStrategy:
         if p_valid == r_valid:
             return None
 
+        # ── False-positive guard: multi-assertion scope confusion.
+        # In XSW inputs with multiple assertions, the manipulated KeyInfo
+        # is typically in an evil assertion while the accepting library
+        # validates a different assertion with proper KeyInfo.  This is
+        # an assertion-selection divergence, not a KeyInfo precedence
+        # issue.  Let SamlDiffStrategy handle it as signature_bypass.
+        p_count = p.get("assertion_count", 0)
+        r_count = r.get("assertion_count", 0)
+        if p_count > 1 or r_count > 1:
+            return None
+
+        # ── Single-assertion case: the accepting library validates with
+        # a corrupted/empty/missing KeyInfo.  Since the assertion was
+        # signed with the real IdP key (and the mutation only corrupts
+        # KeyInfo without providing a working attacker key), signature
+        # validation succeeding proves the library uses the pre-configured
+        # IdP cert, ignoring the manipulated KeyInfo.  This is the SAFE
+        # behavior — downgrade from CRITICAL to HIGH.
+        # The truly dangerous case (library trusts embedded attacker cert)
+        # requires an attacker-signed assertion, which is tested by the
+        # Golden SAML PoC, not by the fuzzer's KeyInfo corruption mutation.
+
         accepting = "primary" if p_valid else f"ref[{ref_index}]"
         acc_data = p if p_valid else r
 
@@ -693,7 +731,7 @@ class SamlKeyInfoPrecedenceStrategy:
                 f"SAML KeyInfo Precedence: {accepting} accepts with "
                 f"manipulated KeyInfo (subject={acc_data.get('subject')})"
             ),
-            severity=Severity.CRITICAL,
+            severity=Severity.HIGH,
             input=inp,
             result=primary,
             oracle_name="differential",
@@ -704,6 +742,7 @@ class SamlKeyInfoPrecedenceStrategy:
                 "ref_valid": r_valid,
                 "ref_index": ref_index,
                 "no_keyinfo": no_keyinfo,
+                "keyinfo_behavior": "ignores_keyinfo",
                 "input_preview": _input_preview(inp),
             },
         )

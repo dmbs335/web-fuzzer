@@ -1,5 +1,7 @@
 """Tests for the SAML taxonomy-driven mutator."""
 
+import os
+
 import pytest
 
 from webfuzzer.fuzzer.mutators.saml_mutator import (
@@ -8,12 +10,29 @@ from webfuzzer.fuzzer.mutators.saml_mutator import (
     XSW_ASSERTION_TEMPLATE,
     _make_evil_assertion,
     _find_element_span,
+    _resign_assertion_bytes,
+    _NEEDS_RESIGN,
+    _BLOCKS_RESIGN,
     _RE_ASSERTION_OPEN,
     _RE_ASSERTION_CLOSE,
     _RE_NAMEID,
     MAX_OUTPUT_SIZE,
 )
 from webfuzzer.fuzzer.protocols import Input
+
+_FIXTURES_DIR = os.path.join(
+    os.path.dirname(__file__), os.pardir, "targets", "saml_fixtures",
+)
+_HAS_FIXTURES = os.path.isfile(os.path.join(_FIXTURES_DIR, "idp_key.pem"))
+
+# Try to import signxml for resign tests
+try:
+    import signxml  # noqa: F401
+    _HAS_SIGNXML = True
+except ImportError:
+    _HAS_SIGNXML = False
+
+_can_resign = _HAS_FIXTURES and _HAS_SIGNXML
 
 
 SAMPLE_SAML = (
@@ -161,3 +180,189 @@ class TestSamlMutator:
         assert seen_xsw, "XSW strategy never fired"
         # At least one other category should fire too
         assert seen_comment or seen_strip, "Only XSW strategies observed"
+
+    def test_metadata_has_resigned_field(self, mutator):
+        """Every mutation should include 'resigned' in metadata."""
+        inp = Input(data=SAMPLE_SAML)
+        for _ in range(20):
+            result = mutator.mutate(inp, [])
+            assert "resigned" in result.metadata
+
+    def test_resign_groups_disjoint(self):
+        """_NEEDS_RESIGN and _BLOCKS_RESIGN must not overlap."""
+        overlap = _NEEDS_RESIGN & _BLOCKS_RESIGN
+        assert not overlap, f"Overlapping strategy indices: {overlap}"
+
+    def test_resign_indices_in_range(self):
+        """All resign indices must be valid strategy indices."""
+        for idx in _NEEDS_RESIGN | _BLOCKS_RESIGN:
+            assert 0 <= idx < 62, f"Index {idx} out of range"
+
+
+@pytest.mark.skipif(not _can_resign, reason="signxml or IdP fixtures unavailable")
+class TestResigning:
+    """Tests for post-mutation re-signing infrastructure."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_signer_cache(self):
+        """Reset module-level signer cache between tests."""
+        import webfuzzer.fuzzer.mutators.saml_mutator as mod
+        mod._resign_key = None
+        mod._resign_cert = None
+        mod._resign_signer = None
+        mod._resign_init_failed = False
+        yield
+
+    def _make_signed_sample(self) -> bytes:
+        """Build a properly signed SAML Response for resign tests."""
+        from lxml import etree
+        from signxml import XMLSigner
+        from signxml.algorithms import (
+            CanonicalizationMethod,
+            DigestAlgorithm,
+            SignatureConstructionMethod,
+            SignatureMethod,
+        )
+
+        SAML_NS = "urn:oasis:names:tc:SAML:2.0:assertion"
+        SAMLP_NS = "urn:oasis:names:tc:SAML:2.0:protocol"
+
+        with open(os.path.join(_FIXTURES_DIR, "idp_key.pem"), "rb") as f:
+            key_pem = f.read()
+        with open(os.path.join(_FIXTURES_DIR, "idp_cert.pem"), "rb") as f:
+            cert_pem = f.read()
+
+        resp = etree.Element(
+            f"{{{SAMLP_NS}}}Response",
+            nsmap={"samlp": SAMLP_NS, "saml": SAML_NS},
+        )
+        resp.set("ID", "_resp_test")
+        resp.set("Version", "2.0")
+
+        iss = etree.SubElement(resp, f"{{{SAML_NS}}}Issuer")
+        iss.text = "https://idp.example.com"
+
+        status = etree.SubElement(resp, f"{{{SAMLP_NS}}}Status")
+        sc = etree.SubElement(status, f"{{{SAMLP_NS}}}StatusCode")
+        sc.set("Value", "urn:oasis:names:tc:SAML:2.0:status:Success")
+
+        assertion = etree.SubElement(resp, f"{{{SAML_NS}}}Assertion")
+        assertion.set("Version", "2.0")
+        assertion.set("ID", "_assert_test")
+        assertion.set("IssueInstant", "2025-06-01T00:00:00Z")
+
+        iss2 = etree.SubElement(assertion, f"{{{SAML_NS}}}Issuer")
+        iss2.text = "https://idp.example.com"
+
+        subject = etree.SubElement(assertion, f"{{{SAML_NS}}}Subject")
+        nameid = etree.SubElement(subject, f"{{{SAML_NS}}}NameID")
+        nameid.set("Format", "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress")
+        nameid.text = "user@example.com"
+
+        conditions = etree.SubElement(assertion, f"{{{SAML_NS}}}Conditions")
+        conditions.set("NotBefore", "2025-06-01T00:00:00Z")
+        conditions.set("NotOnOrAfter", "2099-12-31T23:59:59Z")
+        aud_r = etree.SubElement(conditions, f"{{{SAML_NS}}}AudienceRestriction")
+        aud = etree.SubElement(aud_r, f"{{{SAML_NS}}}Audience")
+        aud.text = "https://sp.example.com"
+
+        signer = XMLSigner(
+            method=SignatureConstructionMethod.enveloped,
+            signature_algorithm=SignatureMethod.RSA_SHA256,
+            digest_algorithm=DigestAlgorithm.SHA256,
+            c14n_algorithm=CanonicalizationMethod.EXCLUSIVE_XML_CANONICALIZATION_1_0,
+        )
+        signed = signer.sign(assertion, key=key_pem, cert=cert_pem)
+
+        parent = assertion.getparent()
+        idx = list(parent).index(assertion)
+        parent.remove(assertion)
+        parent.insert(idx, signed)
+
+        return etree.tostring(resp, xml_declaration=True, encoding="UTF-8")
+
+    def test_resign_produces_valid_signature(self):
+        """Re-signing a modified NameID should produce a verifiable signature."""
+        from lxml import etree
+        from signxml import XMLVerifier
+
+        signed_xml = self._make_signed_sample()
+        assert b"user@example.com" in signed_xml
+
+        # Mutate: replace NameID (Group B strategy #36 equivalent)
+        mutated = signed_xml.replace(b"user@example.com", b"admin@example.com")
+        assert b"admin@example.com" in mutated
+
+        # Re-sign
+        resigned = _resign_assertion_bytes(mutated)
+        assert resigned is not None
+        assert b"admin@example.com" in resigned
+
+        # Verify signature is valid
+        with open(os.path.join(_FIXTURES_DIR, "idp_cert.pem"), "rb") as f:
+            cert = f.read()
+        root = etree.fromstring(resigned)
+        assertion = root.find("{urn:oasis:names:tc:SAML:2.0:assertion}Assertion")
+        # Should not raise
+        XMLVerifier().verify(assertion, x509_cert=cert)
+
+    def test_resign_returns_none_on_garbage(self):
+        """Re-signing garbage bytes should return None, not crash."""
+        result = _resign_assertion_bytes(b"this is not xml at all")
+        assert result is None
+
+    def test_resign_returns_none_on_no_assertion(self):
+        """Re-signing XML without Assertion should return None."""
+        result = _resign_assertion_bytes(
+            b'<?xml version="1.0"?><root><child/></root>'
+        )
+        assert result is None
+
+    def test_mutate_group_b_produces_resigned(self):
+        """Mutations applying only Group B strategies should be re-signed."""
+        signed_xml = self._make_signed_sample()
+        # Use a seed that reliably produces a Group B strategy
+        # Run many mutations and check that at least some get resigned
+        mutator = SamlMutator(seed=1)
+        inp = Input(data=signed_xml)
+        resigned_count = 0
+        for _ in range(200):
+            result = mutator.mutate(inp, [])
+            if result.metadata.get("resigned"):
+                resigned_count += 1
+        assert resigned_count > 0, (
+            "No re-signed mutations in 200 iterations; "
+            "Group B strategies should trigger re-signing"
+        )
+
+    def test_mutate_group_a_not_resigned(self):
+        """Mutations applying only Group A strategies should NOT be re-signed."""
+        signed_xml = self._make_signed_sample()
+        mutator = SamlMutator(seed=42)
+        inp = Input(data=signed_xml)
+        # Collect mutations that had only Group A strategies
+        group_a_not_resigned = 0
+        for _ in range(200):
+            result = mutator.mutate(inp, [])
+            strategies = result.metadata.get("strategies", [])
+            # Map strategy names back to indices
+            name_to_idx = {fn.__name__.lstrip("_"): i
+                           for i, fn in enumerate(mutator._strategies)}
+            indices = {name_to_idx.get(s, -1) for s in strategies}
+            has_needs = bool(indices & _NEEDS_RESIGN)
+            has_blocks = bool(indices & _BLOCKS_RESIGN)
+            if has_blocks and not has_needs:
+                assert not result.metadata.get("resigned"), (
+                    f"Group A-only mutation should not be resigned: {strategies}"
+                )
+                group_a_not_resigned += 1
+        assert group_a_not_resigned > 0, "No pure Group A mutations observed"
+
+    def test_resigned_metadata_tracks_correctly(self):
+        """The 'resigned' metadata field should reflect actual re-signing."""
+        signed_xml = self._make_signed_sample()
+        mutator = SamlMutator(seed=7)
+        inp = Input(data=signed_xml)
+        for _ in range(100):
+            result = mutator.mutate(inp, [])
+            assert isinstance(result.metadata.get("resigned"), bool)

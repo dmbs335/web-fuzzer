@@ -8,7 +8,9 @@ from webfuzzer.fuzzer.oracles.saml_oracle import SamlOracle, _parse_saml_output
 from webfuzzer.fuzzer.oracles.saml_diff_strategy import (
     SamlDiffStrategy,
     SamlAlgorithmConfusionStrategy,
+    SamlAlgorithmDowngradeStrategy,
     SamlIssuerConfusionStrategy,
+    SamlKeyInfoPrecedenceStrategy,
     get_saml_strategies,
 )
 
@@ -349,3 +351,173 @@ class TestSubjectExtractionDivergence:
         assert finding is not None
         assert finding.severity == Severity.CRITICAL
         assert finding.metadata["category"] == "subject_confusion"
+
+
+# ── Regression: HMAC confusion false-positive guard ─────────────
+
+
+class TestHmacConfusionFalsePositive:
+    """Regression: HMAC indicator in evil assertion should not trigger
+    algo_downgrade_hmac_confusion when the accepting library validates
+    a different assertion using RSA-SHA256.
+
+    Root cause from Session 127 Batch 1: XSW input contains HMAC in
+    evil assertion's SignatureMethod, but accepting library validates
+    the legitimate RSA-signed assertion.  The oracle checked raw bytes
+    for 'hmac-sha' and incorrectly flagged HMAC confusion.
+    """
+
+    def test_hmac_in_input_but_accepting_uses_rsa(self):
+        """HMAC string in input, accepting library reports rsa-sha256 -> None."""
+        strategy = SamlAlgorithmDowngradeStrategy()
+        # Input contains hmac-sha256 somewhere (e.g. in evil assertion)
+        inp = Input(data=b'<SignatureMethod Algorithm="hmac-sha256"/><saml/>')
+        # Primary accepts with RSA (validates different assertion)
+        primary = _make_result({
+            **VALID_SAML,
+            "algorithms": {"signature": "rsa-sha256", "digest": "sha256"},
+        })
+        # Reference rejects
+        reference = _make_result(INVALID_SAML)
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is None, "Should not flag HMAC confusion when accepting lib uses RSA"
+
+    def test_hmac_accepted_by_library_is_still_critical(self):
+        """Library actually reports HMAC algorithm -> CRITICAL finding."""
+        strategy = SamlAlgorithmDowngradeStrategy()
+        inp = Input(data=b'<SignatureMethod Algorithm="hmac-sha256"/><saml/>')
+        # Primary accepts and reports using HMAC
+        primary = _make_result({
+            **VALID_SAML,
+            "algorithms": {"signature": "hmac-sha256", "digest": "sha256"},
+        })
+        reference = _make_result(INVALID_SAML)
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.severity == Severity.CRITICAL
+        assert finding.metadata["category"] == "algo_downgrade_hmac_confusion"
+
+    def test_hmac_in_input_ref_accepts_with_rsa(self):
+        """Ref accepts with RSA while HMAC in input -> None (ref side)."""
+        strategy = SamlAlgorithmDowngradeStrategy()
+        inp = Input(data=b'<SignatureMethod Algorithm="hmac-sha1"/><saml/>')
+        primary = _make_result(INVALID_SAML)
+        reference = _make_result({
+            **VALID_SAML,
+            "algorithms": {"signature": "rsa-sha256", "digest": "sha256"},
+        })
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is None
+
+    def test_sha1_downgrade_unaffected_by_hmac_guard(self):
+        """SHA-1 downgrade is not HMAC, so the HMAC guard does not apply."""
+        strategy = SamlAlgorithmDowngradeStrategy()
+        inp = Input(data=b'<SignatureMethod Algorithm="rsa-sha1"/><saml/>')
+        primary = _make_result({
+            **VALID_SAML,
+            "algorithms": {"signature": "rsa-sha1", "digest": "sha1"},
+        })
+        reference = _make_result(INVALID_SAML)
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.severity == Severity.HIGH
+        assert finding.metadata["category"] == "algo_downgrade_sha1_downgrade"
+
+    def test_hmac_no_algo_reported_still_fires(self):
+        """Accepting library reports no algorithm -> conservatively flag."""
+        strategy = SamlAlgorithmDowngradeStrategy()
+        inp = Input(data=b'<SignatureMethod Algorithm="hmac-sha256"/><saml/>')
+        primary = _make_result({
+            **VALID_SAML,
+            "algorithms": {},
+        })
+        reference = _make_result(INVALID_SAML)
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None, "No reported algo -> conservatively keep finding"
+        assert finding.severity == Severity.CRITICAL
+
+
+# ── Regression: KeyInfo precedence false-positive guard ──────────
+
+
+class TestKeyInfoPrecedenceFalsePositive:
+    """Regression: KeyInfo manipulation in multi-assertion XSW input
+    should not trigger keyinfo_precedence when the accepting library
+    validates a different assertion with proper KeyInfo.
+
+    Also, single-assertion KeyInfo manipulation acceptance proves the
+    library uses pre-configured cert (safe behavior), so severity
+    should be HIGH not CRITICAL.
+
+    Root cause from Session 127 Batch 1: PoC confirmed all 9 libraries
+    use pre-configured IdP cert.  Fuzzer mutations only corrupt KeyInfo
+    (AAAA, empty, remove) without providing a working attacker key.
+    """
+
+    def test_multi_assertion_keyinfo_returns_none(self):
+        """Multi-assertion + KeyInfo manipulation -> None (XSW scope)."""
+        strategy = SamlKeyInfoPrecedenceStrategy()
+        inp = Input(data=b'<ds:KeyInfo/><ds:Signature>x</ds:Signature>')
+        primary = _make_result({
+            **VALID_SAML,
+            "assertion_count": 2,
+        })
+        reference = _make_result({
+            **INVALID_SAML,
+            "assertion_count": 2,
+        })
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is None, "Multi-assertion KeyInfo should be handled by SamlDiffStrategy"
+
+    def test_multi_assertion_one_side_multiple(self):
+        """One side sees 2 assertions -> still None."""
+        strategy = SamlKeyInfoPrecedenceStrategy()
+        inp = Input(data=b'<ds:KeyInfo/><ds:Signature>x</ds:Signature>')
+        primary = _make_result({
+            **VALID_SAML,
+            "assertion_count": 1,
+        })
+        reference = _make_result({
+            **INVALID_SAML,
+            "assertion_count": 2,
+        })
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is None
+
+    def test_single_assertion_keyinfo_is_high_not_critical(self):
+        """Single-assertion with manipulated KeyInfo -> HIGH (not CRITICAL)."""
+        strategy = SamlKeyInfoPrecedenceStrategy()
+        inp = Input(data=b'<ds:KeyInfo/><ds:Signature>x</ds:Signature>')
+        primary = _make_result({
+            **VALID_SAML,
+            "assertion_count": 1,
+        })
+        reference = _make_result({
+            **INVALID_SAML,
+            "assertion_count": 1,
+        })
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.severity == Severity.HIGH
+        assert finding.metadata["category"] == "keyinfo_precedence"
+        assert finding.metadata["keyinfo_behavior"] == "ignores_keyinfo"
+
+    def test_no_keyinfo_single_assertion(self):
+        """Signature present but no KeyInfo at all, single assertion."""
+        strategy = SamlKeyInfoPrecedenceStrategy()
+        inp = Input(data=b'<ds:Signature><ds:SignedInfo/></ds:Signature>')
+        primary = _make_result({**VALID_SAML, "assertion_count": 1})
+        reference = _make_result({**INVALID_SAML, "assertion_count": 1})
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.severity == Severity.HIGH
+        assert finding.metadata["no_keyinfo"] is True
+
+    def test_both_accept_no_finding(self):
+        """Both accept with manipulated KeyInfo -> no finding."""
+        strategy = SamlKeyInfoPrecedenceStrategy()
+        inp = Input(data=b'<ds:KeyInfo/><ds:Signature>x</ds:Signature>')
+        primary = _make_result({**VALID_SAML, "assertion_count": 1})
+        reference = _make_result({**VALID_SAML, "assertion_count": 1})
+        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        assert finding is None

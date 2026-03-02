@@ -1,0 +1,1 @@
+session=deleted; Max-Age=-1; Path=/

@@ -1,0 +1,1 @@
+javascript://host/%250aalert(1)

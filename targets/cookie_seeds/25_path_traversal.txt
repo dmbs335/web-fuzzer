@@ -1,0 +1,1 @@
+session=abc; Path=/../../etc; Secure; HttpOnly

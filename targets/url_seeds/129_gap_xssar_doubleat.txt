@@ -1,0 +1,1 @@
+data://user@good.com@evil.com/text/html,<script>alert(1)</script>

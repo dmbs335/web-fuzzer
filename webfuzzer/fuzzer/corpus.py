@@ -171,6 +171,54 @@ class Corpus:
 
         return seed
 
+    def add_finding_seed(
+        self,
+        inp: Input,
+        coverage: CoverageMap | None = None,
+        parent_id: int | None = None,
+        depth: int = 0,
+        boost: float = 2.0,
+    ) -> Seed | None:
+        """Add a seed that produced a novel finding, bypassing coverage novelty.
+
+        Finding-producing inputs carry structural patterns worth preserving
+        even when their coverage bitmap matches existing seeds.  Capped at
+        10% of corpus (min 20) to prevent unbounded growth from prolific
+        oracles.
+        """
+        # Cap: count seeds injected via findings (have finding_count but
+        # no unique feature_set contribution).
+        finding_only = sum(
+            1 for s in self.seeds
+            if s.finding_count > 0 and not s.feature_set
+        )
+        if finding_only > max(len(self.seeds) * 0.10, 20):
+            return None
+
+        if coverage is not None:
+            new_edges = self.global_coverage.update(coverage)
+        else:
+            new_edges = set()
+
+        seed = Seed(
+            id=self._next_id,
+            input=inp,
+            coverage=coverage.clone() if coverage else None,
+            parent_id=parent_id,
+            depth=depth,
+            feature_set=new_edges,
+            finding_count=1,
+            energy=boost,
+        )
+        self._next_id += 1
+        self.seeds.append(seed)
+        self._id_index[seed.id] = seed
+
+        for edge in new_edges:
+            self.edge_freq[edge] = self.edge_freq.get(edge, 0) + 1
+
+        return seed
+
     def remove(self, seed_id: int) -> None:
         seed = self._id_index.pop(seed_id, None)
         if seed:

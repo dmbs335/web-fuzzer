@@ -31,6 +31,7 @@ class GrammarMutator:
     """
 
     name = "grammar"
+    requires_tree = True
 
     def __init__(
         self,
@@ -60,8 +61,16 @@ class GrammarMutator:
         tree: DerivationTree | None = inp.metadata.get("tree")
 
         if tree is None:
-            # No tree available — generate fresh
-            return self._input_source.generate()
+            # No tree available — borrow one from a corpus seed that has one.
+            # This avoids discarding valuable file-based seeds entirely.
+            for _ in range(min(len(corpus), 10)):
+                donor = self.rng.choice(corpus) if corpus else None
+                if donor and donor.input.metadata.get("tree"):
+                    tree = donor.input.metadata["tree"].clone()
+                    break
+            if tree is None:
+                # Last resort: generate fresh (no tree-bearing seeds in corpus yet)
+                return self._input_source.generate()
 
         # Clone tree to avoid mutating the original
         tree = tree.clone()

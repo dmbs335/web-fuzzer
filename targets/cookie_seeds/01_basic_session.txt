@@ -1,0 +1,1 @@
+sessionid=abc123def456; Path=/; HttpOnly; Secure; SameSite=Lax

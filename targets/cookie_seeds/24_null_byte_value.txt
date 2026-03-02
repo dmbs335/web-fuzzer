@@ -1,0 +1,1 @@
+session=abc%00def; Path=/; Secure

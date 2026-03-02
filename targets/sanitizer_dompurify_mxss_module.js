@@ -1,18 +1,17 @@
 /**
- * DOMPurify mXSS detection module for persistent wrapper.
+ * DOMPurify combined mXSS + diff module for persistent wrapper.
  *
- * Performs three checks:
- *   1. Sanitize input → clean
- *   2. Double-parse: assign clean to innerHTML, serialize back → reparsed
- *   3. Idempotency: sanitize(clean) → clean2
+ * Outputs BOTH:
+ *   - Security signal fields (elements_kept, has_script, ...) for diff coverage
+ *   - mXSS fields (reparsed, mxss, idempotency) for mXSS oracle
  *
- * Returns JSON with all results + diff flags.
  * JSDOM window created once, reused across all calls.
  */
 "use strict";
 
 const { JSDOM } = require("jsdom");
 const DOMPurify = require("dompurify");
+const { buildResult } = require("./sanitizer_diff_common");
 
 const window = new JSDOM("").window;
 const purify = DOMPurify(window);
@@ -21,22 +20,21 @@ module.exports.sanitize = (html) => {
   // Step 1: sanitize
   const clean = purify.sanitize(html);
 
-  // Step 2: double-parse (simulate innerHTML assignment)
-  // This is the core mXSS vector: browser re-parses the sanitized string
+  // Step 2: extract security signals
+  const result = buildResult(clean);
+
+  // Step 3: double-parse (simulate innerHTML assignment)
   const dom2 = new JSDOM(`<body>${clean}</body>`);
   const reparsed = dom2.window.document.body.innerHTML;
 
-  // Step 3: idempotency check
+  // Step 4: idempotency check
   const clean2 = purify.sanitize(clean);
 
-  // Detect differences
   const mxss = clean !== reparsed;
   const idempotency = clean !== clean2;
 
-  // Build diff details for mXSS
   let mxssDiff = null;
   if (mxss) {
-    // Find first divergence point
     let diffPos = 0;
     const minLen = Math.min(clean.length, reparsed.length);
     while (diffPos < minLen && clean[diffPos] === reparsed[diffPos]) diffPos++;
@@ -50,7 +48,6 @@ module.exports.sanitize = (html) => {
     };
   }
 
-  // Build diff details for idempotency
   let idempotencyDiff = null;
   if (idempotency) {
     let diffPos = 0;
@@ -66,13 +63,12 @@ module.exports.sanitize = (html) => {
     };
   }
 
-  return JSON.stringify({
-    sanitized: clean,
-    reparsed,
-    resanitized: clean2,
-    mxss,
-    idempotency,
-    mxssDiff,
-    idempotencyDiff,
-  });
+  result.reparsed = reparsed;
+  result.resanitized = clean2;
+  result.mxss = mxss;
+  result.idempotency = idempotency;
+  result.mxssDiff = mxssDiff;
+  result.idempotencyDiff = idempotencyDiff;
+
+  return JSON.stringify(result);
 };

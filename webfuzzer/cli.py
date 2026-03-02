@@ -205,6 +205,8 @@ _PERSISTENT_MODULE_MAP = {
     "targets/sanitizer_sanitize_html.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_sanitize_html_module.js"),
     "targets/sanitizer_jsxss.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_jsxss_module.js"),
     "targets/sanitizer_dompurify_mxss.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_dompurify_mxss_module.js"),
+    "targets/sanitizer_jsxss_mxss.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_jsxss_mxss_module.js"),
+    "targets/sanitizer_sanitize_html_mxss.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_sanitize_html_mxss_module.js"),
     # Sanitizer differential targets
     "targets/sanitizer_dompurify_diff.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_dompurify_diff_module.js"),
     "targets/sanitizer_sanitize_html_diff.js": ("node targets/persistent_wrapper.js", "targets/sanitizer_sanitize_html_diff_module.js"),

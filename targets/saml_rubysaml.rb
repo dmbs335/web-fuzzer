@@ -16,6 +16,15 @@ FIXTURES_DIR = File.join(File.dirname(__FILE__), 'saml_fixtures')
 SAML_NS = 'urn:oasis:names:tc:SAML:2.0:assertion'
 DS_NS = 'http://www.w3.org/2000/09/xmldsig#'
 
+# Match ruby-saml's Utils.element_text behavior: element.texts.map(&:value).join
+# REXML .text only returns the first Text child (truncates at comment/PI).
+# .texts returns ALL Text children, skipping comments and PIs.
+def element_text(elem)
+  return nil if elem.nil?
+  t = elem.texts.map(&:value).join.strip
+  t.empty? ? nil : t
+end
+
 def verify_saml(xml_input)
   raise ArgumentError, 'empty input' if xml_input.nil? || xml_input.strip.empty?
   raise ArgumentError, 'not XML' unless xml_input.include?('<')
@@ -86,20 +95,20 @@ def verify_saml(xml_input)
     assertion_id = signed_assertion.attributes['ID']
     name_ids = REXML::XPath.match(signed_assertion, './/saml:NameID', 'saml' => SAML_NS)
     unless name_ids.empty?
-      subject = name_ids[0].text&.strip
+      subject = element_text(name_ids[0])
       subject_format = name_ids[0].attributes['Format']
     end
 
     issuers = REXML::XPath.match(signed_assertion, 'saml:Issuer', 'saml' => SAML_NS)
-    issuer = issuers[0].text&.strip unless issuers.empty?
+    issuer = element_text(issuers[0]) unless issuers.empty?
 
     audiences = REXML::XPath.match(signed_assertion, './/saml:Audience', 'saml' => SAML_NS)
-    audience = audiences[0].text&.strip unless audiences.empty?
+    audience = element_text(audiences[0]) unless audiences.empty?
 
     REXML::XPath.each(signed_assertion, './/saml:Attribute', 'saml' => SAML_NS) do |attr|
       name = attr.attributes['Name']
       vals = REXML::XPath.match(attr, 'saml:AttributeValue', 'saml' => SAML_NS)
-        .map { |v| v.text&.strip }
+        .map { |v| element_text(v) }
         .compact
       attributes[name] = vals.length == 1 ? vals[0] : vals if name && !vals.empty?
     end
@@ -108,7 +117,7 @@ def verify_saml(xml_input)
   # Response-level issuer as fallback
   unless issuer
     resp_issuers = REXML::XPath.match(doc, '//saml:Issuer', 'saml' => SAML_NS)
-    issuer = resp_issuers[0].text&.strip unless resp_issuers.empty?
+    issuer = element_text(resp_issuers[0]) unless resp_issuers.empty?
   end
 
   # Algorithms

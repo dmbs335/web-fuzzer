@@ -1,0 +1,1 @@
+session=abc; Path=/; Path=/admin; Domain=a.example.com; Domain=b.example.com; Secure

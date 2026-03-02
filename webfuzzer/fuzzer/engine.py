@@ -114,6 +114,13 @@ class FuzzEngine:
         self._publisher = RedisPublisher()
         self._cmd_queue: queue.Queue[dict] = queue.Queue()
 
+        # Flat list of all targets for primary rotation in differential mode.
+        # Round-robin rotation removes the fixed-primary bias: each target
+        # takes turns as "primary" so differentials visible from any
+        # parser's perspective get discovered.
+        self.all_targets: list[Target] = [target] + list(self.reference_targets)
+        self._rotation_idx: int = 0
+
         # Reusable thread pool for reference target execution (avoids
         # per-iteration ThreadPoolExecutor creation/teardown overhead).
         self._ref_pool: ThreadPoolExecutor | None = None
@@ -152,12 +159,11 @@ class FuzzEngine:
     # ── Internal phases ───────────────────────────────────────────
 
     def _setup(self) -> None:
-        self.target.setup()
-        for i, ref in enumerate(self.reference_targets):
-            ref.setup()
-            logger.info("Reference target [%d] set up", i)
+        for i, t in enumerate(self.all_targets):
+            t.setup()
+            logger.info("Target [%d] set up", i)
         self._start_command_reader()
-        logger.info("Target set up successfully")
+        logger.info("All %d targets set up successfully", len(self.all_targets))
 
     def _seed_corpus(self) -> None:
         """Generate initial seeds and populate the corpus."""
@@ -179,8 +185,9 @@ class FuzzEngine:
                         data = input_f.read_bytes()
                         if data:
                             inp = Input(data=data)
-                            result = self._execute(inp)
-                            ref_results = self._execute_references(inp)
+                            primary, refs = self._rotate_primary()
+                            result = self._execute_on(primary, inp)
+                            ref_results = self._execute_on_refs(refs, inp)
                             cov = self._collect_coverage(inp, result, ref_results=ref_results)
                             self.corpus.force_add(inp, cov)
                             self._check_oracles(inp, result, mutator_name="file_seed", ref_results=ref_results)
@@ -201,8 +208,9 @@ class FuzzEngine:
                         data = sf.read_bytes()
                         if data:
                             inp = Input(data=data)
-                            result = self._execute(inp)
-                            ref_results = self._execute_references(inp)
+                            primary, refs = self._rotate_primary()
+                            result = self._execute_on(primary, inp)
+                            ref_results = self._execute_on_refs(refs, inp)
                             cov = self._collect_coverage(inp, result, ref_results=ref_results)
                             self.corpus.force_add(inp, cov)
                             self._check_oracles(inp, result, mutator_name="file_seed", ref_results=ref_results)
@@ -217,10 +225,11 @@ class FuzzEngine:
 
         for _ in range(gen_count):
             inp = self.input_source.generate()
-            result = self._execute(inp)
+            primary, refs = self._rotate_primary()
+            result = self._execute_on(primary, inp)
 
             # Execute refs once, share results with coverage + oracles
-            ref_results = self._execute_references(inp)
+            ref_results = self._execute_on_refs(refs, inp)
             cov = self._collect_coverage(inp, result, ref_results=ref_results)
 
             # Check novelty BEFORE force_add (which merges into global coverage)
@@ -275,13 +284,22 @@ class FuzzEngine:
 
             # 2. Select mutator
             mutator = self.mutator_scheduler.select(self.mutators, seed)
+            # Override if scheduler picked an incompatible mutator (e.g.,
+            # GrammarMutator for a tree-less file seed).  We override
+            # post-selection rather than pre-filtering to avoid resetting
+            # MOPT/DARWIN/LinUCB internal state (they re-init when k changes).
+            if getattr(mutator, 'requires_tree', False) and 'tree' not in seed.input.metadata:
+                compatible = [m for m in self.mutators if not getattr(m, 'requires_tree', False)]
+                if compatible:
+                    mutator = self.rng.choice(compatible)
             mutator_name = mutator.name
 
             # 3. Mutate
             mutated_input = mutator.mutate(seed.input, self.corpus.seeds)
 
-            # 4. Execute
-            result = self._execute(mutated_input)
+            # 4. Execute with rotated primary
+            primary, refs = self._rotate_primary()
+            result = self._execute_on(primary, mutated_input)
             self.stats.record_execution(mutator_name)
 
             # Track per-strategy metrics (e.g., SAML mutator's 50 strategies)
@@ -290,7 +308,7 @@ class FuzzEngine:
                 self.stats.record_strategies(strategies)
 
             # 4.5. Execute refs once (cached for coverage + oracles)
-            ref_results = self._execute_references(mutated_input)
+            ref_results = self._execute_on_refs(refs, mutated_input)
 
             # 5. Collect coverage and check novelty
             is_novel = False
@@ -335,6 +353,21 @@ class FuzzEngine:
             found_crash = self._check_oracles(mutated_input, result, mutator_name, ref_results=ref_results)
             if found_crash and strategies:
                 self.stats.record_strategy_finding(strategies)
+
+            # 6.5 Finding-driven corpus injection
+            # Novel finding + no new coverage → force-add so structural
+            # patterns can be reused by future mutations.
+            if found_crash and not is_novel and new_cov is not None:
+                finding_seed = self.corpus.add_finding_seed(
+                    mutated_input, new_cov,
+                    parent_id=seed.id,
+                    depth=seed.depth + 1,
+                )
+                if finding_seed:
+                    self.stats.update_corpus(
+                        len(self.corpus),
+                        sum(len(s.input.data) for s in self.corpus.seeds),
+                    )
 
             # 7. Update schedulers
             schedule_result = ScheduleResult(
@@ -403,11 +436,29 @@ class FuzzEngine:
             return self.coverage.collect_diff(inp, result, ref_results=ref_results)
         return self.coverage.collect(result)
 
-    def _execute(self, inp: Input) -> ExecutionResult:
-        """Execute input against target, handling crashes."""
+    # ── Primary rotation ─────────────────────────────────────────
+
+    def _rotate_primary(self) -> tuple[Target, list[Target]]:
+        """Select next primary target via round-robin.
+
+        Returns (primary, refs) where refs is all other targets.
+        Each call advances the rotation counter, so every target gets
+        equal time as primary.  In non-differential mode (single target)
+        this always returns (target, []).
+        """
+        idx = self._rotation_idx % len(self.all_targets)
+        self._rotation_idx += 1
+        primary = self.all_targets[idx]
+        refs = [t for i, t in enumerate(self.all_targets) if i != idx]
+        return primary, refs
+
+    # ── Execution helpers ──────────────────────────────────────
+
+    def _execute_on(self, target: Target, inp: Input) -> ExecutionResult:
+        """Execute input against a specific target, handling crashes."""
         start = time.time()
         try:
-            result = self.target.execute(inp)
+            result = target.execute(inp)
         except Exception as e:
             result = ExecutionResult(
                 exit_code=-1,
@@ -418,18 +469,45 @@ class FuzzEngine:
             result.duration_ms = (time.time() - start) * 1000
 
         # Check target health
-        if not self.target.is_alive():
+        if not target.is_alive():
             logger.warning("Target died, resetting...")
             try:
-                self.target.teardown()
+                target.teardown()
             except Exception:
                 pass
-            self.target.setup()
+            target.setup()
 
         return result
 
+    def _execute_on_refs(self, refs: list[Target], inp: Input) -> list[ExecutionResult] | None:
+        """Execute input against specified reference targets (parallel)."""
+        if not refs:
+            return None
+
+        def _run(target: Target) -> ExecutionResult:
+            try:
+                return target.execute(inp)
+            except Exception as e:
+                return ExecutionResult(
+                    exit_code=-999,
+                    stderr=str(e).encode("utf-8", errors="replace"),
+                )
+
+        if len(refs) == 1:
+            return [_run(refs[0])]
+
+        if self._ref_pool is None:
+            self._ref_pool = ThreadPoolExecutor(
+                max_workers=max(len(self.all_targets) - 1, 1),
+            )
+        return list(self._ref_pool.map(_run, refs))
+
+    def _execute(self, inp: Input) -> ExecutionResult:
+        """Execute input against the fixed primary target (backward compat)."""
+        return self._execute_on(self.target, inp)
+
     def _execute_references(self, inp: Input) -> list[ExecutionResult] | None:
-        """Execute input against all reference targets (parallel).
+        """Execute input against all reference targets (backward compat).
 
         Fast path: Rust parallel_pipe_execute (GIL-free native threads).
         Slow path: Python ThreadPoolExecutor (fallback).
@@ -444,24 +522,7 @@ class FuzzEngine:
             except Exception as e:
                 logger.debug("Rust pipe execute failed, falling back: %s", e)
 
-        # --- Slow path: Python ThreadPoolExecutor ---
-        def _run(target: Target) -> ExecutionResult:
-            try:
-                return target.execute(inp)
-            except Exception as e:
-                return ExecutionResult(
-                    exit_code=-999,
-                    stderr=str(e).encode("utf-8", errors="replace"),
-                )
-
-        if len(self.reference_targets) == 1:
-            return [_run(self.reference_targets[0])]
-
-        if self._ref_pool is None:
-            self._ref_pool = ThreadPoolExecutor(
-                max_workers=len(self.reference_targets),
-            )
-        return list(self._ref_pool.map(_run, self.reference_targets))
+        return self._execute_on_refs(self.reference_targets, inp)
 
     def _can_use_rust_pipes(self) -> bool:
         """Check if Rust parallel pipe execution is available and applicable.
@@ -548,6 +609,9 @@ class FuzzEngine:
             for finding in findings:
                 if mutator_name:
                     finding.metadata["mutator"] = mutator_name
+                # Track which target was primary for this finding (analysis use,
+                # not included in fingerprint to avoid over-deduplication).
+                finding.metadata["primary_idx"] = (self._rotation_idx - 1) % len(self.all_targets)
                 finding.fingerprint = self.deduplicator.fingerprint(finding)
                 if not self.deduplicator.is_duplicate(finding):
                     self.deduplicator.register(finding)
@@ -661,13 +725,9 @@ class FuzzEngine:
         if self._ref_pool is not None:
             self._ref_pool.shutdown(wait=False)
             self._ref_pool = None
-        try:
-            self.target.teardown()
-        except Exception:
-            pass
-        for ref in self.reference_targets:
+        for t in self.all_targets:
             try:
-                ref.teardown()
+                t.teardown()
             except Exception:
                 pass
 

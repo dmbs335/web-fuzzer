@@ -1,0 +1,1 @@
+cross_site=token123; SameSite=None; Secure; Path=/

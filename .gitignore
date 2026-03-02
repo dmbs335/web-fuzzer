@@ -18,6 +18,19 @@ test_*_output/
 # Temp files
 *.tmp
 tmp*.html
+NUL
+_*.json
+_*.xml
+_*.html
+_test_*.html
+profile_stderr*.txt
+URL_Parser_Findings_Report.html
+
+# Vendored dependencies
+targets/vendor/
+
+# Paper drafts
+paper/
 
 # Node
 node_modules/

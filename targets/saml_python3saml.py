@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import traceback
+from copy import deepcopy
 
 from lxml import etree
 
@@ -23,10 +24,20 @@ NSMAP = {"saml": SAML_NS, "ds": DS_NS}
 
 
 def _text(elem):
-    """Get full text content of an element, including text after comments/PIs."""
+    """Match python3-saml's OneLogin_Saml2_Utils.element_text() behavior.
+
+    Strips XML comments, then returns .text (which stops at the first
+    remaining child node, e.g. a PI).  This faithfully mirrors::
+
+        etree.strip_tags(node, etree.Comment)
+        return node.text
+    """
     if elem is None:
         return None
-    return "".join(elem.itertext()).strip() or None
+    e = deepcopy(elem)
+    etree.strip_tags(e, etree.Comment)
+    t = e.text
+    return t.strip() if t else None
 
 
 def _normalize_sig_algo(algo):
@@ -186,8 +197,9 @@ def verify_saml(xml_input: str) -> str:
             name = attr.get("Name", "")
             vals = []
             for v in attr.findall("{%s}AttributeValue" % SAML_NS):
-                if v.text:
-                    vals.append(v.text.strip())
+                t = _text(v)
+                if t:
+                    vals.append(t)
             if name and vals:
                 attributes[name] = vals[0] if len(vals) == 1 else vals
 
