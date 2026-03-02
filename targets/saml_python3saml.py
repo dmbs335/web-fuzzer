@@ -166,8 +166,10 @@ def verify_saml(xml_input: str) -> str:
     issuer = None
     audience = None
     attributes = {}
+    assertion_id = None
 
     if signed_assertion is not None:
+        assertion_id = signed_assertion.get("ID")
         name_id = signed_assertion.find("{%s}Subject/{%s}NameID" % (SAML_NS, SAML_NS))
         if name_id is None:
             name_id = signed_assertion.find(".//{%s}NameID" % SAML_NS)
@@ -205,6 +207,7 @@ def verify_saml(xml_input: str) -> str:
         "audience": audience,
         "attributes": attributes,
         "assertion_count": len(assertions),
+        "assertion_id": assertion_id,
         "algorithms": _extract_algorithms(root),
     }
     return json.dumps(result, sort_keys=True, ensure_ascii=True)

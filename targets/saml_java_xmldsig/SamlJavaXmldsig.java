@@ -133,7 +133,10 @@ public class SamlJavaXmldsig {
             // Extract assertion content from the signed assertion
             // (resolve via Reference URI to avoid XSW extraction confusion)
             Element assertion = findSignedAssertion(doc, assertions);
+            String assertionId = null;
             if (assertion != null) {
+                String aid = assertion.getAttribute("ID");
+                if (aid != null && !aid.isEmpty()) assertionId = aid;
 
                 // Issuer
                 NodeList issuers = assertion.getElementsByTagNameNS(SAML_NS, "Issuer");
@@ -184,6 +187,7 @@ public class SamlJavaXmldsig {
         sb.append("\"signature\":").append(jsonString(sigAlgo));
         sb.append("},");
         sb.append("\"assertion_count\":").append(assertionCount).append(",");
+        sb.append("\"assertion_id\":").append(jsonStringOrNull(assertionId)).append(",");
         sb.append("\"attributes\":{");
         boolean first = true;
         for (Map.Entry<String, String> e : attributes.entrySet()) {

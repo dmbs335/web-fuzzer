@@ -241,9 +241,10 @@ class TestGetSamlStrategies:
     def test_includes_default_and_saml_strategies(self):
         strategies = get_saml_strategies()
         # 5 default (exit_code, output, status_code, timing, error_pattern)
-        # + 7 SAML (saml_bypass, saml_algorithm, saml_issuer, saml_encoding,
-        #          saml_transform, saml_algo_downgrade, saml_keyinfo)
-        assert len(strategies) == 12
+        # + 9 SAML (saml_bypass, saml_algorithm, saml_issuer, saml_encoding,
+        #          saml_transform, saml_algo_downgrade, saml_keyinfo,
+        #          saml_assertion_selection, saml_extraction)
+        assert len(strategies) == 14
 
     def test_strategy_names(self):
         strategies = get_saml_strategies()
@@ -281,14 +282,14 @@ class TestAssertionCountWithoutSignature:
     """
 
     def test_count_divergence_both_sig_false(self):
-        """Both reject sig but different counts -> HIGH finding."""
+        """Both reject sig but different counts -> MEDIUM finding (downgraded)."""
         strategy = SamlDiffStrategy()
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result({**INVALID_SAML, "assertion_count": 1})
         reference = _make_result({**INVALID_SAML, "assertion_count": 2})
         finding = strategy.compare(inp, primary, reference, ref_index=0)
         assert finding is not None
-        assert finding.severity == Severity.HIGH
+        assert finding.severity == Severity.MEDIUM
         assert finding.metadata["category"] == "assertion_count_divergence"
 
     def test_count_divergence_zero_vs_nonzero(self):

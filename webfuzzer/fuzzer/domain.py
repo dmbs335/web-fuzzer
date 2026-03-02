@@ -193,13 +193,16 @@ register(DomainProfile(
 register(DomainProfile(
     name="saml",
     comparison_keys=(
-        "signature_valid", "subject", "issuer", "audience", "assertion_count",
+        "signature_valid", "subject", "issuer", "audience",
+        "assertion_count", "assertion_id",
     ),
     categories=(
         "signature_bypass",
         "subject_confusion",
         "attribute_confusion",
         "assertion_count_divergence",
+        "assertion_selection_divergence",
+        "extraction_divergence",
         "one_sided_accept",
         "algorithm_confusion",
         "issuer_confusion",
@@ -216,9 +219,11 @@ register(DomainProfile(
         "issuer": ("issuer_confusion", Severity.MEDIUM),
         "audience": ("audience_confusion", Severity.MEDIUM),
         "assertion_count": ("assertion_count_divergence", Severity.HIGH),
+        "assertion_id": ("assertion_selection_divergence", Severity.HIGH),
     },
     field_priority=(
-        "signature_valid", "subject", "issuer", "audience", "assertion_count",
+        "signature_valid", "subject", "assertion_id",
+        "issuer", "audience", "assertion_count",
     ),
 ))
 

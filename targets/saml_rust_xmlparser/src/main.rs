@@ -28,6 +28,7 @@ struct SamlInfo {
     digest_algo: String,
     attributes: BTreeMap<String, String>,
     has_signature: bool,
+    assertion_id: Option<String>,
 }
 
 fn normalize_algo(uri: &str) -> String {
@@ -87,6 +88,15 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
                     if info.assertion_count == 1 {
                         in_assertion = true;
                         assertion_depth = elem_stack.len();
+                        // Extract ID attribute from first assertion
+                        for attr in e.attributes().flatten() {
+                            let key = String::from_utf8_lossy(attr.key.as_ref());
+                            if key.as_ref() == "ID" {
+                                info.assertion_id = Some(
+                                    String::from_utf8_lossy(&attr.value).to_string(),
+                                );
+                            }
+                        }
                     }
                 }
 
@@ -255,6 +265,7 @@ fn verify_saml(xml: &str) -> String {
                     "signature": info.sig_algo,
                 },
                 "assertion_count": info.assertion_count,
+                "assertion_id": info.assertion_id,
                 "attributes": info.attributes,
                 "audience": info.audience,
                 "issuer": info.issuer,

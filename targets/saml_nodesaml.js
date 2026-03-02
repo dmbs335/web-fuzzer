@@ -78,9 +78,11 @@ function verifySaml(xmlInput) {
   if (!signedAssertion && assertions.length > 0) signedAssertion = assertions[0];
 
   let subject = null, subjectFormat = null, issuer = null, audience = null;
+  let assertionId = null;
   const attributes = {};
 
   if (signedAssertion) {
+    assertionId = signedAssertion.getAttribute("ID") || null;
     const nameIDs = signedAssertion.getElementsByTagNameNS(SAML_NS, "NameID");
     if (nameIDs.length > 0) {
       subject = getText(nameIDs[0]);
@@ -131,6 +133,7 @@ function verifySaml(xmlInput) {
     audience: audience,
     attributes,
     assertion_count: assertions.length,
+    assertion_id: assertionId,
     algorithms,
   });
 }

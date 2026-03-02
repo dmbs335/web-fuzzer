@@ -111,8 +111,10 @@ function verifySaml($xmlInput) {
     $issuer = null;
     $audience = null;
     $attributes = [];
+    $assertionId = null;
 
     if ($signedAssertion !== null) {
+        $assertionId = $signedAssertion->getAttribute('ID') ?: null;
         // Extract from signed assertion only
         $nameIds = $xpath->query('.//saml:NameID', $signedAssertion);
         $subject = $nameIds->length > 0 ? getText($nameIds->item(0)) : null;
@@ -179,6 +181,7 @@ function verifySaml($xmlInput) {
         'audience' => $audience,
         'attributes' => (object)$attributes,
         'assertion_count' => $assertions->length,
+        'assertion_id' => $assertionId,
         'algorithms' => (object)$algorithms,
     ], JSON_UNESCAPED_SLASHES);
 }

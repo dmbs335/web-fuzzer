@@ -80,8 +80,10 @@ def verify_saml(xml_input)
   issuer = nil
   audience = nil
   attributes = {}
+  assertion_id = nil
 
   if signed_assertion
+    assertion_id = signed_assertion.attributes['ID']
     name_ids = REXML::XPath.match(signed_assertion, './/saml:NameID', 'saml' => SAML_NS)
     unless name_ids.empty?
       subject = name_ids[0].text&.strip
@@ -143,6 +145,7 @@ def verify_saml(xml_input)
     audience: audience,
     attributes: attributes,
     assertion_count: assertions.length,
+    assertion_id: assertion_id,
     algorithms: algorithms,
   }.to_json
 end

@@ -42,6 +42,7 @@ type SAMLResult struct {
 	Audience       *string           `json:"audience"`
 	Attributes     map[string]string `json:"attributes"`
 	AssertionCount int               `json:"assertion_count"`
+	AssertionID    *string           `json:"assertion_id"`
 	Algorithms     map[string]string `json:"algorithms"`
 }
 
@@ -165,6 +166,9 @@ func verifySAML(xmlInput string) (string, int) {
 
 	// Extract fields from signed assertion
 	if a != nil {
+		if aid := a.SelectAttrValue("ID", ""); aid != "" {
+			result.AssertionID = &aid
+		}
 
 		// Issuer
 		issuerEl := findChildNS(a, "", "Issuer")

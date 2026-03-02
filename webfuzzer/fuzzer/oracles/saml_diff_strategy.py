@@ -197,18 +197,18 @@ class SamlDiffStrategy:
 
         # ── Assertion count divergence ──
         # Report when parsers see different numbers of assertions.
-        # This is an XSW indicator even without valid signature — different
-        # assertion counts mean different DOM interpretation, which is the
-        # prerequisite for signature wrapping attacks.
+        # HIGH when at least one side accepts (real XSW risk),
+        # MEDIUM when both reject (structural difference, lower risk).
         p_count = p.get("assertion_count", 0)
         r_count = r.get("assertion_count", 0)
         if p_count != r_count and (p_count > 0 or r_count > 0):
+            severity = Severity.HIGH if (p_valid or r_valid) else Severity.MEDIUM
             return Finding(
                 title=(
                     f"SAML Assertion Count Divergence: "
                     f"primary={p_count} vs ref[{ref_index}]={r_count}"
                 ),
-                severity=Severity.HIGH,
+                severity=severity,
                 input=inp,
                 result=primary,
                 oracle_name="differential",
@@ -217,6 +217,8 @@ class SamlDiffStrategy:
                     "category": "assertion_count_divergence",
                     "primary_count": p_count,
                     "ref_count": r_count,
+                    "primary_valid": p_valid,
+                    "ref_valid": r_valid,
                     "ref_index": ref_index,
                 },
             )
@@ -707,6 +709,145 @@ class SamlKeyInfoPrecedenceStrategy:
         )
 
 
+# ── Assertion selection divergence ────────────────────────────
+
+
+class SamlAssertionSelectionStrategy:
+    """Detect when libraries extract from different assertions.
+
+    When multiple assertions exist (XSW attacks), different libraries
+    may pick different assertions based on Reference URI matching,
+    getElementById, or simple first-child selection.  This directly
+    indicates XSW attack success potential.
+
+    Requires ``assertion_id`` field in target output.
+    """
+
+    name = "saml_assertion_selection"
+
+    def compare(
+        self,
+        inp: Input,
+        primary: ExecutionResult,
+        reference: ExecutionResult,
+        ref_index: int,
+    ) -> Finding | None:
+        p = _parse_saml_output(primary.stdout)
+        r = _parse_saml_output(reference.stdout)
+        if p is None or r is None:
+            return None
+
+        p_aid = (p.get("assertion_id") or "").strip()
+        r_aid = (r.get("assertion_id") or "").strip()
+
+        if not p_aid or not r_aid:
+            return None
+        if p_aid == r_aid:
+            return None
+
+        p_valid = p.get("signature_valid", False)
+        r_valid = r.get("signature_valid", False)
+
+        # CRITICAL when at least one side validates (real XSW risk)
+        severity = Severity.CRITICAL if (p_valid or r_valid) else Severity.HIGH
+
+        return Finding(
+            title=(
+                f"SAML Assertion Selection Divergence: "
+                f"primary uses '{p_aid}' vs ref[{ref_index}] uses '{r_aid}'"
+            ),
+            severity=severity,
+            input=inp,
+            result=primary,
+            oracle_name="differential",
+            metadata={
+                "strategy": self.name,
+                "category": "assertion_selection_divergence",
+                "primary_assertion_id": p_aid,
+                "ref_assertion_id": r_aid,
+                "primary_valid": p_valid,
+                "ref_valid": r_valid,
+                "primary_subject": (p.get("subject") or ""),
+                "ref_subject": (r.get("subject") or ""),
+                "ref_index": ref_index,
+                "input_preview": _input_preview(inp),
+            },
+        )
+
+
+# ── Extraction method divergence ─────────────────────────────
+
+
+class SamlExtractionDivergenceStrategy:
+    """Detect extraction method differences within the same assertion.
+
+    When both libraries select the same assertion (same assertion_id)
+    but extract different subjects, it indicates a text extraction
+    method divergence (e.g., ruby-saml .text vs itertext/textContent).
+
+    This is CRITICAL when combined with sig=TRUE — same signed assertion,
+    different identity extracted.
+    """
+
+    name = "saml_extraction"
+
+    def compare(
+        self,
+        inp: Input,
+        primary: ExecutionResult,
+        reference: ExecutionResult,
+        ref_index: int,
+    ) -> Finding | None:
+        p = _parse_saml_output(primary.stdout)
+        r = _parse_saml_output(reference.stdout)
+        if p is None or r is None:
+            return None
+
+        p_aid = (p.get("assertion_id") or "").strip()
+        r_aid = (r.get("assertion_id") or "").strip()
+
+        # Only fire when both extract from the SAME assertion
+        if not p_aid or not r_aid or p_aid != r_aid:
+            return None
+
+        p_subject = (p.get("subject") or "").strip()
+        r_subject = (r.get("subject") or "").strip()
+
+        if not p_subject or not r_subject:
+            return None
+        if p_subject.lower() == r_subject.lower():
+            return None
+
+        p_valid = p.get("signature_valid", False)
+        r_valid = r.get("signature_valid", False)
+
+        # Require at least one side to validate
+        if not p_valid and not r_valid:
+            return None
+
+        return Finding(
+            title=(
+                f"SAML Extraction Divergence: same assertion '{p_aid}' "
+                f"but primary='{p_subject}' vs ref[{ref_index}]='{r_subject}'"
+            ),
+            severity=Severity.CRITICAL,
+            input=inp,
+            result=primary,
+            oracle_name="differential",
+            metadata={
+                "strategy": self.name,
+                "category": "extraction_divergence",
+                "assertion_id": p_aid,
+                "primary_subject": p_subject,
+                "ref_subject": r_subject,
+                "primary_valid": p_valid,
+                "ref_valid": r_valid,
+                "ref_index": ref_index,
+                "input_preview": _input_preview(inp),
+            },
+        )
+
+
 # ── Factory ─────────────────────────────────────────────────────
 
 
@@ -727,4 +868,6 @@ def get_saml_strategies() -> list:
         SamlTransformConfusionStrategy(),
         SamlAlgorithmDowngradeStrategy(),
         SamlKeyInfoPrecedenceStrategy(),
+        SamlAssertionSelectionStrategy(),
+        SamlExtractionDivergenceStrategy(),
     ]
