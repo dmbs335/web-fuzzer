@@ -130,9 +130,10 @@ public class SamlJavaXmldsig {
                 sigError = "No Signature element found";
             }
 
-            // Extract assertion content (from first assertion)
-            if (assertions.getLength() > 0) {
-                Element assertion = (Element) assertions.item(0);
+            // Extract assertion content from the signed assertion
+            // (resolve via Reference URI to avoid XSW extraction confusion)
+            Element assertion = findSignedAssertion(doc, assertions);
+            if (assertion != null) {
 
                 // Issuer
                 NodeList issuers = assertion.getElementsByTagNameNS(SAML_NS, "Issuer");
@@ -218,6 +219,36 @@ public class SamlJavaXmldsig {
                 ctx.setIdAttributeNS(e, null, "ID");
             }
         }
+    }
+
+    static Element findSignedAssertion(Document doc, NodeList assertions) {
+        // Find the assertion targeted by the Signature's Reference URI
+        NodeList refs = doc.getElementsByTagNameNS(DS_NS, "Reference");
+        for (int i = 0; i < refs.getLength(); i++) {
+            String uri = ((Element) refs.item(i)).getAttribute("URI");
+            if (uri != null && uri.startsWith("#")) {
+                String targetId = uri.substring(1);
+                for (int j = 0; j < assertions.getLength(); j++) {
+                    Element a = (Element) assertions.item(j);
+                    if (targetId.equals(a.getAttribute("ID"))) {
+                        return a;
+                    }
+                }
+            }
+        }
+        // Fallback: assertion that contains the Signature element
+        NodeList sigs = doc.getElementsByTagNameNS(DS_NS, "Signature");
+        if (sigs.getLength() > 0) {
+            Node parent = sigs.item(0).getParentNode();
+            if (parent instanceof Element) {
+                Element pe = (Element) parent;
+                if ("Assertion".equals(pe.getLocalName())) {
+                    return pe;
+                }
+            }
+        }
+        // Last resort: first assertion
+        return assertions.getLength() > 0 ? (Element) assertions.item(0) : null;
     }
 
     static String normalizeAlgo(String uri) {
