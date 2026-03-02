@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from .corpus import Corpus, CoverageMap, Seed
 from .coverage.diff_coverage import DiffCoverageCollector
+from .coverage.adaptive_coverage import AdaptiveDiffCoverage
 from .protocols import (
     CoverageCollector,
     Deduplicator,
@@ -76,6 +77,9 @@ class FuzzEngine:
         status_interval: float = 5.0,
         reference_targets: list[Target] | None = None,
         seeds_dir: Path | None = None,
+        import_findings: list[Path] | None = None,
+        resume: bool = False,
+        checkpoint_interval: float = 60.0,
     ):
         self.target = target
         self.reference_targets: list[Target] = reference_targets or []
@@ -84,7 +88,7 @@ class FuzzEngine:
         self.oracles = oracles
         self.coverage = coverage
         self.corpus = corpus or Corpus()
-        self.stats = FuzzStats()
+        self.stats = FuzzStats(output_dir=output_dir)
         self.rng = random.Random(seed)
 
         self.max_iterations = max_iterations
@@ -93,6 +97,9 @@ class FuzzEngine:
         self.output_dir = output_dir
         self.status_interval = status_interval
         self.seeds_dir = seeds_dir
+        self.import_findings = import_findings or []
+        self.resume = resume
+        self.checkpoint_interval = checkpoint_interval
 
         # Use defaults if not provided
         self.seed_scheduler: SeedScheduler = seed_scheduler or _DefaultSeedScheduler(self.rng)
@@ -101,9 +108,15 @@ class FuzzEngine:
 
         self._last_status_time = 0.0
         self._last_save_time = 0.0
+        self._last_checkpoint_time = 0.0
         self._running = False
+        self._resumed = False
         self._publisher = RedisPublisher()
         self._cmd_queue: queue.Queue[dict] = queue.Queue()
+
+        # Reusable thread pool for reference target execution (avoids
+        # per-iteration ThreadPoolExecutor creation/teardown overhead).
+        self._ref_pool: ThreadPoolExecutor | None = None
 
     def run(self) -> FuzzStats:
         """Execute the main fuzzing loop. Returns stats when done."""
@@ -113,12 +126,21 @@ class FuzzEngine:
 
         try:
             self._setup()
-            self._seed_corpus()
+            if self.resume and self._load_checkpoint():
+                self._resumed = True
+                logger.info(
+                    "Resumed from checkpoint: %d seeds, %d edges, %d execs",
+                    len(self.corpus), self.stats.total_edges,
+                    self.stats.total_executions,
+                )
+            else:
+                self._seed_corpus()
             self._main_loop()
         except KeyboardInterrupt:
             logger.info("Interrupted by user")
             self._publisher.publish_status("stopped")
         finally:
+            self._save_checkpoint()
             self._cleanup()
 
         return self.stats
@@ -140,6 +162,34 @@ class FuzzEngine:
     def _seed_corpus(self) -> None:
         """Generate initial seeds and populate the corpus."""
         file_seed_count = 0
+
+        # Phase 0: Import finding inputs from previous sessions
+        if self.import_findings:
+            imported = 0
+            for session_dir in self.import_findings:
+                findings_dir = session_dir / "findings"
+                if not findings_dir.is_dir():
+                    logger.warning("No findings dir in %s", session_dir)
+                    continue
+                for fd in sorted(findings_dir.iterdir()):
+                    input_f = fd / "input"
+                    if not input_f.is_file():
+                        continue
+                    try:
+                        data = input_f.read_bytes()
+                        if data:
+                            inp = Input(data=data)
+                            result = self._execute(inp)
+                            ref_results = self._execute_references(inp)
+                            cov = self._collect_coverage(inp, result, ref_results=ref_results)
+                            self.corpus.force_add(inp, cov)
+                            self._check_oracles(inp, result, mutator_name="file_seed", ref_results=ref_results)
+                            self.stats.record_execution("file_seed")
+                            imported += 1
+                            file_seed_count += 1
+                    except Exception as e:
+                        logger.warning("Failed to import finding %s: %s", input_f, e)
+            logger.info("Imported %d finding inputs from %d session(s)", imported, len(self.import_findings))
 
         # Phase 1: Load file-based seeds if seeds_dir is provided
         if self.seeds_dir and self.seeds_dir.is_dir():
@@ -173,9 +223,21 @@ class FuzzEngine:
             ref_results = self._execute_references(inp)
             cov = self._collect_coverage(inp, result, ref_results=ref_results)
 
+            # Check novelty BEFORE force_add (which merges into global coverage)
+            is_novel = bool(
+                cov and self.coverage
+                and self.coverage.is_novel(self.corpus.global_coverage, cov)
+            )
             self.corpus.force_add(inp, cov)
-            self._check_oracles(inp, result, mutator_name="seed", ref_results=ref_results)
+            found_crash = self._check_oracles(inp, result, mutator_name="seed", ref_results=ref_results)
             self.stats.record_execution("seed")
+
+            # MCTS feedback: backpropagate to grammar UCB1 table
+            if hasattr(self.input_source, 'update'):
+                self.input_source.update(inp, ScheduleResult(
+                    found_new_coverage=is_novel,
+                    found_crash=found_crash,
+                ))
 
         self.stats.update_corpus(
             len(self.corpus),
@@ -222,6 +284,11 @@ class FuzzEngine:
             result = self._execute(mutated_input)
             self.stats.record_execution(mutator_name)
 
+            # Track per-strategy metrics (e.g., SAML mutator's 50 strategies)
+            strategies = mutated_input.metadata.get("strategies", [])
+            if strategies:
+                self.stats.record_strategies(strategies)
+
             # 4.5. Execute refs once (cached for coverage + oracles)
             ref_results = self._execute_references(mutated_input)
 
@@ -244,6 +311,8 @@ class FuzzEngine:
                         self.stats.record_new_coverage(
                             self.corpus.global_coverage.edge_count, mutator_name
                         )
+                        if strategies:
+                            self.stats.record_strategy_coverage(strategies)
                         self.stats.update_corpus(
                             len(self.corpus),
                             sum(len(s.input.data) for s in self.corpus.seeds),
@@ -262,9 +331,10 @@ class FuzzEngine:
                             energy=new_seed.energy,
                             metadata=mutated_input.metadata,
                         )
-
             # 6. Check oracles
             found_crash = self._check_oracles(mutated_input, result, mutator_name, ref_results=ref_results)
+            if found_crash and strategies:
+                self.stats.record_strategy_finding(strategies)
 
             # 7. Update schedulers
             schedule_result = ScheduleResult(
@@ -272,23 +342,63 @@ class FuzzEngine:
                 found_crash=found_crash,
                 execution_time_ms=result.duration_ms,
                 new_edges=new_edges,
+                finding_metadata=self._last_finding_metadata,
             )
             self.seed_scheduler.update(seed, schedule_result)
             self.mutator_scheduler.update(mutator, schedule_result)
 
+            # 7.5 MCTS feedback: backpropagate to grammar UCB1 table
+            if hasattr(self.input_source, 'update') and (is_novel or found_crash):
+                self.input_source.update(mutated_input, schedule_result)
+
+            # 7.6 CEGAR adaptive coverage check
+            if isinstance(self.coverage, AdaptiveDiffCoverage):
+                self.coverage.notify_execution()
+                if is_novel:
+                    self.coverage.notify_new_coverage(self.stats.total_iterations)
+                if self.coverage.check_and_adapt(self.corpus):
+                    self.stats.update_corpus(
+                        len(self.corpus),
+                        sum(len(s.input.data) for s in self.corpus.seeds),
+                    )
+                    self.stats.record_new_coverage(
+                        self.corpus.global_coverage.edge_count,
+                    )
+
             # 8. Process external commands (priority adjustments etc.)
             self._process_commands()
 
-            # 9. Status output
+            # 9. Periodic corpus compaction (every 10K iterations)
+            if self.stats.total_iterations % 10000 == 0 and len(self.corpus) > 200:
+                removed = self.corpus.compact(min_seeds=50)
+                if removed > 0:
+                    logger.info(
+                        "Corpus compacted: %d seeds removed, %d remaining",
+                        removed, len(self.corpus),
+                    )
+                    self.stats.update_corpus(
+                        len(self.corpus),
+                        sum(len(s.input.data) for s in self.corpus.seeds),
+                    )
+
+            # 10. Status output + periodic checkpoint
             self._maybe_print_status()
+            self._maybe_save_checkpoint()
 
     def _collect_coverage(
         self, inp: Input, result: ExecutionResult,
         ref_results: list[ExecutionResult] | None = None,
     ) -> CoverageMap | None:
-        """Collect coverage, dispatching to diff coverage if applicable."""
+        """Collect coverage, dispatching to diff/adaptive coverage if applicable."""
         if self.coverage is None:
             return None
+        if isinstance(self.coverage, AdaptiveDiffCoverage):
+            # Adaptive wrapper needs seed_id for FeatureStore.
+            # During seeding (corpus.add not yet called) seed_id is corpus._next_id.
+            seed_id = self.corpus._next_id
+            return self.coverage.collect_diff(
+                inp, result, ref_results=ref_results, seed_id=seed_id,
+            )
         if isinstance(self.coverage, DiffCoverageCollector):
             return self.coverage.collect_diff(inp, result, ref_results=ref_results)
         return self.coverage.collect(result)
@@ -319,10 +429,22 @@ class FuzzEngine:
         return result
 
     def _execute_references(self, inp: Input) -> list[ExecutionResult] | None:
-        """Execute input against all reference targets (parallel)."""
+        """Execute input against all reference targets (parallel).
+
+        Fast path: Rust parallel_pipe_execute (GIL-free native threads).
+        Slow path: Python ThreadPoolExecutor (fallback).
+        """
         if not self.reference_targets:
             return None
 
+        # --- Fast path: Rust parallel pipe I/O ---
+        if self._can_use_rust_pipes():
+            try:
+                return self._execute_references_rust(inp)
+            except Exception as e:
+                logger.debug("Rust pipe execute failed, falling back: %s", e)
+
+        # --- Slow path: Python ThreadPoolExecutor ---
         def _run(target: Target) -> ExecutionResult:
             try:
                 return target.execute(inp)
@@ -335,14 +457,79 @@ class FuzzEngine:
         if len(self.reference_targets) == 1:
             return [_run(self.reference_targets[0])]
 
-        with ThreadPoolExecutor(max_workers=len(self.reference_targets)) as pool:
-            return list(pool.map(_run, self.reference_targets))
+        if self._ref_pool is None:
+            self._ref_pool = ThreadPoolExecutor(
+                max_workers=len(self.reference_targets),
+            )
+        return list(self._ref_pool.map(_run, self.reference_targets))
+
+    def _can_use_rust_pipes(self) -> bool:
+        """Check if Rust parallel pipe execution is available and applicable.
+
+        Currently disabled: Rust raw pipe I/O conflicts with Python's
+        buffered warmup reads on the same pipe handles, causing reference
+        targets to return empty stdout.  Python ThreadPoolExecutor is used
+        instead (still fast enough at ~50 exec/s with 7 reference targets).
+        TODO: Re-enable after implementing handle-level isolation (dup pipe
+        fds after warmup, or pass raw fds directly to Rust).
+        """
+        return False
+
+    def _execute_references_rust(self, inp: Input) -> list[ExecutionResult]:
+        """Execute all reference targets via Rust parallel_pipe_execute."""
+        from webfuzzer.native import parallel_pipe_execute
+        from .targets.persistent_target import PersistentTarget
+
+        # Collect handles, restarting dead processes
+        handles: list[tuple[int, int]] = []
+        for target in self.reference_targets:
+            assert isinstance(target, PersistentTarget)
+            if not target.is_alive():
+                target.setup()
+            ph = target.pipe_handles
+            if ph is None:
+                raise RuntimeError("Could not obtain pipe handles")
+            handles.append(ph)
+
+        timeout_ms = int(max(t.timeout_seconds for t in self.reference_targets) * 1000)
+
+        # Call Rust — GIL released during I/O
+        raw_results = parallel_pipe_execute(handles, inp.data, timeout_ms)
+
+        # Convert to ExecutionResult objects
+        results: list[ExecutionResult] = []
+        for i, (output, exit_code, duration_ms, error) in enumerate(raw_results):
+            if error is not None:
+                target = self.reference_targets[i]
+                assert isinstance(target, PersistentTarget)
+                logger.warning("Ref[%d] error (%s): %s (%.0fms)",
+                               i, target.command[:60], error, duration_ms)
+                target.teardown()
+                results.append(ExecutionResult(
+                    exit_code=-1,
+                    stderr=error.encode("utf-8", errors="replace"),
+                    duration_ms=duration_ms,
+                    metadata={"error": "persistent_target_error"},
+                ))
+            else:
+                results.append(ExecutionResult(
+                    exit_code=exit_code,
+                    stdout=output,
+                    duration_ms=duration_ms,
+                ))
+
+        return results
 
     def _check_oracles(self, inp: Input, result: ExecutionResult,
                        mutator_name: str = "",
                        ref_results: list[ExecutionResult] | None = None) -> bool:
-        """Run all oracles. Returns True if any finding was recorded."""
+        """Run all oracles. Returns True if any finding was recorded.
+
+        Side-effect: populates ``self._last_finding_metadata`` with
+        metadata dicts for each unique finding (used by MAP-Elites).
+        """
         found = False
+        self._last_finding_metadata: list[dict] = []
         for oracle in self.oracles:
             # DiffOracle.check_with_refs returns list[Finding]
             if ref_results is not None and hasattr(oracle, 'check_with_refs'):
@@ -359,6 +546,8 @@ class FuzzEngine:
                 findings = [findings_or_one]
 
             for finding in findings:
+                if mutator_name:
+                    finding.metadata["mutator"] = mutator_name
                 finding.fingerprint = self.deduplicator.fingerprint(finding)
                 if not self.deduplicator.is_duplicate(finding):
                     self.deduplicator.register(finding)
@@ -377,6 +566,13 @@ class FuzzEngine:
                         "Finding: [%s] %s (oracle=%s)",
                         finding.severity.value, finding.title, finding.oracle_name,
                     )
+                    # Collect metadata for MAP-Elites scheduler.
+                    self._last_finding_metadata.append({
+                        "category": finding.metadata.get("category", ""),
+                        "ref_index": finding.metadata.get("ref_index", 0),
+                        "severity": finding.severity.value,
+                        "strategy": finding.metadata.get("strategy", ""),
+                    })
                     found = True
         return found
 
@@ -419,7 +615,7 @@ class FuzzEngine:
 
     def _start_command_reader(self) -> None:
         """Start a daemon thread that reads JSON commands from stdin."""
-        if not sys.stdin or sys.stdin.closed:
+        if not sys.stdin or not hasattr(sys.stdin, 'closed') or sys.stdin.closed:
             return
 
         def _reader() -> None:
@@ -462,6 +658,9 @@ class FuzzEngine:
 
     def _cleanup(self) -> None:
         print("", file=sys.stderr)  # newline after status line
+        if self._ref_pool is not None:
+            self._ref_pool.shutdown(wait=False)
+            self._ref_pool = None
         try:
             self.target.teardown()
         except Exception:
@@ -480,6 +679,104 @@ class FuzzEngine:
         if self._running:
             self._publisher.publish_status("completed")
         self._publisher.close()
+
+    # ── Checkpointing ──────────────────────────────────────────────
+
+    def _checkpoint_dir(self) -> Path | None:
+        """Return checkpoint directory path, or None if output_dir not set."""
+        if self.output_dir is None:
+            return None
+        return self.output_dir / "checkpoint"
+
+    def _save_checkpoint(self) -> None:
+        """Save full engine state to checkpoint directory."""
+        ckpt = self._checkpoint_dir()
+        if ckpt is None:
+            return
+
+        try:
+            # Corpus (seeds + global coverage bitmap)
+            self.corpus.save_checkpoint(ckpt / "corpus")
+
+            # Stats
+            state: dict = {
+                "stats": self.stats.to_checkpoint_dict(),
+                "rng_state": self.rng.getstate(),
+            }
+
+            # Deduplicator seen set
+            if isinstance(self.deduplicator, _DefaultDeduplicator):
+                state["dedup_seen"] = sorted(self.deduplicator._seen)
+
+            ckpt.mkdir(parents=True, exist_ok=True)
+            (ckpt / "state.json").write_text(
+                json.dumps(state, default=str), encoding="utf-8",
+            )
+            logger.debug(
+                "Checkpoint saved: %d seeds, %d edges",
+                len(self.corpus), self.stats.total_edges,
+            )
+        except Exception as e:
+            logger.warning("Failed to save checkpoint: %s", e)
+
+    def _load_checkpoint(self) -> bool:
+        """Load engine state from checkpoint. Returns True if loaded."""
+        ckpt = self._checkpoint_dir()
+        if ckpt is None:
+            return False
+
+        state_file = ckpt / "state.json"
+        if not state_file.exists():
+            return False
+
+        try:
+            # Corpus
+            if not self.corpus.load_checkpoint(ckpt / "corpus"):
+                return False
+
+            # State
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+
+            # Stats
+            self.stats.load_checkpoint_dict(state.get("stats", {}))
+
+            # RNG
+            rng_state = state.get("rng_state")
+            if rng_state is not None:
+                # JSON serializes tuples as lists; Random.setstate needs tuples
+                self.rng.setstate(_json_to_rng_state(rng_state))
+
+            # Deduplicator
+            dedup_seen = state.get("dedup_seen")
+            if dedup_seen and isinstance(self.deduplicator, _DefaultDeduplicator):
+                self.deduplicator._seen = set(dedup_seen)
+
+            return True
+        except Exception as e:
+            logger.warning("Failed to load checkpoint: %s", e)
+            return False
+
+    def _maybe_save_checkpoint(self) -> None:
+        """Save checkpoint periodically (every checkpoint_interval seconds)."""
+        if self.output_dir is None:
+            return
+        now = time.time()
+        if now - self._last_checkpoint_time >= self.checkpoint_interval:
+            self._last_checkpoint_time = now
+            self._save_checkpoint()
+
+
+def _json_to_rng_state(raw: list) -> tuple:
+    """Convert JSON-deserialized RNG state back to the tuple format
+    expected by random.Random.setstate().
+
+    JSON serializes tuples as lists, but Random.setstate() requires:
+        (version: int, internalstate: tuple[int, ...], gauss_next: float)
+    """
+    version = raw[0]
+    internal = tuple(raw[1])
+    gauss_next = raw[2]
+    return (version, internal, gauss_next)
 
 
 # ── Default implementations (minimal, used when user provides none) ──
@@ -531,43 +828,50 @@ class _DefaultDeduplicator:
         self._seen: set[str] = set()
 
     def fingerprint(self, finding: Finding) -> str:
-        import hashlib
-        h = hashlib.sha256()
-        h.update(finding.oracle_name.encode())
-        h.update(finding.severity.value.encode())
-        h.update(str(finding.result.exit_code).encode())
-        h.update(finding.result.stderr[:256])
-
         meta = finding.metadata or {}
 
-        # Strategy name (exit_code, output, ssrf, timing, error_pattern)
-        if "strategy" in meta:
-            h.update(meta["strategy"].encode())
+        # Build key string directly — no hashing needed, string IS the fingerprint
+        parts = [
+            finding.oracle_name,
+            finding.severity.value,
+            str(finding.result.exit_code),
+            meta.get("strategy", ""),
+            str(meta.get("ref_index", "")),
+            meta.get("category", ""),
+        ]
 
-        # Which reference target triggered the finding
-        if "ref_index" in meta:
-            h.update(str(meta["ref_index"]).encode())
+        df = meta.get("diff_fields")
+        if df:
+            parts.append(",".join(sorted(df)))
 
-        # SSRF-specific category (host_confusion, scheme_confusion, etc.)
-        if "category" in meta:
-            h.update(meta["category"].encode())
+        # Namespace/structural element sets — different element
+        # divergence patterns produce distinct fingerprints.
+        # (Avoids output hash which creates too-granular dedup.)
+        op = meta.get("only_primary")
+        orr = meta.get("only_ref")
+        if op:
+            parts.append(f"op={','.join(sorted(op))}")
+        if orr:
+            parts.append(f"or={','.join(sorted(orr))}")
 
-        # Set of JSON fields that differ (computed by SSRF/output strategy)
-        if "diff_fields" in meta:
-            h.update(",".join(sorted(meta["diff_fields"])).encode())
+        # Bypass signal — differentiates has_script vs has_event_handler etc.
+        sig = meta.get("signal")
+        if sig:
+            parts.append(f"sig={sig}")
 
-        # For host confusion: internal vs external classification
-        # (not exact host — same class of bypass should dedup)
-        if "primary_internal" in meta:
-            h.update(f"pi={meta['primary_internal']}".encode())
-        if "ref_internal" in meta:
-            h.update(f"ri={meta['ref_internal']}".encode())
+        pi = meta.get("primary_internal")
+        if pi is not None:
+            parts.append(f"pi={pi}")
+        ri = meta.get("ref_internal")
+        if ri is not None:
+            parts.append(f"ri={ri}")
 
-        # For accept/reject: direction matters
-        if "primary_exit" in meta and "ref_exit" in meta:
-            h.update(f"p={meta['primary_exit']},r={meta['ref_exit']}".encode())
+        pe = meta.get("primary_exit")
+        re_ = meta.get("ref_exit")
+        if pe is not None and re_ is not None:
+            parts.append(f"p={pe},r={re_}")
 
-        return h.hexdigest()[:16]
+        return "|".join(parts)
 
     def is_duplicate(self, finding: Finding) -> bool:
         return finding.fingerprint in self._seen

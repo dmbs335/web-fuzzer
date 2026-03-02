@@ -73,6 +73,8 @@ class ScheduleResult:
     found_crash: bool = False
     execution_time_ms: float = 0.0
     new_edges: set[int] = field(default_factory=set)
+    # Finding metadata for MAP-Elites: list of {category, ref_index, severity}.
+    finding_metadata: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ── Pluggable component Protocols ─────────────────────────────────

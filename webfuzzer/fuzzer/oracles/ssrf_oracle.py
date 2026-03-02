@@ -107,6 +107,16 @@ def _is_internal_host(host: str) -> bool:
 
     host_lower = host.lower().strip().rstrip(".")
 
+    # Percent-decode the host before all checks (P2 fix).
+    # Parsers may leave percent-encoded dots/digits (e.g. 127%2e0%2e0%2e1)
+    # which bypass string-based internal IP detection.
+    from urllib.parse import unquote
+    decoded = unquote(host_lower)
+    if decoded != host_lower:
+        # Re-run the full check on the decoded form
+        if _is_internal_host(decoded):
+            return True
+
     # Direct hostname matches
     if host_lower in _INTERNAL_HOSTNAMES:
         return True

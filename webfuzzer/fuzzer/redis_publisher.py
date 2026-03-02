@@ -108,9 +108,9 @@ class RedisPublisher:
         metadata: dict,
     ) -> None:
         try:
-            input_preview = input_data[:2048].decode("utf-8", errors="replace")
+            input_preview = input_data[:256].decode("utf-8", errors="replace")
         except Exception:
-            input_preview = input_data[:2048].hex()
+            input_preview = "<binary>"
 
         self._publish("finding", {
             "title": title,
@@ -118,7 +118,6 @@ class RedisPublisher:
             "oracle_name": oracle_name,
             "fingerprint": fingerprint,
             "input_preview": input_preview,
-            "input_hex": input_data.hex(),
             "exit_code": exit_code,
             "duration_ms": round(duration_ms, 2),
             "metadata": metadata,

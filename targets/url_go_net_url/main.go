@@ -17,8 +17,11 @@
 package main
 
 import (
+	"bufio"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -34,15 +37,17 @@ type URLResult struct {
 	Fragment string `json:"fragment"`
 }
 
-func parseURL(data string) (string, error) {
+func parseURL(data string) (string, int) {
 	data = strings.TrimSpace(data)
 	if data == "" {
-		return "", fmt.Errorf("empty input")
+		empty, _ := json.Marshal(URLResult{})
+		return string(empty), 1
 	}
 
 	parsed, err := url.Parse(data)
 	if err != nil {
-		return "", fmt.Errorf("parse error: %w", err)
+		empty, _ := json.Marshal(URLResult{})
+		return string(empty), 1
 	}
 
 	// Extract userinfo
@@ -82,15 +87,59 @@ func parseURL(data string) (string, error) {
 
 	jsonBytes, err := json.Marshal(result)
 	if err != nil {
-		return "", fmt.Errorf("json marshal error: %w", err)
+		empty, _ := json.Marshal(URLResult{})
+		return string(empty), 1
 	}
 
-	return string(jsonBytes), nil
+	return string(jsonBytes), 0
+}
+
+func persistentMode() {
+	reader := bufio.NewReader(os.Stdin)
+	writer := bufio.NewWriter(os.Stdout)
+
+	for {
+		// Read 4-byte big-endian length
+		var length int32
+		err := binary.Read(reader, binary.BigEndian, &length)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Read error: %v\n", err)
+			break
+		}
+
+		// Read input data
+		inputBytes := make([]byte, length)
+		_, err = io.ReadFull(reader, inputBytes)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Read data error: %v\n", err)
+			break
+		}
+
+		output, exitCode := parseURL(string(inputBytes))
+		outBytes := []byte(output)
+
+		// Write 4-byte big-endian length
+		binary.Write(writer, binary.BigEndian, int32(len(outBytes)))
+		// Write output data
+		writer.Write(outBytes)
+		// Write 4-byte big-endian exit code
+		binary.Write(writer, binary.BigEndian, int32(exitCode))
+		writer.Flush()
+	}
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--persistent" {
+		persistentMode()
+		return
+	}
+
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: url_go_net_url <file>\n")
+		fmt.Fprintf(os.Stderr, "       url_go_net_url --persistent\n")
 		os.Exit(2)
 	}
 
@@ -100,12 +149,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	result, err := parseURL(string(data))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "REJECT: %s\n", err)
-		os.Exit(1)
-	}
-
-	fmt.Println(result)
-	os.Exit(0)
+	output, exitCode := parseURL(string(data))
+	fmt.Println(output)
+	os.Exit(exitCode)
 }

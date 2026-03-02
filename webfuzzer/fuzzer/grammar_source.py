@@ -20,6 +20,8 @@ from .protocols import Input
 
 if TYPE_CHECKING:
     from ..core.registry import GrammarRegistry
+    from .mcts import UCBTable
+    from .protocols import ScheduleResult
 
 RE_BOUNDED_REPEAT = re.compile(r"\{(\d+),(\d+)\}")
 
@@ -55,6 +57,15 @@ class TreeNode:
         if not self.children:
             return 0
         return 1 + max(c.depth() for c in self.children)
+
+    def derivation_path(self) -> list[tuple[str, int]]:
+        """Extract the sequence of (rule_name, production_idx) decisions."""
+        path: list[tuple[str, int]] = []
+        if self.rule_name is not None and self.production_idx >= 0:
+            path.append((self.rule_name, self.production_idx))
+        for child in self.children:
+            path.extend(child.derivation_path())
+        return path
 
     def clone(self) -> TreeNode:
         return TreeNode(
@@ -99,16 +110,20 @@ class TreeGenerator:
     """Generates strings while building a DerivationTree.
 
     Same algorithm as core/generator.py but records the derivation path.
+    Optionally uses a :class:`UCBTable` for MCTS-guided production
+    selection (UCB1 instead of weighted random).
     """
 
     def __init__(
         self,
         registry: GrammarRegistry,
         seed: int | None = None,
+        ucb_table: "UCBTable | None" = None,
     ) -> None:
         self.registry = registry
         self.rng = random.Random(seed)
         self.depth = 0
+        self.ucb_table = ucb_table
 
     def generate_tree(
         self,
@@ -193,6 +208,18 @@ class TreeGenerator:
                 )[:1]
 
         weights = [p.weight for p in productions]
+
+        # MCTS-guided selection when UCB table is available.
+        if self.ucb_table is not None and rule.name:
+            sub_idx = self.ucb_table.select_production(
+                rule.name, len(productions), weights,
+            )
+            chosen = productions[sub_idx]
+            idx = rule.productions.index(chosen)
+            self.ucb_table.record_visit(rule.name, idx)
+            return chosen, idx
+
+        # Default: weighted random selection.
         chosen = self.rng.choices(productions, weights=weights, k=1)[0]
         idx = rule.productions.index(chosen)
         return chosen, idx
@@ -270,6 +297,9 @@ class GrammarInputSource:
 
     Generated inputs include the DerivationTree in metadata for
     grammar-aware mutation.
+
+    When a :class:`UCBTable` is provided, the generator uses MCTS-guided
+    production selection and supports ``update()`` for reward backpropagation.
     """
 
     def __init__(
@@ -278,8 +308,9 @@ class GrammarInputSource:
         grammar_name: str,
         rule_name: str | None = None,
         seed: int | None = None,
+        ucb_table: "UCBTable | None" = None,
     ) -> None:
-        self.tree_gen = TreeGenerator(registry, seed=seed)
+        self.tree_gen = TreeGenerator(registry, seed=seed, ucb_table=ucb_table)
         self.grammar_name = grammar_name
         self.rule_name = rule_name
 
@@ -295,3 +326,24 @@ class GrammarInputSource:
                 "tree": tree,
             },
         )
+
+    def update(self, inp: Input, result: "ScheduleResult") -> None:
+        """Backpropagate execution feedback to the MCTS UCB1 table.
+
+        Duck-typed — called by the engine only when this method exists.
+        No-op when no UCBTable is attached.
+        """
+        if self.tree_gen.ucb_table is None:
+            return
+        tree = inp.metadata.get("tree") if inp.metadata else None
+        if tree is None:
+            return
+        reward = 0.0
+        if result.found_new_coverage:
+            reward += 1.0
+        if result.found_crash:
+            reward += 5.0
+        if reward > 0:
+            self.tree_gen.ucb_table.backpropagate(
+                tree.root.derivation_path(), reward,
+            )

@@ -678,3 +678,110 @@
 <uri> = [weight=2] <scheme>://127.0.0.1%00.<reg_name>/<path_segment>
 <uri> = [weight=1] <scheme>%00://<host>/<path_segment>
 <uri> = [weight=1] <scheme>://127.0.0.1:<port>%00/<path_segment>
+
+# =============================================================================
+# Adversarial authority confusion patterns (P1: grammar differential boost)
+# These productions target parser disagreements that dictionary/havoc find
+# more efficiently — giving grammar the same high-yield attack shapes.
+# =============================================================================
+
+# ── Backslash authority confusion ─────────────────────────────────────
+# Backslash as path separator vs authority delimiter (WHATWG normalizes \ → /)
+<uri> = [weight=3] <scheme>://<reg_name>\@<host>/<path_segment>
+<uri> = [weight=3] <scheme>://<reg_name>\@<host>:<port>/<path_segment>
+<uri> = [weight=3] <scheme>://<host>\/<path_segment>
+<uri> = [weight=2] <scheme>://<host>\\<path_segment>
+<uri> = [weight=2] <scheme>:\\/\\/<host>/<path_segment>
+# Backslash + encoded @
+<uri> = [weight=2] <scheme>://<reg_name>%5c@<host>/<path_segment>
+<uri> = [weight=2] <scheme>://<reg_name>%5C@<host>/<path_segment>
+
+# ── Double-@ authority confusion ──────────────────────────────────────
+# First-@ vs last-@ ambiguity: parsers disagree on which @ delimits userinfo
+<uri> = [weight=3] <scheme>://<reg_name>@<reg_name>@<host>/<path_segment>
+<uri> = [weight=3] <scheme>://<reg_name>@<host>@<reg_name>/<path_segment>
+<uri> = [weight=2] <scheme>://user@<host>:80@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://user@127.0.0.1@<host>/<path_segment>
+# Encoded @ in first position, literal @ in second
+<uri> = [weight=2] <scheme>://<reg_name>%40<host>@127.0.0.1/<path_segment>
+
+# ── Tab/newline injection in scheme and authority ─────────────────────
+# WHATWG strips \t \n \r from scheme; RFC 3986 parsers may reject or include
+<scheme> = ht\ttp
+<scheme> = ht\ntp
+<scheme> = h\ttps
+<scheme> = ht\ttps
+<scheme> = \thttp
+<scheme> = http\t
+# Tab/newline within authority (breaks some parsers' host extraction)
+<uri> = [weight=2] <scheme>://<host>\t:<port>/<path_segment>
+<uri> = [weight=2] <scheme>://\t<host>/<path_segment>
+<uri> = [weight=2] <scheme>://<host>\n/<path_segment>
+
+# ── Null byte confusion ──────────────────────────────────────────────
+# C-parsers truncate at \0; Python/JS/Java see full string
+<authority> = <host>%00.<reg_name>
+<authority> = <reg_name>%00@<host>
+<authority> = <reg_name>%00@<host>:<port>
+<uri> = [weight=2] <scheme>://<host>%00<reg_name>/<path_segment>
+<uri> = [weight=2] <scheme>://<reg_name>%00.<host>:<port>/<path_segment>
+
+# ── Combined: backslash + internal IP ─────────────────────────────────
+<uri> = [weight=3] <scheme>://evil.com\@127.0.0.1/<path_segment>
+<uri> = [weight=3] <scheme>://evil.com\@[::1]/<path_segment>
+<uri> = [weight=3] <scheme>://evil.com\@0x7f000001/<path_segment>
+<uri> = [weight=3] <scheme>://good.com\@127.0.0.1:<port>/<path_segment>
+
+# ── Combined: double-@ + internal IP ─────────────────────────────────
+<uri> = [weight=3] <scheme>://evil.com@good.com@127.0.0.1/<path_segment>
+<uri> = [weight=3] <scheme>://evil.com@127.0.0.1@good.com/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1@evil.com@good.com/<path_segment>
+
+# ── Mixed: backslash + null + encoding ────────────────────────────────
+<uri> = [weight=2] <scheme>://evil.com%5c%00@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://evil.com%00\@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://evil.com\%00@127.0.0.1/<path_segment>
+
+# ── UNC path confusion ───────────────────────────────────────────────
+<uri> = [weight=2] <scheme>:\\\\<host>/<path_segment>
+<uri> = [weight=2] file:\\\\<host>\\<path_segment>
+<uri> = [weight=2] <scheme>://\\\\<host>/<path_segment>
+
+# ── Go net/url specific patterns ─────────────────────────────────────
+# Go rejects backslash and NULL but has unique opaque URI handling,
+# semicolon-in-path behavior, and no hex/octal IP normalization.
+
+# Opaque URIs — Go treats "scheme:opaque" differently from "scheme://authority"
+<uri> = [weight=2] <scheme>:127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>:<reg_name>@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>:///127.0.0.1/<path_segment>
+
+# Semicolons in path — Go splits path parameters on ';' before '?'
+<uri> = [weight=2] <scheme>://<host>/;@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://<host>/<path_segment>;../<path_segment>
+<uri> = [weight=2] <scheme>://<host>/<path_segment>;/<path_segment>
+
+# Dotted-hex octets — Go does NOT normalize 0x7f.0.0.1 to 127.0.0.1
+<uri> = [weight=2] <scheme>://0x7f.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://0x7f.0x00.0x00.0x01/<path_segment>
+<uri> = [weight=1] <scheme>://0177.0.0.1/<path_segment>
+
+# Mixed decimal/hex octets
+<uri> = [weight=1] <scheme>://127.0.0x00.1/<path_segment>
+<uri> = [weight=1] <scheme>://127.0x0.0.1/<path_segment>
+
+# Userinfo edge cases — Go strict vs others lenient
+<uri> = [weight=2] <scheme>://<reg_name>%40127.0.0.1@<host>/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1%40<reg_name>@<host>/<path_segment>
+
+# Double-slash after scheme — Go vs others authority detection
+<uri> = [weight=2] <scheme>:/<host>/<path_segment>
+<uri> = [weight=1] <scheme>:////127.0.0.1/<path_segment>
+
+# Query-in-authority confusion — Go strict query delimiter
+<uri> = [weight=2] <scheme>://<host>?@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1?<host>/<path_segment>
+
+# Fragment before authority — Go discards fragment early
+<uri> = [weight=2] <scheme>://<host>#@127.0.0.1/<path_segment>
+<uri> = [weight=2] <scheme>://127.0.0.1#<host>/<path_segment>

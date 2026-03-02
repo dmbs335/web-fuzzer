@@ -15,6 +15,7 @@
 
 use std::env;
 use std::fs;
+use std::io::{self, Read, Write};
 use std::process;
 
 fn parse_url(data: &str) -> Result<String, String> {
@@ -84,11 +85,55 @@ fn parse_url(data: &str) -> Result<String, String> {
     Ok(result.to_string())
 }
 
+fn persistent_mode() {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut reader = stdin.lock();
+    let mut writer = stdout.lock();
+
+    loop {
+        // Read 4-byte big-endian length
+        let mut len_buf = [0u8; 4];
+        if reader.read_exact(&mut len_buf).is_err() {
+            break; // EOF or error — clean exit
+        }
+        let length = u32::from_be_bytes(len_buf) as usize;
+
+        // Read input data
+        let mut input_buf = vec![0u8; length];
+        if reader.read_exact(&mut input_buf).is_err() {
+            break;
+        }
+
+        let input = String::from_utf8_lossy(&input_buf);
+        let (output, exit_code) = match parse_url(&input) {
+            Ok(result) => (result, 0u32),
+            Err(e) => (format!("REJECT: {}", e), 1u32),
+        };
+
+        let out_bytes = output.as_bytes();
+
+        // Write 4-byte big-endian length
+        let _ = writer.write_all(&(out_bytes.len() as u32).to_be_bytes());
+        // Write output data
+        let _ = writer.write_all(out_bytes);
+        // Write 4-byte big-endian exit code
+        let _ = writer.write_all(&exit_code.to_be_bytes());
+        let _ = writer.flush();
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
+    if args.len() > 1 && args[1] == "--persistent" {
+        persistent_mode();
+        return;
+    }
+
     if args.len() < 2 {
         eprintln!("Usage: url_rust_url <file>");
+        eprintln!("       url_rust_url --persistent");
         process::exit(2);
     }
 

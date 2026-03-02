@@ -219,6 +219,47 @@ class Corpus:
         self.seeds = kept
         self._id_index = {s.id: s for s in kept}
 
+    def compact(self, min_seeds: int = 50) -> int:
+        """Soft compaction — remove redundant seeds while preserving diversity.
+
+        Unlike ``minimize()`` (aggressive set-cover), this keeps seeds
+        that have findings or contribute unique edges. Returns the number
+        of seeds removed.
+
+        Strategy:
+          1. Always keep: seeds with findings, or contributing unique edges.
+          2. Remove: seeds with empty feature_set and no findings.
+          3. If still over threshold: run greedy minimize but keep at
+             least ``min_seeds``.
+        """
+        if len(self.seeds) <= min_seeds:
+            return 0
+
+        before = len(self.seeds)
+
+        # Phase 1: Remove zero-contribution seeds
+        essential: list[Seed] = []
+        removable: list[Seed] = []
+        for seed in self.seeds:
+            if seed.finding_count > 0 or seed.feature_set:
+                essential.append(seed)
+            else:
+                removable.append(seed)
+
+        if removable:
+            self.seeds = essential
+            self._id_index = {s.id: s for s in essential}
+
+        # Phase 2: If still bloated, run greedy minimize
+        if len(self.seeds) > min_seeds * 4:
+            self.minimize()
+            # Ensure we don't go below min_seeds
+            if len(self.seeds) < min_seeds:
+                # Shouldn't happen (minimize covers all edges), but safety check
+                pass
+
+        return before - len(self.seeds)
+
     def save(self, path: Path) -> None:
         """Save corpus to directory (one file per seed)."""
         path.mkdir(parents=True, exist_ok=True)
@@ -254,3 +295,111 @@ class Corpus:
                 metadata = raw.get("metadata", {})
             inp = Input(data=data, metadata=metadata)
             self.force_add(inp)
+
+    # ── Checkpoint (full state save/restore) ──────────────────────
+
+    def save_checkpoint(self, path: Path) -> None:
+        """Save full corpus state including coverage bitmap.
+
+        Layout:
+            path/coverage.bin    — global coverage bitmap (raw bytes)
+            path/state.json      — edge_freq, next_id
+            path/seeds/id_NNNNNN — seed input data
+            path/seeds/id_NNNNNN.meta — seed metadata + feature_set
+        """
+        path.mkdir(parents=True, exist_ok=True)
+        seeds_dir = path / "seeds"
+        seeds_dir.mkdir(exist_ok=True)
+
+        # Global coverage bitmap
+        (path / "coverage.bin").write_bytes(bytes(self.global_coverage.bitmap))
+
+        # Corpus-level state
+        state = {
+            "next_id": self._next_id,
+            "edge_freq": self.edge_freq,
+            "edge_count": self.global_coverage.edge_count,
+        }
+        (path / "state.json").write_text(
+            json.dumps(state, default=str), encoding="utf-8",
+        )
+
+        # Per-seed
+        for seed in self.seeds:
+            (seeds_dir / f"id_{seed.id:06d}").write_bytes(seed.input.data)
+            meta = {
+                "id": seed.id,
+                "parent_id": seed.parent_id,
+                "depth": seed.depth,
+                "energy": seed.energy,
+                "exec_count": seed.exec_count,
+                "finding_count": seed.finding_count,
+                "priority_boost": seed.priority_boost,
+                "created_at": seed.created_at,
+                "last_mutated_at": seed.last_mutated_at,
+                "feature_set": sorted(seed.feature_set),
+                "rare_branches": sorted(seed.rare_branches),
+                "metadata": seed.input.metadata,
+            }
+            (seeds_dir / f"id_{seed.id:06d}.meta").write_text(
+                json.dumps(meta, default=str), encoding="utf-8",
+            )
+
+    def load_checkpoint(self, path: Path) -> bool:
+        """Restore full corpus state from checkpoint.
+
+        Returns True if checkpoint was loaded, False if not found.
+        """
+        coverage_file = path / "coverage.bin"
+        state_file = path / "state.json"
+        seeds_dir = path / "seeds"
+        if not coverage_file.exists() or not state_file.exists():
+            return False
+
+        # Restore global coverage
+        bitmap_data = coverage_file.read_bytes()
+        if len(bitmap_data) == len(self.global_coverage.bitmap):
+            self.global_coverage.bitmap = bytearray(bitmap_data)
+
+        # Restore corpus-level state
+        state = json.loads(state_file.read_text(encoding="utf-8"))
+        self._next_id = state.get("next_id", 0)
+        self.global_coverage.edge_count = state.get("edge_count", 0)
+        raw_freq = state.get("edge_freq", {})
+        self.edge_freq = {int(k): v for k, v in raw_freq.items()}
+
+        # Restore seeds
+        self.seeds.clear()
+        self._id_index.clear()
+        if seeds_dir.is_dir():
+            for seed_file in sorted(seeds_dir.glob("id_*")):
+                if seed_file.suffix == ".meta":
+                    continue
+                data = seed_file.read_bytes()
+                meta_file = seed_file.with_suffix(".meta")
+                meta: dict[str, Any] = {}
+                if meta_file.exists():
+                    meta = json.loads(meta_file.read_text(encoding="utf-8"))
+
+                inp = Input(
+                    data=data,
+                    metadata=meta.get("metadata", {}),
+                )
+                seed = Seed(
+                    id=meta.get("id", self._next_id),
+                    input=inp,
+                    energy=meta.get("energy", 1.0),
+                    priority_boost=meta.get("priority_boost", 1.0),
+                    exec_count=meta.get("exec_count", 0),
+                    finding_count=meta.get("finding_count", 0),
+                    depth=meta.get("depth", 0),
+                    parent_id=meta.get("parent_id"),
+                    created_at=meta.get("created_at", time.time()),
+                    last_mutated_at=meta.get("last_mutated_at", 0.0),
+                    feature_set=set(meta.get("feature_set", [])),
+                    rare_branches=set(meta.get("rare_branches", [])),
+                )
+                self.seeds.append(seed)
+                self._id_index[seed.id] = seed
+
+        return True

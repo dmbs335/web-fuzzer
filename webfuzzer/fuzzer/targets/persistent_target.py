@@ -19,11 +19,23 @@ from __future__ import annotations
 
 import struct
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 
 from ..protocols import ExecutionResult, Input
+
+
+def _read_nbytes(stream, n: int) -> bytes:
+    """Read exactly *n* bytes from an unbuffered stream."""
+    buf = b""
+    while len(buf) < n:
+        chunk = stream.read(n - len(buf))
+        if not chunk:
+            raise EOFError("Persistent target process died")
+        buf += chunk
+    return buf
 
 
 class PersistentTarget:
@@ -46,9 +58,40 @@ class PersistentTarget:
             shell=True,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             cwd=self.working_dir,
+            bufsize=0,  # Unbuffered: prevents Python BufferedReader readahead
+                        # that steals pipe data from Rust parallel_pipe_execute.
         )
+        # Warmup: send a minimal request to ensure module is fully loaded.
+        # This absorbs slow startup (Ruby ~800ms, Node ~300ms) so that
+        # real requests can use the short timeout.
+        self._warmup()
+
+    def _warmup(self) -> None:
+        """Send a dummy request to let the process finish loading."""
+        warmup_data = b"<x/>"
+        try:
+            header = struct.pack(">I", len(warmup_data))
+            self._proc.stdin.write(header + warmup_data)
+            self._proc.stdin.flush()
+            result = [None]
+
+            def _reader():
+                try:
+                    h = _read_nbytes(self._proc.stdout, 4)
+                    out_len = struct.unpack(">I", h)[0]
+                    _read_nbytes(self._proc.stdout, out_len)  # body
+                    _read_nbytes(self._proc.stdout, 4)  # exit code
+                    result[0] = True
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=_reader, daemon=True)
+            t.start()
+            t.join(timeout=5.0)  # 5s generous startup timeout
+        except Exception:
+            pass  # Warmup failure is non-fatal; target will restart on next use
 
     def teardown(self) -> None:
         if self._proc is not None:
@@ -71,6 +114,26 @@ class PersistentTarget:
     def reset(self) -> None:
         self.teardown()
         self.setup()
+
+    @property
+    def pipe_handles(self) -> tuple[int, int] | None:
+        """Return (stdin_handle, stdout_handle) as raw OS integers.
+
+        On Windows: returns OS HANDLEs via msvcrt.get_osfhandle().
+        On Unix: returns file descriptors via fileno().
+        Returns None if process is not alive.
+        """
+        if self._proc is None or not self.is_alive():
+            return None
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                return (msvcrt.get_osfhandle(self._proc.stdin.fileno()),
+                        msvcrt.get_osfhandle(self._proc.stdout.fileno()))
+            else:
+                return (self._proc.stdin.fileno(), self._proc.stdout.fileno())
+        except (OSError, ValueError):
+            return None
 
     def execute(self, inp: Input) -> ExecutionResult:
         if self._proc is None or not self.is_alive():

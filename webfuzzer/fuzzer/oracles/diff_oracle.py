@@ -26,6 +26,7 @@ import hashlib
 import re
 from typing import Protocol, runtime_checkable
 
+from ..domain import get_merged_field_category_map, get_merged_field_priority
 from ..protocols import ExecutionResult, Finding, Input, Severity, Target
 
 
@@ -113,25 +114,18 @@ class OutputStrategy:
     deduplication.  Falls back to normalized byte comparison for
     non-JSON outputs.
 
-    Assigns a ``category`` based on which URL component fields differ,
-    reducing uncategorized findings from ~33% to near-zero.
+    Assigns a ``category`` based on which output fields differ,
+    using the merged DomainProfile field_category_map. Works for
+    URL, SAML, and any registered domain automatically.
     """
 
     name = "output"
 
-    # Map diff_fields to (category, severity) for URL parser outputs
-    _FIELD_CATEGORY_MAP = {
-        "host": ("host_mismatch", Severity.MEDIUM),
-        "scheme": ("scheme_mismatch", Severity.MEDIUM),
-        "path": ("path_mismatch", Severity.MEDIUM),
-        "port": ("port_mismatch", Severity.LOW),
-        "query": ("query_mismatch", Severity.LOW),
-        "fragment": ("fragment_mismatch", Severity.LOW),
-        "userinfo": ("authority_mismatch", Severity.MEDIUM),
-    }
-
     def __init__(self, normalize: bool = True) -> None:
         self.normalize = normalize
+        # Resolve from domain registry (cached, computed once)
+        self._field_category_map = get_merged_field_category_map()
+        self._field_priority = get_merged_field_priority()
 
     def compare(
         self, inp: Input, primary: ExecutionResult,
@@ -154,10 +148,9 @@ class OutputStrategy:
         category = None
         severity = Severity.MEDIUM
         if diff_fields:
-            for field_name in ("host", "scheme", "userinfo", "path",
-                               "port", "query", "fragment"):
-                if field_name in diff_fields:
-                    category, severity = self._FIELD_CATEGORY_MAP[field_name]
+            for field_name in self._field_priority:
+                if field_name in diff_fields and field_name in self._field_category_map:
+                    category, severity = self._field_category_map[field_name]
                     break
 
         meta: dict = {
@@ -438,24 +431,23 @@ class DiffOracle:
     ) -> list[Finding]:
         """Collect all findings from all (strategy × ref) combinations.
 
-        Per-strategy best-per-ref: for each strategy, keeps the
-        highest-severity finding across all refs (avoids N duplicates
-        from N refs for the same strategy).  Different strategies
-        always contribute independently.
+        Per-strategy-per-ref: for each (strategy, ref_index) pair, keeps the
+        highest-severity finding.  Different strategies and different
+        reference targets always contribute independently.
         """
-        # strategy_name → best Finding for that strategy
-        best_per_strategy: dict[str, Finding] = {}
+        # (strategy_name, ref_index) → best Finding
+        best: dict[tuple[str, int], Finding] = {}
         for i, ref_result in enumerate(ref_results):
             for strategy in self.strategies:
                 finding = strategy.compare(inp, result, ref_result, i)
                 if finding:
-                    key = strategy.name
-                    prev = best_per_strategy.get(key)
+                    key = (strategy.name, i)
+                    prev = best.get(key)
                     if prev is None or self._sev_rank(finding) > self._sev_rank(prev):
-                        best_per_strategy[key] = finding
+                        best[key] = finding
         # Sort by severity descending
         findings = sorted(
-            best_per_strategy.values(),
+            best.values(),
             key=lambda f: self._sev_rank(f),
             reverse=True,
         )
