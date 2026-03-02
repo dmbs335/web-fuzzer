@@ -17,6 +17,8 @@ Context validation:
     entity-encoded text (``&lt;...&gt;``).
   - ``css`` patterns are only reported when inside a real ``<style>`` element
     and not entity-encoded.
+  - ``any_not_attr`` patterns skip matches whose dangerous tail sits inside
+    a quoted attribute value (e.g. ``style="...<script..."``).
   - ``any`` patterns have no extra context checks.
 """
 
@@ -60,10 +62,34 @@ def _is_inside_style_tag(output: bytes, match_start: int) -> bool:
     return last_open > last_close
 
 
+def _is_inside_quoted_attr(output: bytes, pos: int) -> bool:
+    """Return True if *pos* sits inside a quoted HTML attribute value.
+
+    Scans backward from *pos* for the nearest ``="`` or ``='``.  If found
+    without an intervening closing quote of the same kind, the position
+    is inside an attribute value — e.g. ``style="...<script..."`` — and
+    any ``<tag`` text there is not a real element.
+
+    Also handles JSON-escaped quotes (``\\"``) since sanitizer diff targets
+    wrap HTML in JSON output.
+    """
+    window = output[max(0, pos - 500):pos]
+    # Check both quote styles, and JSON-escaped variants
+    for quote in (b'"', b"'", b'\\"'):
+        last_quote = window.rfind(quote)
+        if last_quote == -1:
+            continue
+        # Look for `=` before the quote (allowing whitespace and JSON escaping)
+        before_quote = window[:last_quote].rstrip()
+        if before_quote.endswith(b"=") or before_quote.endswith(b"=\\"):
+            return True
+    return False
+
+
 # ── XSS pattern definitions ──────────────────────────────────────
 #
 # Each entry: (compiled regex, severity, short description, context_type)
-#   context_type: "html_attr" | "css" | "any"
+#   context_type: "html_attr" | "css" | "any" | "any_not_attr"
 
 XSS_PATTERNS: list[tuple[re.Pattern[bytes], Severity, str, str]] = [
     # --- Script execution ---
@@ -117,7 +143,7 @@ XSS_PATTERNS: list[tuple[re.Pattern[bytes], Severity, str, str]] = [
         re.compile(rb"<\s*svg\b[^>]*>[\s\S]{0,500}<\s*script", re.I),
         Severity.CRITICAL,
         "SVG with embedded script survived",
-        "any",
+        "any_not_attr",
     ),
     (
         re.compile(
@@ -126,7 +152,7 @@ XSS_PATTERNS: list[tuple[re.Pattern[bytes], Severity, str, str]] = [
         ),
         Severity.CRITICAL,
         "SVG with event handler survived",
-        "any",
+        "any_not_attr",
     ),
     (
         re.compile(
@@ -246,19 +272,19 @@ XSS_PATTERNS: list[tuple[re.Pattern[bytes], Severity, str, str]] = [
         ),
         Severity.HIGH,
         "MathML integration point (mglyph/malignmark) with dangerous content",
-        "any",
+        "any_not_attr",
     ),
-    # §3: Style element in body context with unfiltered CSS
+    # §3: Style element in body context with dangerous CSS
+    # Only flag when CSS contains executable patterns (expression, javascript:)
+    # Plain @import/url()/background: are CSS injection, not XSS.
     (
         re.compile(
-            rb"(?:<\s*(?:div|p|span|br|img|a|b|i|em|strong|body|table"
-            rb"|form|input|ul|ol|li|h[1-6])\b[^>]*>|[a-zA-Z0-9])"
-            rb"\s*<\s*style\b[^>]*>[\s\S]{1,5000}"
-            rb"(?:@import|expression|url\s*\(|background\s*:)",
+            rb"<\s*style\b[^>]*>[\s\S]{1,5000}"
+            rb"(?:expression\s*\(|@import\b[^;]*javascript\s*:|-moz-binding\s*:)",
             re.I,
         ),
         Severity.HIGH,
-        "Style element in body context with unfiltered CSS (injection vector)",
+        "Style element with executable CSS survived (XSS vector)",
         "any",
     ),
     # §1-3: Nested namespace elements with dangerous content
@@ -271,7 +297,7 @@ XSS_PATTERNS: list[tuple[re.Pattern[bytes], Severity, str, str]] = [
         ),
         Severity.CRITICAL,
         "Nested namespace elements with dangerous content (multi-layer mXSS)",
-        "any",
+        "any_not_attr",
     ),
     # Browser security: DOM clobbering vector
     (
@@ -304,10 +330,11 @@ XSS_PATTERNS: list[tuple[re.Pattern[bytes], Severity, str, str]] = [
         "xmlns attribute contains embedded event handler/script (mXSS)",
         "any",
     ),
-    # §3-3: noscript with dangerous content
+    # §3-3: noscript with dangerous content (must be INSIDE noscript)
     (
         re.compile(
-            rb"<\s*noscript\b[^>]*>[\s\S]{0,500}"
+            rb"<\s*noscript\b[^>]*>"
+            rb"(?:(?!<\s*/\s*noscript)[\s\S]){0,500}"
             rb"(?:<\s*(?:script|img|svg|math|iframe)\b[^>]*"
             rb"\b(?:on[a-z]+|src|href)\s*=)",
             re.I,
@@ -316,10 +343,11 @@ XSS_PATTERNS: list[tuple[re.Pattern[bytes], Severity, str, str]] = [
         "noscript with dangerous content survived (scripting flag differential)",
         "any",
     ),
-    # §3: template element with dangerous content
+    # §3: template element with dangerous content (must be INSIDE template)
     (
         re.compile(
-            rb"<\s*template\b[^>]*>[\s\S]{0,1000}"
+            rb"<\s*template\b[^>]*>"
+            rb"(?:(?!<\s*/\s*template)[\s\S]){0,1000}"
             rb"(?:<\s*script|on[a-z]+\s*=|javascript\s*:)",
             re.I,
         ),
@@ -416,6 +444,13 @@ class XssOracle:
                     continue  # CSS pattern outside <style> — not exploitable
                 if _is_entity_encoded_context(output, match.start()):
                     continue  # entity-encoded CSS text
+            elif context_type == "any_not_attr":
+                # The dangerous tail of the match must not sit inside a
+                # quoted attribute value (e.g. style="...<script...").
+                if _is_inside_quoted_attr(output, match.end()):
+                    continue
+                if _is_entity_encoded_context(output, match.end()):
+                    continue
             # context_type == "any" → no extra checks
 
             matched_text = match.group(0)[:200]
