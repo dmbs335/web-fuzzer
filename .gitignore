@@ -53,10 +53,8 @@ targets/url_curl.exe
 # Claude Code session data
 .claude/
 
-# Documentation / PoC / Reports
-docs/
-poc/
-reports/
+# Research (docs + poc + reports)
+research/
 
 # OS
 .DS_Store
