@@ -241,8 +241,9 @@ class TestGetSamlStrategies:
     def test_includes_default_and_saml_strategies(self):
         strategies = get_saml_strategies()
         # 5 default (exit_code, output, status_code, timing, error_pattern)
-        # + 5 SAML (saml_bypass, saml_algorithm, saml_issuer, saml_encoding, saml_transform)
-        assert len(strategies) == 10
+        # + 7 SAML (saml_bypass, saml_algorithm, saml_issuer, saml_encoding,
+        #          saml_transform, saml_algo_downgrade, saml_keyinfo)
+        assert len(strategies) == 12
 
     def test_strategy_names(self):
         strategies = get_saml_strategies()

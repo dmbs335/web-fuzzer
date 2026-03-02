@@ -540,6 +540,173 @@ class SamlTransformConfusionStrategy:
         return None
 
 
+# ── Algorithm downgrade detection ─────────────────────────────
+
+
+class SamlAlgorithmDowngradeStrategy:
+    """Detect weak algorithm acceptance divergence.
+
+    Flags when one target accepts a weak/deprecated algorithm (SHA-1,
+    HMAC-SHA256 with public key, MD5, "none") while another rejects it.
+    This indicates the accepting target lacks algorithm restriction —
+    a common real-world vulnerability (CVE-2016-5697 pattern for HMAC,
+    algorithm downgrade for SHA-1).
+
+    Severity: CRITICAL for HMAC confusion (attacker can forge signatures
+    using the public key as HMAC secret), HIGH for SHA-1/MD5 downgrade.
+    """
+
+    name = "saml_algo_downgrade"
+
+    _WEAK_INDICATORS = [
+        (b"hmac-sha", "hmac_confusion"),
+        (b"hmac-sha1", "hmac_confusion"),
+        (b"hmac-sha256", "hmac_confusion"),
+        (b"rsa-sha1", "sha1_downgrade"),
+        (b"#sha1", "sha1_downgrade"),
+        (b"#md5", "md5_downgrade"),
+        (b'"none"', "algo_none"),
+        (b'Algorithm=""', "algo_empty"),
+    ]
+
+    def compare(
+        self,
+        inp: Input,
+        primary: ExecutionResult,
+        reference: ExecutionResult,
+        ref_index: int,
+    ) -> Finding | None:
+        # Check if input has weak algorithm indicators
+        raw = inp.data.lower()
+        triggered_category = None
+        for indicator, category in self._WEAK_INDICATORS:
+            if indicator in raw:
+                triggered_category = category
+                break
+        if not triggered_category:
+            return None
+
+        p = _parse_saml_output(primary.stdout)
+        r = _parse_saml_output(reference.stdout)
+        if p is None or r is None:
+            return None
+
+        p_valid = p.get("signature_valid", False)
+        r_valid = r.get("signature_valid", False)
+
+        # Only interesting if one accepts and other rejects
+        if p_valid == r_valid:
+            return None
+
+        accepting = "primary" if p_valid else f"ref[{ref_index}]"
+        acc_data = p if p_valid else r
+
+        severity = (
+            Severity.CRITICAL if triggered_category == "hmac_confusion"
+            else Severity.HIGH
+        )
+
+        return Finding(
+            title=(
+                f"SAML Algorithm Downgrade: {accepting} accepts "
+                f"{triggered_category} "
+                f"(subject={acc_data.get('subject')})"
+            ),
+            severity=severity,
+            input=inp,
+            result=primary,
+            oracle_name="differential",
+            metadata={
+                "strategy": self.name,
+                "category": f"algo_downgrade_{triggered_category}",
+                "primary_valid": p_valid,
+                "ref_valid": r_valid,
+                "ref_index": ref_index,
+                "downgrade_type": triggered_category,
+                "input_preview": _input_preview(inp),
+            },
+        )
+
+
+# ── KeyInfo precedence detection ─────────────────────────────
+
+
+class SamlKeyInfoPrecedenceStrategy:
+    """Detect KeyInfo-based signature validation divergence.
+
+    When KeyInfo is manipulated (empty, removed, replaced with KeyValue,
+    or contains a different certificate), tests whether libraries:
+    - Reject: requires pre-configured cert (correct behavior)
+    - Accept with embedded cert: allows attacker-supplied cert (CRITICAL)
+    - Accept without KeyInfo: falls back to pre-configured cert (safe)
+
+    The dangerous case is when a library uses the embedded X509Certificate
+    from KeyInfo to validate, ignoring the pre-configured IdP cert.
+    An attacker can then sign with their own key and embed their own cert.
+    """
+
+    name = "saml_keyinfo"
+
+    _KEYINFO_INDICATORS = [
+        b"<ds:KeyInfo/>",           # empty KeyInfo
+        b"<ds:KeyInfo></ds:KeyInfo>",
+        b"<ds:KeyValue>",           # KeyValue instead of X509
+        b"<RSAKeyValue>",           # raw RSA key
+    ]
+
+    def compare(
+        self,
+        inp: Input,
+        primary: ExecutionResult,
+        reference: ExecutionResult,
+        ref_index: int,
+    ) -> Finding | None:
+        raw = inp.data
+        has_keyinfo_manipulation = any(
+            ind in raw for ind in self._KEYINFO_INDICATORS
+        )
+        # Also check if KeyInfo is completely absent but Signature exists
+        has_sig = b"<ds:Signature" in raw or b"<Signature" in raw
+        no_keyinfo = has_sig and b"<ds:KeyInfo" not in raw and b"<KeyInfo" not in raw
+
+        if not has_keyinfo_manipulation and not no_keyinfo:
+            return None
+
+        p = _parse_saml_output(primary.stdout)
+        r = _parse_saml_output(reference.stdout)
+        if p is None or r is None:
+            return None
+
+        p_valid = p.get("signature_valid", False)
+        r_valid = r.get("signature_valid", False)
+
+        if p_valid == r_valid:
+            return None
+
+        accepting = "primary" if p_valid else f"ref[{ref_index}]"
+        acc_data = p if p_valid else r
+
+        return Finding(
+            title=(
+                f"SAML KeyInfo Precedence: {accepting} accepts with "
+                f"manipulated KeyInfo (subject={acc_data.get('subject')})"
+            ),
+            severity=Severity.CRITICAL,
+            input=inp,
+            result=primary,
+            oracle_name="differential",
+            metadata={
+                "strategy": self.name,
+                "category": "keyinfo_precedence",
+                "primary_valid": p_valid,
+                "ref_valid": r_valid,
+                "ref_index": ref_index,
+                "no_keyinfo": no_keyinfo,
+                "input_preview": _input_preview(inp),
+            },
+        )
+
+
 # ── Factory ─────────────────────────────────────────────────────
 
 
@@ -558,4 +725,6 @@ def get_saml_strategies() -> list:
         SamlIssuerConfusionStrategy(),
         SamlEncodingConfusionStrategy(),
         SamlTransformConfusionStrategy(),
+        SamlAlgorithmDowngradeStrategy(),
+        SamlKeyInfoPrecedenceStrategy(),
     ]

