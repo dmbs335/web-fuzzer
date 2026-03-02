@@ -88,7 +88,7 @@ class FuzzEngine:
         self.oracles = oracles
         self.coverage = coverage
         self.corpus = corpus or Corpus()
-        self.stats = FuzzStats()
+        self.stats = FuzzStats(output_dir=output_dir)
         self.rng = random.Random(seed)
 
         self.max_iterations = max_iterations

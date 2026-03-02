@@ -51,6 +51,10 @@ class FuzzStats:
     last_new_coverage_at: float = 0.0
     last_finding_at: float = 0.0
 
+    # Incremental finding save
+    output_dir: Path | None = field(default=None, repr=False)
+    _saved_finding_count: int = field(default=0, repr=False)
+
     def elapsed(self) -> float:
         return time.time() - self.start_time
 
@@ -93,6 +97,7 @@ class FuzzStats:
             self.findings_by_mutator[mutator_name] = (
                 self.findings_by_mutator.get(mutator_name, 0) + 1
             )
+        self._save_finding_incremental(finding)
 
     def record_strategies(self, strategies: list[str]) -> None:
         """Record which sub-strategies were applied in a mutation."""
@@ -209,8 +214,35 @@ class FuzzStats:
             "strategy_findings": self.strategy_findings,
         }, indent=2)
 
+    def _save_finding_incremental(self, finding: Finding) -> None:
+        """Write a single finding to disk immediately when discovered."""
+        if self.output_dir is None:
+            return
+        try:
+            findings_dir = self.output_dir / "findings"
+            findings_dir.mkdir(parents=True, exist_ok=True)
+            idx = len(self.findings) - 1
+            f_dir = findings_dir / f"{idx:04d}_{finding.severity.value}_{finding.oracle_name}"
+            f_dir.mkdir(exist_ok=True)
+            (f_dir / "input").write_bytes(finding.input.data)
+            (f_dir / "info.json").write_text(json.dumps({
+                "title": finding.title,
+                "severity": finding.severity.value,
+                "oracle": finding.oracle_name,
+                "fingerprint": finding.fingerprint,
+                "exit_code": finding.result.exit_code,
+                "duration_ms": finding.result.duration_ms,
+                "metadata": finding.metadata,
+            }, default=str, indent=2), encoding="utf-8")
+            self._saved_finding_count = len(self.findings)
+        except Exception:
+            pass  # best-effort; full save at session end is the fallback
+
     def save(self, path: Path) -> None:
-        """Save report and findings to disk."""
+        """Save report and findings to disk.
+
+        Findings already written incrementally are skipped.
+        """
         path.mkdir(parents=True, exist_ok=True)
         (path / "report.txt").write_text(self.report("text"), encoding="utf-8")
         (path / "report.json").write_text(self.report("json"), encoding="utf-8")
@@ -219,6 +251,8 @@ class FuzzStats:
         findings_dir.mkdir(exist_ok=True)
         for i, finding in enumerate(self.findings):
             f_dir = findings_dir / f"{i:04d}_{finding.severity.value}_{finding.oracle_name}"
+            if f_dir.exists():
+                continue  # already saved incrementally
             f_dir.mkdir(exist_ok=True)
             (f_dir / "input").write_bytes(finding.input.data)
             (f_dir / "info.json").write_text(json.dumps({
