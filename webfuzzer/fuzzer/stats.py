@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .protocols import Finding, Severity
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -235,35 +238,52 @@ class FuzzStats:
                 "metadata": finding.metadata,
             }, default=str, indent=2), encoding="utf-8")
             self._saved_finding_count = len(self.findings)
-        except Exception:
-            pass  # best-effort; full save at session end is the fallback
+        except Exception as e:
+            logger.warning("Failed to save finding %d incrementally: %s", idx, e)
 
     def save(self, path: Path) -> None:
         """Save report and findings to disk.
 
         Findings already written incrementally are skipped.
+        Each step is isolated so a single failure won't block the rest.
         """
         path.mkdir(parents=True, exist_ok=True)
-        (path / "report.txt").write_text(self.report("text"), encoding="utf-8")
-        (path / "report.json").write_text(self.report("json"), encoding="utf-8")
 
+        # Save reports first (lightweight, most likely to succeed)
+        try:
+            (path / "report.txt").write_text(self.report("text"), encoding="utf-8")
+        except Exception as e:
+            logger.error("Failed to save report.txt: %s", e)
+        try:
+            (path / "report.json").write_text(self.report("json"), encoding="utf-8")
+        except Exception as e:
+            logger.error("Failed to save report.json: %s", e)
+
+        # Save individual findings
         findings_dir = path / "findings"
         findings_dir.mkdir(exist_ok=True)
+        save_errors = 0
         for i, finding in enumerate(self.findings):
             f_dir = findings_dir / f"{i:04d}_{finding.severity.value}_{finding.oracle_name}"
             if f_dir.exists():
                 continue  # already saved incrementally
-            f_dir.mkdir(exist_ok=True)
-            (f_dir / "input").write_bytes(finding.input.data)
-            (f_dir / "info.json").write_text(json.dumps({
-                "title": finding.title,
-                "severity": finding.severity.value,
-                "oracle": finding.oracle_name,
-                "fingerprint": finding.fingerprint,
-                "exit_code": finding.result.exit_code,
-                "duration_ms": finding.result.duration_ms,
-                "metadata": finding.metadata,
-            }, default=str, indent=2), encoding="utf-8")
+            try:
+                f_dir.mkdir(exist_ok=True)
+                (f_dir / "input").write_bytes(finding.input.data)
+                (f_dir / "info.json").write_text(json.dumps({
+                    "title": finding.title,
+                    "severity": finding.severity.value,
+                    "oracle": finding.oracle_name,
+                    "fingerprint": finding.fingerprint,
+                    "exit_code": finding.result.exit_code,
+                    "duration_ms": finding.result.duration_ms,
+                    "metadata": finding.metadata,
+                }, default=str, indent=2), encoding="utf-8")
+            except Exception as e:
+                save_errors += 1
+                logger.error("Failed to save finding %d: %s", i, e)
+        if save_errors:
+            logger.error("Failed to save %d/%d findings", save_errors, len(self.findings))
 
     # ── Checkpoint (full state save/restore) ──────────────────────
 

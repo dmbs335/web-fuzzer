@@ -672,9 +672,16 @@ class FuzzEngine:
                 pass
 
         if self.output_dir:
-            self.stats.save(self.output_dir)
-            self.corpus.save(self.output_dir / "corpus")
-            logger.info("Results saved to %s", self.output_dir)
+            try:
+                self.stats.save(self.output_dir)
+            except Exception as e:
+                logger.error("Failed to save stats: %s", e)
+            try:
+                self.corpus.save(self.output_dir / "corpus")
+            except Exception as e:
+                logger.error("Failed to save corpus: %s", e)
+            else:
+                logger.info("Results saved to %s", self.output_dir)
 
         if self._running:
             self._publisher.publish_status("completed")
