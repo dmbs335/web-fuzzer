@@ -1,0 +1,1 @@
+session=abc123; Version=1; Path="C"; Domain=".exampl".exampe.com"

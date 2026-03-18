@@ -1,0 +1,1 @@
+session=val; Path=/foobar; HttpOnly; Secure

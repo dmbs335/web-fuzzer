@@ -1,0 +1,1 @@
+mutation { createUser(input: { name: "Test", email: "test@test.com", role: ADMIN }) { id name role status } }

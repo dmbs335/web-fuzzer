@@ -1,0 +1,1 @@
+{ user(id: "1") { id friends(limit: 2) { id name friends(limit: 2) { id name friends(limit: 2) { id name } } } } }

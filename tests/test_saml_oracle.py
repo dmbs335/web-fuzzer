@@ -4,14 +4,17 @@ import json
 import pytest
 
 from webfuzzer.fuzzer.protocols import ExecutionResult, Finding, Input, Severity
-from webfuzzer.fuzzer.oracles.saml_oracle import SamlOracle, _parse_saml_output
+from webfuzzer.fuzzer.oracles._saml_parsing import parse_saml_output as _parse_saml_output
+from webfuzzer.fuzzer.oracles.saml_oracle import SamlOracle, SamlSigTrueOracle
 from webfuzzer.fuzzer.oracles.saml_diff_strategy import (
     SamlDiffStrategy,
     SamlAlgorithmConfusionStrategy,
     SamlAlgorithmDowngradeStrategy,
     SamlIssuerConfusionStrategy,
     SamlKeyInfoPrecedenceStrategy,
+    SamlReferenceScopeStrategy,
     get_saml_strategies,
+    get_saml_sigtrue_strategies,
 )
 
 
@@ -20,6 +23,13 @@ def _make_result(data: dict, exit_code: int = 0) -> ExecutionResult:
         exit_code=exit_code,
         stdout=json.dumps(data).encode(),
     )
+
+
+def _first(result):
+    """Unwrap list or single Finding from compare() for test assertions."""
+    if isinstance(result, list):
+        return result[0]
+    return result
 
 
 VALID_SAML = {
@@ -108,6 +118,20 @@ class TestSamlOracle:
         assert finding.severity == Severity.HIGH
         assert "3" in finding.title
 
+    def test_reference_scope_mismatch(self, oracle):
+        data = {
+            **VALID_SAML,
+            "reference_uri": "#signed-assertion",
+            "assertion_id": "evil-assertion",
+            "reference_matches_selected_assertion": False,
+        }
+        inp = Input(data=b"<saml>test</saml>")
+        result = _make_result(data)
+        finding = oracle.check(inp, result)
+        assert finding is not None
+        assert finding.severity == Severity.CRITICAL
+        assert finding.metadata["category"] == "reference_scope_mismatch"
+
     def test_weak_algorithm(self, oracle):
         data = {**VALID_SAML, "algorithms": {"signature": "rsa-sha1", "digest": "sha1"}}
         inp = Input(data=b"<saml>test</saml>")
@@ -128,6 +152,11 @@ class TestSamlOracle:
         assert oracle.check(inp, result) is None
 
 
+class TestSamlSigTrueOracle:
+    def test_name(self):
+        assert SamlSigTrueOracle().name == "saml_sigtrue"
+
+
 class TestSamlDiffStrategy:
     @pytest.fixture
     def strategy(self):
@@ -141,7 +170,7 @@ class TestSamlDiffStrategy:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result(VALID_SAML)
         reference = _make_result(INVALID_SAML)
-        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
         assert finding is not None
         assert finding.severity == Severity.CRITICAL
         assert "Signature Bypass" in finding.title
@@ -151,7 +180,7 @@ class TestSamlDiffStrategy:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result(VALID_SAML)
         reference = _make_result(VALID_ADMIN)
-        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
         assert finding is not None
         assert finding.severity == Severity.CRITICAL
         assert "Subject Confusion" in finding.title
@@ -162,7 +191,7 @@ class TestSamlDiffStrategy:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result(VALID_SAML)
         reference = _make_result(data_ref)
-        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
         assert finding is not None
         assert finding.severity == Severity.HIGH
         assert "Attribute Confusion" in finding.title
@@ -172,7 +201,7 @@ class TestSamlDiffStrategy:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result(VALID_SAML)
         reference = _make_result(data_ref)
-        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
         assert finding is not None
         assert finding.severity == Severity.HIGH
 
@@ -192,7 +221,7 @@ class TestSamlDiffStrategy:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result(VALID_SAML)
         ref_result = ExecutionResult(exit_code=1, stdout=b"", stderr=b"parse error")
-        finding = strategy.compare(inp, primary, ref_result, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, ref_result, ref_index=0))
         assert finding is not None
         assert finding.severity == Severity.HIGH
         assert "One-Sided" in finding.title
@@ -239,13 +268,73 @@ class TestIssuerConfusion:
         assert "Audience" in finding.title
 
 
+class TestReferenceScopeStrategy:
+    def test_reference_scope_divergence(self):
+        s = SamlReferenceScopeStrategy()
+        primary = _make_result({
+            **VALID_SAML,
+            "reference_uri": "#assertion-a",
+            "assertion_id": "assertion-a",
+            "reference_matches_selected_assertion": True,
+        })
+        reference = _make_result({
+            **VALID_SAML,
+            "reference_uri": "#assertion-a",
+            "assertion_id": "assertion-b",
+            "reference_matches_selected_assertion": False,
+        })
+        inp = Input(data=b"<saml>test</saml>")
+        finding = s.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.severity == Severity.CRITICAL
+        assert finding.metadata["category"] == "reference_scope_divergence"
+
+    def test_same_reference_scope_no_finding(self):
+        s = SamlReferenceScopeStrategy()
+        primary = _make_result({
+            **VALID_SAML,
+            "reference_uri": "#assertion-a",
+            "assertion_id": "assertion-a",
+            "reference_matches_selected_assertion": True,
+        })
+        reference = _make_result({
+            **VALID_SAML,
+            "reference_uri": "#assertion-a",
+            "assertion_id": "assertion-a",
+            "reference_matches_selected_assertion": True,
+        })
+        inp = Input(data=b"<saml>test</saml>")
+        assert s.compare(inp, primary, reference, ref_index=0) is None
+
+
+class TestAssertionSelectionFallback:
+    def test_uses_selected_assertion_index_when_ids_missing(self):
+        s = get_saml_strategies()
+        selection = next(strategy for strategy in s if strategy.name == "saml_assertion_selection")
+        primary = _make_result({
+            **VALID_SAML,
+            "assertion_id": None,
+            "selected_assertion_index": 0,
+        })
+        reference = _make_result({
+            **VALID_SAML,
+            "assertion_id": None,
+            "selected_assertion_index": 1,
+        })
+        inp = Input(data=b"<saml>test</saml>")
+        finding = selection.compare(inp, primary, reference, ref_index=0)
+        assert finding is not None
+        assert finding.metadata["primary_selected_assertion"] == "index:0"
+        assert finding.metadata["ref_selected_assertion"] == "index:1"
+
+
 class TestGetSamlStrategies:
     def test_includes_default_and_saml_strategies(self):
         strategies = get_saml_strategies()
-        # 5 default (exit_code, output, status_code, timing, error_pattern)
-        # + 9 SAML (saml_bypass, saml_algorithm, saml_issuer, saml_encoding,
-        #          saml_transform, saml_algo_downgrade, saml_keyinfo,
-        #          saml_assertion_selection, saml_extraction)
+        # 4 default (exit_code, status_code, timing, error_pattern)
+        # + 10 SAML (saml_bypass, saml_algorithm, saml_issuer, saml_encoding,
+        #           saml_transform, saml_algo_downgrade, saml_keyinfo,
+        #           saml_assertion_selection, saml_reference_scope, saml_extraction)
         assert len(strategies) == 14
 
     def test_strategy_names(self):
@@ -253,16 +342,52 @@ class TestGetSamlStrategies:
         names = {s.name for s in strategies}
         # Must include both default and SAML-specific strategies
         assert "exit_code" in names, "ExitCodeStrategy missing from SAML strategies"
-        assert "output" in names, "OutputStrategy missing from SAML strategies"
+        assert "output" not in names, "OutputStrategy should be excluded from SAML strategies"
         assert "saml_bypass" in names
         assert "saml_algorithm" in names
         assert "saml_encoding" in names
         assert "saml_transform" in names
+        assert "saml_reference_scope" in names
 
     def test_all_have_compare(self):
         for s in get_saml_strategies():
             assert hasattr(s, "compare")
             assert callable(s.compare)
+
+
+class TestGetSamlSigTrueStrategies:
+    def test_includes_only_sigtrue_campaign_strategies(self):
+        strategies = get_saml_sigtrue_strategies()
+        assert len(strategies) == 10
+
+    def test_strategy_names(self):
+        names = {s.name for s in get_saml_sigtrue_strategies()}
+        assert "output" not in names
+        assert "exit_code" in names
+        assert "saml_bypass_sigtrue" in names
+        assert "saml_algorithm_sigtrue" in names
+        assert "saml_issuer_sigtrue" in names
+        assert "saml_assertion_selection_sigtrue" in names
+        assert "saml_reference_scope_sigtrue" in names
+        assert "saml_extraction_sigtrue" in names
+
+    def test_sigtrue_subject_confusion_requires_both_valid(self):
+        strategy = next(s for s in get_saml_sigtrue_strategies() if s.name == "saml_bypass_sigtrue")
+        inp = Input(data=b"<saml>test</saml>")
+        primary = _make_result(VALID_SAML)
+        reference = _make_result(VALID_ADMIN)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
+        assert finding is not None
+        assert finding.metadata["category"] == "subject_confusion"
+        assert finding.metadata["sigtrue_only"] is True
+        assert finding.metadata["campaign"] == "saml_sigtrue"
+
+    def test_sigtrue_subject_confusion_skips_sig_false(self):
+        strategy = next(s for s in get_saml_sigtrue_strategies() if s.name == "saml_bypass_sigtrue")
+        inp = Input(data=b"<saml>test</saml>")
+        primary = _make_result(VALID_SAML)
+        reference = _make_result(INVALID_DIFF_SUBJECT)
+        assert strategy.compare(inp, primary, reference, ref_index=0) is None
 
 
 # ── Regression tests for gating fixes ──────────────────────────
@@ -289,7 +414,7 @@ class TestAssertionCountWithoutSignature:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result({**INVALID_SAML, "assertion_count": 1})
         reference = _make_result({**INVALID_SAML, "assertion_count": 2})
-        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
         assert finding is not None
         assert finding.severity == Severity.MEDIUM
         assert finding.metadata["category"] == "assertion_count_divergence"
@@ -300,7 +425,7 @@ class TestAssertionCountWithoutSignature:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result({**INVALID_SAML, "assertion_count": 1})
         reference = _make_result({**INVALID_SAML, "assertion_count": 0})
-        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
         assert finding is not None
         assert finding.metadata["category"] == "assertion_count_divergence"
 
@@ -327,7 +452,7 @@ class TestSubjectExtractionDivergence:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result({**INVALID_SAML, "subject": "user@example.com"})
         reference = _make_result(INVALID_DIFF_SUBJECT)
-        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
         assert finding is not None
         assert finding.severity == Severity.MEDIUM
         assert finding.metadata["category"] == "subject_extraction_divergence"
@@ -347,7 +472,7 @@ class TestSubjectExtractionDivergence:
         inp = Input(data=b"<saml>test</saml>")
         primary = _make_result(VALID_SAML)
         reference = _make_result(VALID_ADMIN)
-        finding = strategy.compare(inp, primary, reference, ref_index=0)
+        finding = _first(strategy.compare(inp, primary, reference, ref_index=0))
         assert finding is not None
         assert finding.severity == Severity.CRITICAL
         assert finding.metadata["category"] == "subject_confusion"

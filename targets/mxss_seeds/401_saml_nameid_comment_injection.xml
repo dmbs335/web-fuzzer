@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- VECTOR: XML comment injection inside nameID — some parsers strip comments, yielding different identity string than signature covers -->
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                ID="_comment001"
+                Version="2.0"
+                IssueInstant="2026-01-01T00:00:00Z"
+                Destination="https://meshcentral.example.com/auth-saml-callback">
+  <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <saml:Assertion ID="_assertion_comment" Version="2.0" IssueInstant="2026-01-01T00:00:00Z">
+    <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+    <saml:Subject>
+      <!-- Comment mid-nameID: parser A sees "user@corp.com", parser B sees "user<!--evil-->@corp.com" -->
+      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">user<!--evil-->@corp.com</saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData NotOnOrAfter="2099-01-01T00:00:00Z"
+                                      Recipient="https://meshcentral.example.com/auth-saml-callback"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+    <saml:Conditions NotBefore="2026-01-01T00:00:00Z" NotOnOrAfter="2099-01-01T00:00:00Z">
+      <saml:AudienceRestriction>
+        <saml:Audience>meshcentral</saml:Audience>
+      </saml:AudienceRestriction>
+    </saml:Conditions>
+    <saml:AttributeStatement>
+      <saml:Attribute Name="email">
+        <saml:AttributeValue>admin@corp.com</saml:AttributeValue>
+      </saml:Attribute>
+    </saml:AttributeStatement>
+  </saml:Assertion>
+</samlp:Response>

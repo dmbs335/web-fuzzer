@@ -1,0 +1,2 @@
+session=admin; Path=/
+session=guest; Path=/api

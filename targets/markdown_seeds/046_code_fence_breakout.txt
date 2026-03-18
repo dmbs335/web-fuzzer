@@ -1,0 +1,7 @@
+```html" onmouseover="alert(1)
+<p>test</p>
+```
+
+```javascript&quot; onmouseover=&quot;alert(1)
+var x = 1;
+```

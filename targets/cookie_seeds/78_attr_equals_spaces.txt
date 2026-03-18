@@ -1,0 +1,1 @@
+session=val; Path = /; Domain = .example.com; SameSite = Lax

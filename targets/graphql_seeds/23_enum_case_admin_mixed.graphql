@@ -1,0 +1,1 @@
+mutation { updateUser(id: "1", role: aDmIn) { id role } }

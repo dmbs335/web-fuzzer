@@ -1,0 +1,19 @@
+{
+  "chain_type": "Fragment: LazyMap link wrapping a Transformer",
+  "root_class": "PLACEHOLDER_ROOT",
+  "root_trigger": "PLACEHOLDER",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "PLACEHOLDER_TRANSFORMER",
+      "field_overrides": {}
+    }
+  ],
+  "sink_method": "PLACEHOLDER"
+}

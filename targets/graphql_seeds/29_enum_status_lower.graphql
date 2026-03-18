@@ -1,0 +1,1 @@
+{ users(filter: { status: active }) { id name status } }

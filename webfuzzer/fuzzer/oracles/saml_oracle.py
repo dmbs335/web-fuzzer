@@ -13,9 +13,8 @@ handled by saml_diff_strategy.py in differential mode.
 
 from __future__ import annotations
 
-import json
-
 from ..protocols import ExecutionResult, Finding, Input, Severity
+from ._saml_parsing import parse_saml_output as _parse_saml_output
 
 # Algorithms considered weak/deprecated
 _WEAK_ALGORITHMS = frozenset({
@@ -24,19 +23,6 @@ _WEAK_ALGORITHMS = frozenset({
     "http://www.w3.org/2000/09/xmldsig#sha1",
     "http://www.w3.org/2001/04/xmldsig-more#md5",
 })
-
-
-def _parse_saml_output(stdout: bytes) -> dict | None:
-    """Parse JSON output from a SAML target.  Returns None on failure."""
-    if not stdout:
-        return None
-    try:
-        data = json.loads(stdout.strip())
-        if isinstance(data, dict) and ("signature_valid" in data or "subject" in data):
-            return data
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        pass
-    return None
 
 
 class SamlOracle:
@@ -55,6 +41,7 @@ class SamlOracle:
         sig_valid = parsed.get("signature_valid")
         subject = (parsed.get("subject") or "").strip()
         assertion_count = parsed.get("assertion_count", 0)
+        ref_match = parsed.get("reference_matches_selected_assertion")
 
         # CRITICAL: Signature accepted despite multiple assertions (XSW bypass)
         if sig_valid is True and assertion_count > 1:
@@ -67,6 +54,24 @@ class SamlOracle:
                 metadata={
                     "category": "sig_accepted_multi_assertion",
                     "assertion_count": assertion_count,
+                    "subject": subject,
+                },
+            )
+
+        # Signature scope mismatch is a direct auth-bypass indicator:
+        # the library accepted a signature but extracted from a different assertion.
+        if sig_valid is True and ref_match is False:
+            return Finding(
+                title="SAML: Signature accepted but selected assertion is outside Reference URI scope",
+                severity=Severity.CRITICAL,
+                input=inp,
+                result=result,
+                oracle_name=self.name,
+                metadata={
+                    "category": "reference_scope_mismatch",
+                    "assertion_count": assertion_count,
+                    "assertion_id": parsed.get("assertion_id"),
+                    "reference_uri": parsed.get("reference_uri"),
                     "subject": subject,
                 },
             )
@@ -105,3 +110,15 @@ class SamlOracle:
                 )
 
         return None
+
+
+class SamlSigTrueOracle(SamlOracle):
+    """SAML oracle alias for sig=true differential campaigns."""
+
+    name = "saml_sigtrue"
+
+
+class SamlValidatorOracle(SamlOracle):
+    """SAML oracle alias for validator-bug differential campaigns."""
+
+    name = "saml_validator"

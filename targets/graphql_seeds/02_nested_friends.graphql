@@ -1,0 +1,14 @@
+query DeepFriends {
+  user(id: "1") {
+    id name
+    friends {
+      id name
+      friends {
+        id name
+        friends {
+          id name
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"model":"config","method":"init","payload":{"debug":true,"secret_key":"pwned"}}

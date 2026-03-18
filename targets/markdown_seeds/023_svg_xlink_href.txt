@@ -1,0 +1,2 @@
+<svg><a xlink:href="javascript:alert(1)"><text y="20">click</text></a></svg>
+<svg><use xlink:href="data:image/svg+xml,<svg onload=alert(1)>"></use></svg>

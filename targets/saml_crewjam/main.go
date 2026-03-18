@@ -39,11 +39,28 @@ type SAMLResult struct {
 	Subject        *string           `json:"subject"`
 	SubjectFormat  *string           `json:"subject_format"`
 	Issuer         *string           `json:"issuer"`
+	IssuerSource   string            `json:"issuer_source"`
 	Audience       *string           `json:"audience"`
+	AudienceCount  int               `json:"audience_count"`
 	Attributes     map[string]string `json:"attributes"`
 	AssertionCount int               `json:"assertion_count"`
 	AssertionID    *string           `json:"assertion_id"`
+	SelectedAssertionIndex *int      `json:"selected_assertion_index"`
+	SelectionMode  string            `json:"selection_mode"`
+	ReferenceURI   *string           `json:"reference_uri"`
+	ReferenceMatchesSelectedAssertion *bool `json:"reference_matches_selected_assertion"`
+	SignatureCount int               `json:"signature_count"`
+	NameIDCount    int               `json:"nameid_count"`
+	EmptyNameIDSemantics string      `json:"empty_nameid_semantics"`
 	Algorithms     map[string]string `json:"algorithms"`
+	ValidatedSignatureAlgorithm *string `json:"validated_signature_algorithm"`
+}
+
+type AssertionSelection struct {
+	Assertion *etree.Element
+	SelectedAssertionIndex *int
+	SelectionMode string
+	ReferenceURI *string
 }
 
 var idpCert *x509.Certificate
@@ -91,6 +108,16 @@ func allText(el *etree.Element) string {
 	return strings.TrimSpace(sb.String())
 }
 
+// signatureMethod returns the full Algorithm URI from the first SignatureMethod element.
+func signatureMethod(root *etree.Element) string {
+	for _, el := range root.FindElements("//SignatureMethod") {
+		if alg := el.SelectAttrValue("Algorithm", ""); alg != "" {
+			return alg
+		}
+	}
+	return ""
+}
+
 // findChildNS finds the first child element with matching namespace+tag.
 func findChildNS(el *etree.Element, space, tag string) *etree.Element {
 	for _, child := range el.ChildElements() {
@@ -127,30 +154,76 @@ func findAllByTag(el *etree.Element, tag string) []*etree.Element {
 	return results
 }
 
+func firstReferenceURI(root *etree.Element) *string {
+	for _, ref := range findAllByTag(root, "Reference") {
+		uri := ref.SelectAttrValue("URI", "")
+		if uri != "" {
+			u := uri
+			return &u
+		}
+	}
+	return nil
+}
+
 // findSignedAssertion finds the assertion targeted by the signature's Reference URI.
 // Falls back to the first assertion if no matching reference found.
-func findSignedAssertion(root *etree.Element, assertions []*etree.Element) *etree.Element {
+func findSignedAssertion(root *etree.Element, assertions []*etree.Element) AssertionSelection {
 	for _, ref := range findAllByTag(root, "Reference") {
 		uri := ref.SelectAttrValue("URI", "")
 		if len(uri) > 1 && uri[0] == '#' {
 			targetID := uri[1:]
-			for _, a := range assertions {
+			for idx, a := range assertions {
 				if a.SelectAttrValue("ID", "") == targetID {
-					return a
+					u := uri
+					i := idx
+					return AssertionSelection{
+						Assertion: a,
+						SelectedAssertionIndex: &i,
+						SelectionMode: "reference_uri",
+						ReferenceURI: &u,
+					}
 				}
 			}
 		}
 	}
 	if len(assertions) > 0 {
-		return assertions[0]
+		i := 0
+		return AssertionSelection{
+			Assertion: assertions[0],
+			SelectedAssertionIndex: &i,
+			SelectionMode: "first_assertion_fallback",
+			ReferenceURI: firstReferenceURI(root),
+		}
 	}
-	return nil
+	return AssertionSelection{
+		Assertion: nil,
+		SelectedAssertionIndex: nil,
+		SelectionMode: "no_assertion",
+		ReferenceURI: firstReferenceURI(root),
+	}
+}
+
+func nameIDObservability(assertion *etree.Element) (int, string) {
+	if assertion == nil {
+		return 0, "missing"
+	}
+	nameIDs := findAllByTag(assertion, "NameID")
+	if len(nameIDs) == 0 {
+		return 0, "missing"
+	}
+	if allText(nameIDs[0]) == "" {
+		return len(nameIDs), "empty"
+	}
+	return len(nameIDs), "nonempty"
 }
 
 func verifySAML(xmlInput string) (string, int) {
 	result := SAMLResult{
 		Attributes: make(map[string]string),
 		Algorithms: make(map[string]string),
+		IssuerSource: "none",
+		SelectionMode: "no_assertion",
+		EmptyNameIDSemantics: "missing",
 	}
 
 	// Parse with etree
@@ -174,9 +247,14 @@ func verifySAML(xmlInput string) (string, int) {
 	// Find all Assertion elements
 	assertions := findAllByTag(root, "Assertion")
 	result.AssertionCount = len(assertions)
+	result.SignatureCount = len(findAllByTag(root, "Signature"))
 
 	// Find the assertion targeted by the signature's Reference URI
-	a := findSignedAssertion(root, assertions)
+	selection := findSignedAssertion(root, assertions)
+	a := selection.Assertion
+	result.SelectedAssertionIndex = selection.SelectedAssertionIndex
+	result.SelectionMode = selection.SelectionMode
+	result.ReferenceURI = selection.ReferenceURI
 
 	// Extract fields from signed assertion
 	if a != nil {
@@ -189,12 +267,14 @@ func verifySAML(xmlInput string) (string, int) {
 		if issuerEl != nil {
 			v := allText(issuerEl)
 			result.Issuer = &v
+			result.IssuerSource = "assertion"
 		} else {
 			// Try Response-level Issuer
 			respIssuer := findChildNS(root, "", "Issuer")
 			if respIssuer != nil {
 				v := allText(respIssuer)
 				result.Issuer = &v
+				result.IssuerSource = "response"
 			}
 		}
 
@@ -204,19 +284,23 @@ func verifySAML(xmlInput string) (string, int) {
 			nameID := findChildNS(subject, "", "NameID")
 			if nameID != nil {
 				v := allText(nameID)
-				result.Subject = &v
+				if v != "" {
+					result.Subject = &v
+				}
 				format := nameID.SelectAttrValue("Format", "")
 				if format != "" {
 					result.SubjectFormat = &format
 				}
 			}
 		}
+		result.NameIDCount, result.EmptyNameIDSemantics = nameIDObservability(a)
 
 		// Conditions/AudienceRestriction
 		conditions := findChildNS(a, "", "Conditions")
 		if conditions != nil {
 			audRestrict := findChildNS(conditions, "", "AudienceRestriction")
 			if audRestrict != nil {
+				result.AudienceCount = len(findAllByTag(audRestrict, "Audience"))
 				audience := findChildNS(audRestrict, "", "Audience")
 				if audience != nil {
 					v := allText(audience)
@@ -262,6 +346,10 @@ func verifySAML(xmlInput string) (string, int) {
 			}
 		}
 	}
+	if result.ReferenceURI != nil && result.AssertionID != nil && strings.HasPrefix(*result.ReferenceURI, "#") {
+		match := strings.TrimPrefix(*result.ReferenceURI, "#") == *result.AssertionID
+		result.ReferenceMatchesSelectedAssertion = &match
+	}
 
 	// Signature verification using goxmldsig
 	sigValid := false
@@ -303,6 +391,17 @@ func verifySAML(xmlInput string) (string, int) {
 	result.SignatureValid = sigValid
 	if sigErr != "" {
 		result.SignatureError = &sigErr
+	}
+	if sigValid {
+		if alg, ok := result.Algorithms["signature"]; ok && alg != "" {
+			// Reconstruct full URI from shortened algo
+			fullAlg := signatureMethod(root)
+			if fullAlg != "" {
+				result.ValidatedSignatureAlgorithm = &fullAlg
+			} else {
+				result.ValidatedSignatureAlgorithm = &alg
+			}
+		}
 	}
 
 	out, _ := json.Marshal(result)

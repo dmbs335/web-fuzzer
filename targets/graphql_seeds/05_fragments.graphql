@@ -1,0 +1,14 @@
+query WithFragments {
+  user(id: "1") {
+    ...UserFields
+    posts { ...PostFields }
+  }
+}
+
+fragment UserFields on User {
+  id name email role status score
+}
+
+fragment PostFields on Post {
+  id title body status createdAt
+}

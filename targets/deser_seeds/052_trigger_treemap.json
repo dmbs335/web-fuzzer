@@ -1,0 +1,15 @@
+{
+  "chain_type": "Fragment: TreeMap root trigger",
+  "root_class": "java.util.TreeMap",
+  "root_trigger": "readObject→buildFromSorted→comparator.compare",
+  "links": [
+    {
+      "class": "PLACEHOLDER_COMPARATOR",
+      "field_overrides": {
+        "transformer": null,
+        "decorated": null
+      }
+    }
+  ],
+  "sink_method": "PLACEHOLDER"
+}

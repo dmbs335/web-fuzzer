@@ -1,0 +1,1 @@
+{"type":"token_exchange","registered":["http://example.com:80/callback"],"auth_redirect_uri":"http://example.com:80/callback","token_redirect_uri":"http://example.com:80/callback","grant_type":"authorization_code","code":"abc123"}

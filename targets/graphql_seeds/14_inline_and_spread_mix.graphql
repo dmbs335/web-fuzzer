@@ -1,0 +1,11 @@
+query MixedFragments {
+  search(query: "test") {
+    ... on User {
+      ...UserBasic
+      posts { id title }
+    }
+    ... on Post { id title }
+  }
+}
+
+fragment UserBasic on User { id name role }

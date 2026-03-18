@@ -1,0 +1,4 @@
+[xss1](java&#x09;script:alert(1))
+[xss2](java&#x0a;script:alert(1))
+[xss3](java&#x0d;script:alert(1))
+[xss4](&#xA0;javascript:alert(1))

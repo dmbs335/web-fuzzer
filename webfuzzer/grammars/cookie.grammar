@@ -306,3 +306,194 @@
 <set_cookie_header> = [weight=1] _ga=GA1.2.<int min=1000000000 max=9999999999>.<int min=1000000000 max=9999999999>; Expires=<cookie_date>; Path=/; Domain=.<string min=5 max=15 charset=lower>.<tld>
 <set_cookie_header> = [weight=1] preferences=<url_encoded_value>; Max-Age=31536000; Path=/; SameSite=Lax
 <set_cookie_header> = [weight=1] <cookie_name>=deleted; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/
+
+# =============================================================================
+# Cookie Crumbles / Cookie Chaos patterns (2023-2025 research)
+# =============================================================================
+
+# §1-3: Nameless cookie (CVE-2022-2860, CVE-2022-40958)
+<set_cookie_header> = [weight=2] =<cookie_value><cookie_attrs>
+<set_cookie_header> = [weight=2] =<cookie_value>; Path=/; Secure
+
+# §1-3: Unicode whitespace prefix bypass (Cookie Crumbles 2023)
+<prefixed_cookie_name> = <unicode_ws>__Host-<string min=3 max=20 charset=lower>
+<prefixed_cookie_name> = <unicode_ws>__Secure-<string min=3 max=20 charset=lower>
+<prefixed_cookie_name> = <unicode_ws>__Host-session
+<prefixed_cookie_name> = <unicode_ws>__Secure-token
+
+<unicode_ws> = \xc2\x85
+<unicode_ws> = \xc2\xa0
+<unicode_ws> = \xe2\x80\x80
+<unicode_ws> = \xe2\x80\x83
+<unicode_ws> = \xe2\x80\x89
+<unicode_ws> = \xe3\x80\x80
+
+# §1-3: PHP name normalization (CVE-2022-31629)
+<cookie_name> = __Host.<string min=3 max=12 charset=lower>
+<cookie_name> = __Secure.<string min=3 max=12 charset=lower>
+<cookie_name> = __Host session
+<cookie_name> = session.id
+
+# §2-2: Leading-equals stripping (CVE-2023-23934 Werkzeug)
+<set_cookie_header> = [weight=2] =__Host-session=<string min=16 max=32 charset=hex>; Path=/; Secure
+<set_cookie_header> = [weight=2] =__Secure-token=<string min=16 max=32 charset=hex>; Path=/; Secure
+
+# §2-3: Percent-encoded cookie name (CVE-2022-36032 ReactPHP)
+<cookie_name> = %5F%5FHost-<string min=3 max=12 charset=lower>
+<cookie_name> = %5F%5FSecure-<string min=3 max=12 charset=lower>
+<cookie_name> = %5f%5fHost-session
+<cookie_name> = %5F%5FHost-session
+
+# §2-1: Phantom $Version attribute injection (Cookie Chaos 2025)
+<set_cookie_header> = [weight=3] $Version=1; <cookie_name>="<string min=8 max=16 charset=alphanumeric>; Path=/evil"; session=<string min=16 max=32 charset=hex>
+<set_cookie_header> = [weight=3] $Version=1; <cookie_name>="<string min=8 max=16 charset=alphanumeric>; Domain=.evil.com"; session=<string min=16 max=32 charset=hex>
+
+# §2-1: $Version comma-separated (RFC 2109 — highest yield from S169)
+<set_cookie_header> = [weight=4] $Version=1; <cookie_name>="<string min=8 max=16 charset=alphanumeric>"; Path="/", <cookie_name>="<string min=8 max=16 charset=alphanumeric>"; Path="/"
+<set_cookie_header> = [weight=3] $Version=1, <cookie_name>=<cookie_value>, <cookie_name>=<cookie_value>
+<set_cookie_header> = [weight=3] $Version="1", <cookie_name>="<string min=8 max=16 charset=alphanumeric>", evil="injected"
+
+# §2-1: $Version + quoted semicolons (cookie sandwich / phantom attrs)
+<set_cookie_header> = [weight=4] $Version=1; <cookie_name>="val; JSESSIONID=secret"
+<set_cookie_header> = [weight=3] $Version=1; <cookie_name>="val; HttpOnly"; session=<string min=16 max=32 charset=hex>
+<set_cookie_header> = [weight=3] $Version=1; <cookie_name>="session_data; Path=/evil; Domain=.evil.com"
+<set_cookie_header> = [weight=3] $Version=1; <cookie_name>="b"; $Path="/evil"
+<set_cookie_header> = [weight=3] $Version=1; <cookie_name>="b"; $Domain=".evil.com"
+
+# §2-1: Quoted value edge cases (havoc-derived CRITICAL patterns)
+<cookie_value> = [weight=2] "<string min=5 max=20 charset=alphanumeric>; <cookie_name>=<string min=8 max=16 charset=hex>"
+<cookie_value> = [weight=2] "<string min=5 max=20 charset=alphanumeric>; Path=/admin; Domain=.evil.com"
+
+# =============================================================================
+# Byte-level attack patterns (null bytes, CRLF, control chars)
+# =============================================================================
+
+# CRLF injection in value
+<cookie_value> = abc\r\nSet-Cookie: evil=injected
+<cookie_value> = abc\r\nX-Injected: true
+<cookie_value> = abc%0d%0aSet-Cookie: evil=injected
+
+# Null byte in value
+<cookie_value> = abc\x00def
+<cookie_value> = <string min=5 max=10 charset=lower>\x00<string min=5 max=10 charset=lower>
+
+# Control chars in name
+<cookie_name> = <string min=3 max=8 charset=lower>\x01<string min=3 max=8 charset=lower>
+<cookie_name> = <string min=3 max=8 charset=lower>\x7f<string min=3 max=8 charset=lower>
+
+# Backslash escapes in value (RFC 2109)
+<cookie_value> = "<string min=5 max=10 charset=alphanumeric>\"def"
+<cookie_value> = "\\074script\\076"
+<cookie_value> = "val\\;more"
+
+# =============================================================================
+# Scope confusion edge cases
+# =============================================================================
+
+# Leading dot toggle
+<domain_value> = [weight=2] example.com
+<domain_value> = [weight=2] .example.com
+
+# Quoted domain (Python strips quotes, Node keeps)
+<cookie_attr> = ; Domain="<domain_value>"
+<cookie_attr> = ; Path="<path_value>"
+
+# =============================================================================
+# Multi-cookie patterns (header-level)
+# =============================================================================
+
+# §5-3: Cookie ordering (same name, different values)
+<cookie_header> = <cookie_name>=<cookie_value>; <cookie_name>=<string min=8 max=16 charset=hex>
+<cookie_header> = session=first; session=second; session=third
+
+# =============================================================================
+# RFC 6265/6265bis Compliance Gap Patterns (G1-G15)
+# =============================================================================
+
+# --- G1: CTL in cookie value (RFC 6265 §4.1.1 cookie-octet excludes CTL) ---
+<cookie_value> = <string min=3 max=8 charset=lower>\x00<string min=3 max=8 charset=lower>
+<cookie_value> = <string min=3 max=8 charset=lower>\x01<string min=3 max=8 charset=lower>
+<cookie_value> = <string min=3 max=8 charset=lower>\x09<string min=3 max=8 charset=lower>
+<cookie_value> = <string min=3 max=8 charset=lower>\x0b<string min=3 max=8 charset=lower>
+<cookie_value> = <string min=3 max=8 charset=lower>\x0c<string min=3 max=8 charset=lower>
+<cookie_value> = <string min=3 max=8 charset=lower>\x1f<string min=3 max=8 charset=lower>
+<cookie_value> = <string min=3 max=8 charset=lower>\x7f<string min=3 max=8 charset=lower>
+
+# --- G2: CTL in attribute values (RFC 6265bis §5.5) ---
+<domain_value> = .<string min=3 max=8 charset=lower>\x00.<tld>
+<domain_value> = .<string min=3 max=8 charset=lower>\x01.<tld>
+<path_value> = /<string min=3 max=8 charset=lower>\x00<string min=3 max=8 charset=lower>
+<path_value> = /<string min=3 max=8 charset=lower>\x7f<string min=3 max=8 charset=lower>
+
+# --- G3: Name+value length boundary (RFC 6265bis §5.6: >4096 SHOULD reject) ---
+<set_cookie_header> = [weight=2] <string min=4090 max=4090 charset=lower>=val; Path=/
+<set_cookie_header> = [weight=2] s=<string min=4093 max=4093 charset=alphanumeric>; Path=/
+<set_cookie_header> = [weight=2] <string min=4092 max=4092 charset=lower>=val; Path=/
+
+# --- G4: Attr-value length boundary (RFC 6265bis §5.6: >1024 SHOULD reject) ---
+<domain_value> = .<string min=1020 max=1020 charset=lower>.com
+<domain_value> = .<string min=1022 max=1022 charset=lower>.com
+<path_value> = /<string min=1023 max=1023 charset=lower>
+<path_value> = /<string min=1025 max=1025 charset=lower>
+
+# --- G5: Non-standard Max-Age formats (RFC 6265 §5.2.2: digits only) ---
+<max_age_value> = 0x0E10
+<max_age_value> = 03600
+<max_age_value> = 3600.5
+<max_age_value> =  3600
+<max_age_value> = +3600
+<max_age_value> = 3,600
+<max_age_value> = 36e2
+
+# --- G6: Expires delimiter confusion (RFC 6265 §5.1.1) ---
+<cookie_date> = Thu 01-Jan-2026 00:00:00 GMT
+<cookie_date> = Thu\t01\tJan\t2026\t00:00:00\tGMT
+<cookie_date> = Thursday, 01-Jan-26 00:00:00 GMT
+<cookie_date> = 01 Jan 2026 00:00:00 GMT
+<cookie_date> = Thu, 01 Jan 2026 00:00:00 +0000
+<cookie_date> = Thu, 01 Jan 2026 00:00:00 UTC
+<cookie_date> = Thu, 01 Jan 2026 00:00:00
+
+# --- G7: __Host- with empty Domain (RFC 6265bis §5.5) ---
+<set_cookie_header> = [weight=2] __Host-<string min=3 max=12 charset=lower>=<cookie_value>; Secure; Path=/; Domain=
+<set_cookie_header> = [weight=2] __Host-<string min=3 max=12 charset=lower>=<cookie_value>; Secure; Path=/; Domain=""
+<set_cookie_header> = [weight=1] __Host-<string min=3 max=12 charset=lower>=<cookie_value>; Secure; Path=/; Domain=
+
+# --- G8: Non-standard whitespace around attribute separators ---
+<cookie_attr> = ;\tPath=<path_value>
+<cookie_attr> = ;\tSecure
+<cookie_attr> = ;\tHttpOnly
+<cookie_attr> = ;\r\n Path=<path_value>
+<cookie_attr> = ; Path\t=\t<path_value>
+<cookie_attr> = ;\x0bSecure
+<cookie_attr> = ;\x0cHttpOnly
+
+# --- G9: Extension attributes with special characters ---
+<cookie_attr> = ; X-Custom=val;ue
+<cookie_attr> = ; X-Test="<string min=3 max=12 charset=alphanumeric>"
+<cookie_attr> = ; Priority=Critical
+<cookie_attr> = ; X-Foo=a=b=c
+<cookie_attr> = ; X-Evil=val\tmore
+
+# --- G10: Duplicate cookie names with different paths ---
+<cookie_header> = <cookie_name>=admin; <cookie_name>=guest
+<cookie_header> = session=<string min=8 max=16 charset=hex>; session=<string min=8 max=16 charset=hex>; session=<string min=8 max=16 charset=hex>
+
+# --- G11: Max-Age 400-day cap boundary (RFC 6265bis) ---
+<max_age_value> = 34559999
+<max_age_value> = 34560000
+<max_age_value> = 34560001
+<max_age_value> = 315360000
+
+# --- G12: SameSite without value / empty value ---
+<cookie_attr> = ; SameSite
+<cookie_attr> = ; SameSite=
+
+# --- G13: __Secure- without Secure flag ---
+<set_cookie_header> = [weight=2] __Secure-<string min=3 max=12 charset=lower>=<cookie_value>; Path=/; HttpOnly
+
+# --- G14: Conflicting Expires + Max-Age (far future Expires, Max-Age=0) ---
+<set_cookie_header> = [weight=2] <cookie_name>=<cookie_value>; Expires=Fri, 31 Dec 2099 23:59:59 GMT; Max-Age=0; Path=/
+
+# --- G15: RFC 2109 comma-chained cookies ---
+<set_cookie_header> = [weight=3] $Version=1; <cookie_name>="<string min=5 max=12 charset=alphanumeric>", <cookie_name>="<string min=5 max=12 charset=alphanumeric>", <cookie_name>="<string min=5 max=12 charset=alphanumeric>"

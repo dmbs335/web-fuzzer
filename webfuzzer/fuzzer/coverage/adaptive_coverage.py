@@ -65,6 +65,14 @@ class AdaptiveConfig:
     min_level: RefinementLevel = RefinementLevel.L0_MINIMAL
     max_level: RefinementLevel = RefinementLevel.L4_FULL
 
+    # Safety: minimum edge count after coarsening.  If a coarsen would
+    # drop below this threshold the transition is rolled back.
+    min_edge_floor: int = 30
+
+    # Safety: maximum consecutive coarsen transitions before forcing a
+    # cooldown (prevents cascading collapse L2→L1→L0 within minutes).
+    max_consecutive_coarsen: int = 2
+
 
 # Namespace prefixes active at each level.
 #
@@ -73,11 +81,11 @@ class AdaptiveConfig:
 # The raw elem_div/attr_div hashes (per-element-set SHA256) are deferred
 # to L3 where fine-grained resolution is appropriate.
 _LEVEL_PREFIXES: dict[int, set[str]] = {
-    0: {"exit_vec", "div_exit", "parse"},
-    1: {"exit_vec", "div_exit", "parse", "cdiff"},
-    2: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp"},
-    3: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp", "elem_div", "attr_div", "val"},
-    4: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp", "elem_div", "attr_div", "val", "status_vec", "div_err"},
+    0: {"exit_vec", "div_exit", "parse", "danger", "escalation"},
+    1: {"exit_vec", "div_exit", "parse", "cdiff", "danger", "escalation", "surv", "sig", "phase_status"},
+    2: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp", "nst", "depth", "danger", "escalation", "surv", "sig", "r", "near", "new", "dcat", "p", "phase", "uri_confusion", "fn_confusion", "handler_confusion", "phase_status"},
+    3: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp", "nst", "depth", "elem_div", "attr_div", "val", "danger", "escalation", "surv", "sig", "r", "near", "new", "dcat", "p", "phase", "uri_confusion", "fn_confusion", "handler_confusion", "phase_status"},
+    4: {"exit_vec", "div_exit", "parse", "cdiff", "ecat", "comp", "nst", "depth", "elem_div", "attr_div", "val", "status_vec", "div_err", "danger", "escalation", "surv", "sig", "r", "near", "new", "dcat", "p", "phase", "uri_confusion", "fn_confusion", "handler_confusion", "phase_status"},
 }
 
 
@@ -107,6 +115,7 @@ class AdaptiveDiffCoverage:
         self._corpus_size_at_last_check: int = 0
         self._execs_at_last_check: int = 0
         self._transition_history: list[tuple[int, RefinementLevel, str]] = []
+        self._consecutive_coarsen: int = 0
 
     # ── CoverageCollector-compatible interface ────────────────────
 
@@ -179,18 +188,31 @@ class AdaptiveDiffCoverage:
                     corpus, new_level,
                     f"rapid_growth: corpus_pct={corpus_pct:.2f}% > {self.config.upper_corpus_pct}% => refine",
                 )
+                self._consecutive_coarsen = 0  # Reset on refine
                 return True
 
         # Signal 2: coverage stagnating → coarsen (escape local optimum).
         if self._is_stagnating(corpus):
             if self.level > self.config.min_level:
+                # Safety: block cascading coarsen
+                if self._consecutive_coarsen >= self.config.max_consecutive_coarsen:
+                    logger.info(
+                        "CEGAR: coarsen blocked — %d consecutive coarsens reached limit %d",
+                        self._consecutive_coarsen, self.config.max_consecutive_coarsen,
+                    )
+                    self._last_check_iter = self._total_execs
+                    self._last_new_coverage_iter = self._total_execs
+                    return False
+
                 new_level = RefinementLevel(self.level - 1)
                 stag = self._total_execs - self._last_new_coverage_iter
-                self._transition(
+                did_transition = self._transition(
                     corpus, new_level,
                     f"stagnation={stag} iters => coarsen",
                 )
-                return True
+                if did_transition:
+                    self._consecutive_coarsen += 1
+                return did_transition
 
         self._last_check_iter = self._total_execs
         self._corpus_size_at_last_check = len(corpus)
@@ -221,12 +243,23 @@ class AdaptiveDiffCoverage:
 
     def _transition(
         self, corpus: Corpus, new_level: RefinementLevel, reason: str,
-    ) -> None:
+    ) -> bool:
+        """Attempt a level transition. Returns False if rolled back."""
         old_level = self.level
+
+        # Snapshot corpus state for rollback
+        is_coarsen = new_level < old_level
+        snapshot_seeds = None
+        snapshot_coverage = None
+        snapshot_edge_freq = None
+        if is_coarsen:
+            snapshot_seeds = list(corpus.seeds)
+            snapshot_coverage = corpus.global_coverage.clone()
+            snapshot_edge_freq = dict(corpus.edge_freq)
+
         self.level = new_level
         self._last_transition_iter = self._total_execs
         self._last_check_iter = self._total_execs
-        self._transition_history.append((self._total_execs, new_level, reason))
 
         old_size = len(corpus)
         logger.info(
@@ -236,15 +269,36 @@ class AdaptiveDiffCoverage:
 
         self._rebuild_coverage(corpus)
 
+        new_edges = corpus.global_coverage.edge_count
+
+        # Safety: rollback if coarsening dropped edges below floor
+        if is_coarsen and new_edges < self.config.min_edge_floor:
+            logger.warning(
+                "CEGAR rollback: L%d -> L%d would give %d edges (floor=%d). "
+                "Reverting to L%d.",
+                old_level, new_level, new_edges,
+                self.config.min_edge_floor, old_level,
+            )
+            self.level = old_level
+            corpus.seeds = snapshot_seeds
+            corpus._id_index = {s.id: s for s in snapshot_seeds}
+            corpus.global_coverage = snapshot_coverage
+            corpus.edge_freq = snapshot_edge_freq
+            # Extend cooldown to prevent immediate retry
+            self._last_new_coverage_iter = self._total_execs
+            return False
+
+        self._transition_history.append((self._total_execs, new_level, reason))
         logger.info(
             "Rebuild complete: %d -> %d seeds, %d edges",
-            old_size, len(corpus), corpus.global_coverage.edge_count,
+            old_size, len(corpus), new_edges,
         )
 
         # Reset monitoring for next window.
         self._corpus_size_at_last_check = len(corpus)
         self._execs_at_last_check = self._total_execs
         self._last_new_coverage_iter = self._total_execs
+        return True
 
     def _rebuild_coverage(self, corpus: Corpus) -> None:
         """Re-hash all seeds at the new level using stored raw features."""
@@ -266,13 +320,17 @@ class AdaptiveDiffCoverage:
             if not kept or corpus.global_coverage.has_new_bits(new_cov):
                 new_edges = corpus.global_coverage.update(new_cov)
                 seed.coverage = new_cov
-                seed.feature_set = new_edges
+                # Store ALL edges this seed covers, not just the delta.
+                # Using only new_edges corrupts edge_freq and makes
+                # compaction/scheduling decisions unreliable.
+                seed.feature_set = new_cov.edges()
                 kept.append(seed)
-                for edge in new_edges:
+                for edge in seed.feature_set:
                     corpus.edge_freq[edge] = corpus.edge_freq.get(edge, 0) + 1
 
         corpus.seeds = kept
         corpus._id_index = {s.id: s for s in kept}
+        corpus._total_bytes = sum(len(s.input.data) for s in kept)
 
     def _compute_features_at_level(
         self, record: FeatureRecord, level: RefinementLevel,
@@ -297,6 +355,28 @@ class AdaptiveDiffCoverage:
                 prefix = "attr_div"
             elif namespace.startswith("ecat"):
                 prefix = "ecat"
+            elif namespace.startswith("nst"):
+                prefix = "nst"
+            elif namespace.startswith("depth"):
+                prefix = "depth"
+            elif namespace.startswith("danger"):
+                prefix = "danger"
+            elif namespace.startswith("escalation"):
+                prefix = "escalation"
+            elif namespace.startswith("surv"):
+                prefix = "surv"
+            elif namespace.startswith("sig"):
+                prefix = "sig"
+            elif namespace.startswith("r_sig"):
+                prefix = "r"
+            elif namespace.startswith("near_miss"):
+                prefix = "near"
+            elif namespace.startswith("new_elems"):
+                prefix = "new"
+            elif namespace.startswith("dcat"):
+                prefix = "dcat"
+            elif namespace.startswith("p_"):
+                prefix = "p"
 
             if prefix in active:
                 self._collector._set_feature(bitmap, namespace, value)

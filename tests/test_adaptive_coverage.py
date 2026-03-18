@@ -209,6 +209,7 @@ class TestAdaptiveDiffCoverage:
             cooldown_iterations=0,
             stagnation_window=500,
             lower_growth_rate=0.01,
+            min_edge_floor=0,  # Disable edge floor for basic coarsen test
         )
         cov = AdaptiveDiffCoverage(
             reference_targets=[_make_fake_target()],
@@ -231,6 +232,36 @@ class TestAdaptiveDiffCoverage:
         result = cov.check_and_adapt(corpus)
         assert result
         assert cov.level == RefinementLevel.L1_COARSE
+
+    def test_coarsen_rollback_below_edge_floor(self):
+        """Coarsening is rolled back when edge count drops below min_edge_floor."""
+        config = AdaptiveConfig(
+            initial_level=RefinementLevel.L2_COMPONENT,
+            check_interval=100,
+            cooldown_iterations=0,
+            stagnation_window=500,
+            lower_growth_rate=0.01,
+            min_edge_floor=30,
+        )
+        cov = AdaptiveDiffCoverage(
+            reference_targets=[_make_fake_target()],
+            config=config,
+        )
+        corpus = Corpus()
+        seed = Seed(id=0, input=Input(data=b"x"))
+        corpus.seeds.append(seed)
+        corpus._id_index[0] = seed
+
+        cov._total_execs = 2000
+        cov._last_new_coverage_iter = 0
+        cov._last_check_iter = 0
+        cov._last_transition_iter = 0
+        cov._corpus_size_at_last_check = 1
+        cov._execs_at_last_check = 1
+
+        result = cov.check_and_adapt(corpus)
+        assert not result  # Rolled back — edge floor violated
+        assert cov.level == RefinementLevel.L2_COMPONENT  # Stays at L2
 
     def test_no_coarsen_below_min_level(self):
         """Cannot coarsen below min_level even when stagnating."""
@@ -434,3 +465,118 @@ class TestElementClassCoverage:
         assert "iframe" in _ELEMENT_CLASSES["dangerous"]
         # Categories are disjoint
         assert not (_ELEMENT_CLASSES["scripting"] & _ELEMENT_CLASSES["dangerous"])
+
+
+# ── HybridCoverageCollector tests ──────────────────────────────
+
+
+class TestHybridCoverageCollector:
+    """Test HybridCoverageCollector wrapping and target coverage merging."""
+
+    def test_disabled_delegates_directly(self):
+        """When target_coverage_enabled=False, all methods delegate to inner."""
+        from webfuzzer.fuzzer.coverage.hybrid_coverage import HybridCoverageCollector
+        from webfuzzer.fuzzer.coverage.diff_coverage import DiffCoverageCollector
+
+        inner = DiffCoverageCollector(reference_targets=[_make_fake_target()])
+        hybrid = HybridCoverageCollector(inner, target_coverage_enabled=False)
+
+        assert hybrid.reference_targets == inner.reference_targets
+        assert hybrid.map_size == inner.map_size
+        assert hybrid._target_edge_count == 0
+
+    def test_collect_diff_no_target_coverage(self):
+        """Without target coverage in results, behaves like inner."""
+        from webfuzzer.fuzzer.coverage.hybrid_coverage import HybridCoverageCollector
+        from webfuzzer.fuzzer.coverage.diff_coverage import DiffCoverageCollector
+
+        inner = DiffCoverageCollector(reference_targets=[_make_fake_target()])
+        hybrid = HybridCoverageCollector(inner, target_coverage_enabled=True)
+
+        inp = Input(data=b"http://example.com")
+        primary = ExecutionResult(exit_code=0, stdout=b'{"host":"a.com"}')
+        ref = ExecutionResult(exit_code=0, stdout=b'{"host":"b.com"}')
+
+        cov = hybrid.collect_diff(inp, primary, ref_results=[ref])
+        assert isinstance(cov, CoverageMap)
+        assert cov.edge_count > 0
+        assert hybrid._target_edge_count == 0  # no target cov data
+
+    def test_target_coverage_merges_new_bits(self):
+        """Target coverage bitmap is merged and detected as novel."""
+        from webfuzzer.fuzzer.coverage.hybrid_coverage import HybridCoverageCollector
+        from webfuzzer.fuzzer.coverage.diff_coverage import DiffCoverageCollector
+
+        inner = DiffCoverageCollector(reference_targets=[_make_fake_target()])
+        hybrid = HybridCoverageCollector(inner, target_coverage_enabled=True)
+
+        # Simulate target coverage in result metadata
+        tcov = bytes([0] * 100 + [1, 1, 0, 1] + [0] * 16280)
+        primary = ExecutionResult(
+            exit_code=0, stdout=b'{"host":"a.com"}',
+            metadata={"target_coverage": tcov},
+        )
+        ref = ExecutionResult(exit_code=0, stdout=b'{"host":"a.com"}')
+
+        inp = Input(data=b"test")
+        cov = hybrid.collect_diff(inp, primary, ref_results=[ref])
+
+        assert hybrid._target_edge_count == 3  # 3 new bits at indices 100, 101, 103
+        assert getattr(cov, '_has_new_target_cov', False) is True
+
+    def test_is_novel_with_target_coverage_only(self):
+        """Input with no new diff features but new target coverage is novel."""
+        from webfuzzer.fuzzer.coverage.hybrid_coverage import HybridCoverageCollector
+        from webfuzzer.fuzzer.coverage.diff_coverage import DiffCoverageCollector
+
+        inner = DiffCoverageCollector(reference_targets=[_make_fake_target()])
+        hybrid = HybridCoverageCollector(inner, target_coverage_enabled=True)
+
+        existing = CoverageMap()
+        new = CoverageMap()
+        new._has_new_target_cov = True
+
+        # Inner says not novel (no new diff bits), but target cov says yes
+        assert not inner.is_novel(existing, new)
+        assert hybrid.is_novel(existing, new)
+
+    def test_is_novel_without_target_coverage(self):
+        """When no new target coverage, delegates to inner."""
+        from webfuzzer.fuzzer.coverage.hybrid_coverage import HybridCoverageCollector
+        from webfuzzer.fuzzer.coverage.diff_coverage import DiffCoverageCollector
+
+        inner = DiffCoverageCollector(reference_targets=[_make_fake_target()])
+        hybrid = HybridCoverageCollector(inner, target_coverage_enabled=True)
+
+        existing = CoverageMap()
+        new = CoverageMap()
+        new._has_new_target_cov = False
+
+        assert not hybrid.is_novel(existing, new)
+
+    def test_edge_count_includes_target(self):
+        """edge_count should sum diff + target coverage."""
+        from webfuzzer.fuzzer.coverage.hybrid_coverage import HybridCoverageCollector
+        from webfuzzer.fuzzer.coverage.diff_coverage import DiffCoverageCollector
+
+        inner = DiffCoverageCollector(reference_targets=[_make_fake_target()])
+        hybrid = HybridCoverageCollector(inner, target_coverage_enabled=True)
+
+        # Manually set target edges
+        hybrid._target_bitmap[0] = 1
+        hybrid._target_bitmap[1] = 1
+        hybrid._target_edge_count = 2
+
+        assert hybrid.edge_count == 2  # inner has 0 edges
+
+    def test_duplicate_bits_not_double_counted(self):
+        """Same coverage bitmap submitted twice should not increase count."""
+        from webfuzzer.fuzzer.coverage.hybrid_coverage import HybridCoverageCollector
+
+        hybrid = HybridCoverageCollector(None, target_coverage_enabled=True)
+        bitmap = bytes([1, 0, 1, 0] + [0] * 16380)
+
+        assert hybrid._merge_target_bitmap(bitmap) is True  # 2 new bits
+        assert hybrid._target_edge_count == 2
+        assert hybrid._merge_target_bitmap(bitmap) is False  # no new bits
+        assert hybrid._target_edge_count == 2

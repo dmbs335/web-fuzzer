@@ -1,0 +1,1 @@
+{"type": "token_request", "grant_type": "authorization_code", "code": "abc123", "redirect_uri": "http://example.com/cb", "client_id": "testclient", "client_secret": "secret", "scope": "openid\tprofile"}

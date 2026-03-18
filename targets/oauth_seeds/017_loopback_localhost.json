@@ -1,0 +1,1 @@
+{"type":"redirect_uri","registered":["http://localhost:3000/callback"],"candidate":"http://localhost:9999/callback","application_type":"native"}

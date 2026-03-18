@@ -1,0 +1,9 @@
+mutation EnumCaseTest {
+  createUser(input: {
+    name: "test"
+    email: "test@test.com"
+    role: admin
+  }) {
+    id name role
+  }
+}

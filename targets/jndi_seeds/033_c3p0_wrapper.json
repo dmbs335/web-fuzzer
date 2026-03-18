@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"com.mchange.v2.naming.JavaBeanObjectFactory","reference_class":"com.mchange.v2.c3p0.WrapperConnectionPoolDataSource","factory_attrs":{"userOverridesAsString":""}}

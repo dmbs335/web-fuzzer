@@ -1,0 +1,1 @@
+{"type": "token_response", "status_code": 500, "body": "{\"error\":\"server_error\"}", "requested_scope": "openid"}

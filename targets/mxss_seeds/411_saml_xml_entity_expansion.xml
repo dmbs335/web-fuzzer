@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- VECTOR: XML entity expansion in nameID — billion laughs lite; tests parser resource limits and whether entity refs affect identity string extraction -->
+<!DOCTYPE Response [
+  <!ENTITY a "admin">
+  <!ENTITY b "&a;&a;&a;&a;">
+  <!ENTITY c "&b;&b;&b;&b;">
+  <!ENTITY corp "@corp.com">
+]>
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                ID="_entity001"
+                Version="2.0"
+                IssueInstant="2026-01-01T00:00:00Z"
+                Destination="https://meshcentral.example.com/auth-saml-callback">
+  <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <saml:Assertion ID="_assertion_entity" Version="2.0" IssueInstant="2026-01-01T00:00:00Z">
+    <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+    <saml:Subject>
+      <!-- Entity expansion: &a;&corp; expands to "admin@corp.com" -->
+      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">&a;&corp;</saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData NotOnOrAfter="2099-01-01T00:00:00Z"
+                                      Recipient="https://meshcentral.example.com/auth-saml-callback"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+    <saml:Conditions NotBefore="2026-01-01T00:00:00Z" NotOnOrAfter="2099-01-01T00:00:00Z">
+      <saml:AudienceRestriction>
+        <saml:Audience>meshcentral</saml:Audience>
+      </saml:AudienceRestriction>
+    </saml:Conditions>
+    <saml:AttributeStatement>
+      <!-- Deep entity ref chain in attribute — tests resource exhaustion -->
+      <saml:Attribute Name="email">
+        <saml:AttributeValue>&c;&corp;</saml:AttributeValue>
+      </saml:Attribute>
+    </saml:AttributeStatement>
+  </saml:Assertion>
+</samlp:Response>

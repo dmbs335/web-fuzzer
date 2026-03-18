@@ -1,6 +1,9 @@
 {
   "dependencies": {
     "cookie": "^1.1.1",
+    "got": "^14.6.6",
+    "http-proxy": "^1.18.1",
+    "samlify": "^2.7.6",
     "set-cookie-parser": "^3.0.1",
     "tough-cookie": "^6.0.0"
   }

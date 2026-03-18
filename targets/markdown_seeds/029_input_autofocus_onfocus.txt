@@ -1,0 +1,3 @@
+<input autofocus onfocus="alert(1)">
+<input type="text" autofocus onfocus=alert(1) value="test">
+<select autofocus onfocus=alert(1)><option>x</option></select>

@@ -1,0 +1,2 @@
+![img](data:image/svg+xml,%3Csvg%20onload%3Dalert(1)%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3C%2Fsvg%3E)
+[link](data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+)

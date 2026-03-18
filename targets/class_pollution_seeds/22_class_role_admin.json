@@ -1,0 +1,10 @@
+{
+  "merge_fn": "setattr_loop",
+  "payload": {
+    "__class__": {
+      "role": "admin",
+      "is_authenticated": true,
+      "permissions": ["admin", "write", "delete"]
+    }
+  }
+}

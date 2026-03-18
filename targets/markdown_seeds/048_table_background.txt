@@ -1,0 +1,3 @@
+<table background="javascript:alert(1)"><tr><td>cell</td></tr></table>
+<table><tr><td background="javascript:alert(1)">cell</td></tr></table>
+<table><tr><td style="background-image:url(javascript:alert(1))">cell</td></tr></table>

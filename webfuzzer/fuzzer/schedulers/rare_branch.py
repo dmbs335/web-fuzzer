@@ -66,4 +66,4 @@ class RareBranchScheduler:
         rare_edges = {e for e, f in edge_freq.items() if f < threshold}
 
         for seed in corpus.seeds:
-            seed.rare_branches = seed.feature_set & rare_edges
+            seed.rare_branches = (seed.feature_set & rare_edges) if seed.feature_set else set()

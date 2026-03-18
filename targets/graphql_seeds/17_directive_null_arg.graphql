@@ -1,0 +1,7 @@
+query DirectiveNullArg {
+  user(id: "1") {
+    id
+    name @skip(if: null)
+    email @include(if: null)
+  }
+}

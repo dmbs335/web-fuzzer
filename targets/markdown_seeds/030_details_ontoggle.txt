@@ -1,0 +1,2 @@
+<details open ontoggle="alert(1)"><summary>info</summary>content</details>
+<details open ontoggle=alert(1)><summary>click</summary><img src=x onerror=alert(2)></details>

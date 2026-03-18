@@ -93,7 +93,7 @@ _LOCALHOST_ALTERNATES = frozenset({
 
 
 @lru_cache(maxsize=64)
-def _is_internal_host(host: str) -> bool:
+def _is_internal_host(host: str, _depth: int = 0) -> bool:
     """Check if a hostname/IP resolves to an internal/private address.
 
     Covers RFC 1918, RFC 4193, loopback, link-local, cloud metadata,
@@ -110,11 +110,10 @@ def _is_internal_host(host: str) -> bool:
     # Percent-decode the host before all checks (P2 fix).
     # Parsers may leave percent-encoded dots/digits (e.g. 127%2e0%2e0%2e1)
     # which bypass string-based internal IP detection.
-    from urllib.parse import unquote
+    # Limit recursion depth to 2 to avoid stack overflow on multi-encoded inputs.
     decoded = unquote(host_lower)
-    if decoded != host_lower:
-        # Re-run the full check on the decoded form
-        if _is_internal_host(decoded):
+    if decoded != host_lower and _depth < 2:
+        if _is_internal_host(decoded, _depth + 1):
             return True
 
     # Direct hostname matches
@@ -220,6 +219,72 @@ _DANGEROUS_SCHEMES = frozenset({
 _XSS_SCHEMES = frozenset({
     "javascript", "vbscript", "data",
 })
+
+
+# -- Mechanism classifiers (for dedup fingerprinting) ----------------------
+
+def _host_mechanism(p_host: str, r_host: str) -> str:
+    combined = p_host + r_host
+    combined_low = combined.lower()
+    # IPv6
+    if ":" in p_host or ":" in r_host:
+        return "ipv6"
+    # Hex IP (0x7f000001)
+    if "0x" in combined_low:
+        return "hex_ip"
+    # Octal IP (0177.0.0.1) — leading zero in dotted quad
+    for h in (p_host, r_host):
+        parts = h.split(".")
+        if len(parts) == 4 and any(
+            len(p) > 1 and p.startswith("0") and p.isdigit() for p in parts
+        ):
+            return "octal_ip"
+    # Decimal IP without dots (2130706433)
+    for h in (p_host, r_host):
+        if h.isdigit() and len(h) > 3:
+            return "decimal_ip"
+    # Cloud metadata endpoints
+    _CLOUD_META = {"169.254.169.254", "metadata.google.internal",
+                   "100.100.100.200", "fd00:ec2::254"}
+    if p_host in _CLOUD_META or r_host in _CLOUD_META:
+        return "cloud_metadata"
+    # Localhost / loopback
+    _LOOPBACK = {"localhost", "127.0.0.1", "0.0.0.0", "0"}
+    if p_host.lower() in _LOOPBACK or r_host.lower() in _LOOPBACK:
+        return "loopback"
+    # Internal hostname suffix (.internal, .local, .corp)
+    for h in (p_host.lower(), r_host.lower()):
+        if any(h.endswith(s) for s in (".internal", ".local", ".corp", ".intra")):
+            return "internal_suffix"
+    # Percent-encoded host
+    if "%" in combined:
+        return "encoded_host"
+    # Dotted-quad IP (both numeric)
+    if p_host.replace(".", "").isdigit() and r_host.replace(".", "").isdigit():
+        return "ip_interpretation"
+    return "hostname_diff"
+
+
+def _scheme_mechanism(p_scheme: str, r_scheme: str) -> str:
+    _DANGEROUS = {"file", "gopher", "dict", "ldap", "tftp"}
+    _XSS = {"javascript", "vbscript", "data"}
+    for s in (p_scheme, r_scheme):
+        sl = (s or "").lower()
+        if sl in _DANGEROUS:
+            return f"dangerous_{sl}"
+        if sl in _XSS:
+            return f"xss_{sl}"
+    return "protocol_diff"
+
+
+def _path_mechanism_url(p_path: str, r_path: str, has_backslash: bool) -> str:
+    if has_backslash:
+        return "backslash"
+    if "/.." in (p_path or "") or "/.." in (r_path or ""):
+        return "traversal"
+    if "%" in (p_path or "") or "%" in (r_path or ""):
+        return "encoding"
+    return "normalization"
 
 
 # -- Path analysis helpers -------------------------------------------------
@@ -364,7 +429,7 @@ class UrlConfusionStrategy:
         primary: ExecutionResult,
         reference: ExecutionResult,
         ref_index: int,
-    ) -> Finding | None:
+    ) -> list[Finding] | None:
         # Need at least one successful parse to compare
         if primary.exit_code != 0 and reference.exit_code != 0:
             return None
@@ -374,10 +439,11 @@ class UrlConfusionStrategy:
 
         # If only one side parsed, check for interesting one-sided cases
         if primary_parsed is None or ref_parsed is None:
-            return self._check_one_sided(
+            one = self._check_one_sided(
                 inp, primary, reference, ref_index,
                 primary_parsed, ref_parsed,
             )
+            return [one] if one else None
 
         # Both parsed - compare all 7 components
         p_scheme = primary_parsed.get("scheme", "").lower().strip()
@@ -417,6 +483,10 @@ class UrlConfusionStrategy:
         has_backslash = _has_backslash(raw_input)
         has_traversal = _has_traversal_indicators(raw_input)
 
+        # Collect ALL independent divergences instead of returning
+        # only the highest-priority one.
+        all_findings: list[Finding] = []
+
         # -- S3 + S2-1: Host confusion (most critical) --
         if p_host and r_host and p_host != r_host:
             p_internal = _is_internal_host(p_host)
@@ -426,7 +496,7 @@ class UrlConfusionStrategy:
             if p_internal != r_internal:
                 internal_side = "primary" if p_internal else "reference"
                 external_side = "reference" if p_internal else "primary"
-                return self._make_finding(
+                all_findings.append(self._make_finding(
                     inp=inp,
                     result=primary,
                     ref_index=ref_index,
@@ -445,37 +515,39 @@ class UrlConfusionStrategy:
                         "primary_internal": p_internal,
                         "ref_internal": r_internal,
                         "has_backslash": has_backslash,
+                        "mechanism": _host_mechanism(p_host, r_host),
                     },
                     primary_parsed=primary_parsed,
                     ref_parsed=ref_parsed,
                     diff_fields=diff_fields,
-                )
-
-            # HIGH: different external hosts - open redirect / CORS bypass
-            return self._make_finding(
-                inp=inp,
-                result=primary,
-                ref_index=ref_index,
-                category="open_redirect",
-                severity=Severity.HIGH,
-                title=(
-                    f"Open redirect: parsers disagree on host "
-                    f"(primary={p_host} vs ref[{ref_index}]={r_host})"
-                ),
-                details={
-                    "primary_host": p_host,
-                    "ref_host": r_host,
-                    "attack_vectors": [
-                        "open_redirect",
-                        "cors_bypass",
-                        "oauth_redirect_uri_bypass",
-                    ],
-                    "has_backslash": has_backslash,
-                },
-                primary_parsed=primary_parsed,
-                ref_parsed=ref_parsed,
-                diff_fields=diff_fields,
-            )
+                ))
+            else:
+                # HIGH: different external hosts - open redirect / CORS bypass
+                all_findings.append(self._make_finding(
+                    inp=inp,
+                    result=primary,
+                    ref_index=ref_index,
+                    category="open_redirect",
+                    severity=Severity.HIGH,
+                    title=(
+                        f"Open redirect: parsers disagree on host "
+                        f"(primary={p_host} vs ref[{ref_index}]={r_host})"
+                    ),
+                    details={
+                        "primary_host": p_host,
+                        "ref_host": r_host,
+                        "attack_vectors": [
+                            "open_redirect",
+                            "cors_bypass",
+                            "oauth_redirect_uri_bypass",
+                        ],
+                        "has_backslash": has_backslash,
+                        "mechanism": "backslash" if has_backslash else "host_diff",
+                    },
+                    primary_parsed=primary_parsed,
+                    ref_parsed=ref_parsed,
+                    diff_fields=diff_fields,
+                ))
 
         # -- S1: Scheme confusion --
         if p_scheme and r_scheme and p_scheme != r_scheme:
@@ -496,7 +568,7 @@ class UrlConfusionStrategy:
             if not attack_vectors:
                 attack_vectors.append("protocol_confusion")
 
-            return self._make_finding(
+            all_findings.append(self._make_finding(
                 inp=inp,
                 result=primary,
                 ref_index=ref_index,
@@ -510,47 +582,48 @@ class UrlConfusionStrategy:
                     "primary_scheme": p_scheme,
                     "ref_scheme": r_scheme,
                     "attack_vectors": attack_vectors,
+                    "mechanism": _scheme_mechanism(p_scheme, r_scheme),
                 },
                 primary_parsed=primary_parsed,
                 ref_parsed=ref_parsed,
                 diff_fields=diff_fields,
-            )
+            ))
 
         # -- S2-1: Userinfo/authority confusion --
         if p_userinfo != r_userinfo:
-            if bool(p_userinfo) != bool(r_userinfo):
-                return self._make_finding(
-                    inp=inp,
-                    result=primary,
-                    ref_index=ref_index,
-                    category="authority_confusion",
-                    severity=Severity.HIGH,
-                    title=(
-                        f"Authority confusion: userinfo mismatch "
-                        f"({p_userinfo!r} vs {r_userinfo!r}) "
-                        f"(ref[{ref_index}])"
-                    ),
-                    details={
-                        "primary_userinfo": p_userinfo,
-                        "ref_userinfo": r_userinfo,
-                        "primary_host": p_host,
-                        "ref_host": r_host,
-                        "attack_vectors": [
-                            "credential_confusion",
-                            "auth_bypass",
-                        ],
-                        "has_backslash": has_backslash,
-                    },
-                    primary_parsed=primary_parsed,
-                    ref_parsed=ref_parsed,
-                    diff_fields=diff_fields,
-                )
+            all_findings.append(self._make_finding(
+                inp=inp,
+                result=primary,
+                ref_index=ref_index,
+                category="authority_confusion",
+                severity=Severity.HIGH,
+                title=(
+                    f"Authority confusion: userinfo mismatch "
+                    f"({p_userinfo!r} vs {r_userinfo!r}) "
+                    f"(ref[{ref_index}])"
+                ),
+                details={
+                    "primary_userinfo": p_userinfo,
+                    "ref_userinfo": r_userinfo,
+                    "primary_host": p_host,
+                    "ref_host": r_host,
+                    "attack_vectors": [
+                        "credential_confusion",
+                        "auth_bypass",
+                    ],
+                    "has_backslash": has_backslash,
+                    "mechanism": "userinfo_presence" if bool(p_userinfo) != bool(r_userinfo) else "userinfo_value",
+                },
+                primary_parsed=primary_parsed,
+                ref_parsed=ref_parsed,
+                diff_fields=diff_fields,
+            ))
 
         # -- S5: Path traversal (HIGH - subset of path confusion) --
         if p_path != r_path and (p_path or r_path):
             if not _is_trivial_path_diff(p_path, r_path):
                 if has_traversal or _is_traversal_path_diff(p_path, r_path):
-                    return self._make_finding(
+                    all_findings.append(self._make_finding(
                         inp=inp,
                         result=primary,
                         ref_index=ref_index,
@@ -571,15 +644,43 @@ class UrlConfusionStrategy:
                                 "path_normalization_bypass",
                             ],
                             "has_backslash": has_backslash,
+                            "mechanism": _path_mechanism_url(p_path, r_path, has_backslash),
                         },
                         primary_parsed=primary_parsed,
                         ref_parsed=ref_parsed,
                         diff_fields=diff_fields,
-                    )
+                    ))
+                else:
+                    # -- S5: Generic path confusion (MEDIUM) --
+                    attack_vectors = ["cache_poisoning", "waf_bypass"]
+                    if has_backslash:
+                        attack_vectors.append("backslash_path_confusion")
+
+                    all_findings.append(self._make_finding(
+                        inp=inp,
+                        result=primary,
+                        ref_index=ref_index,
+                        category="path_confusion",
+                        severity=Severity.MEDIUM,
+                        title=(
+                            f"Path confusion: primary={p_path[:60]} vs "
+                            f"ref[{ref_index}]={r_path[:60]}"
+                        ),
+                        details={
+                            "primary_path": p_path,
+                            "ref_path": r_path,
+                            "attack_vectors": attack_vectors,
+                            "has_backslash": has_backslash,
+                            "mechanism": _path_mechanism_url(p_path, r_path, has_backslash),
+                        },
+                        primary_parsed=primary_parsed,
+                        ref_parsed=ref_parsed,
+                        diff_fields=diff_fields,
+                    ))
 
         # -- S4: Port confusion --
         if p_port != r_port and (p_port or r_port):
-            return self._make_finding(
+            all_findings.append(self._make_finding(
                 inp=inp,
                 result=primary,
                 ref_index=ref_index,
@@ -593,44 +694,17 @@ class UrlConfusionStrategy:
                     "primary_port": p_port,
                     "ref_port": r_port,
                     "attack_vectors": ["port_based_access_control_bypass"],
+                    "mechanism": "default_port" if not p_port or not r_port else "port_value",
                 },
                 primary_parsed=primary_parsed,
                 ref_parsed=ref_parsed,
                 diff_fields=diff_fields,
-            )
-
-        # -- S5: Generic path confusion (MEDIUM) --
-        if p_path != r_path and p_path and r_path:
-            if not _is_trivial_path_diff(p_path, r_path):
-                attack_vectors = ["cache_poisoning", "waf_bypass"]
-                if has_backslash:
-                    attack_vectors.append("backslash_path_confusion")
-
-                return self._make_finding(
-                    inp=inp,
-                    result=primary,
-                    ref_index=ref_index,
-                    category="path_confusion",
-                    severity=Severity.MEDIUM,
-                    title=(
-                        f"Path confusion: primary={p_path[:60]} vs "
-                        f"ref[{ref_index}]={r_path[:60]}"
-                    ),
-                    details={
-                        "primary_path": p_path,
-                        "ref_path": r_path,
-                        "attack_vectors": attack_vectors,
-                        "has_backslash": has_backslash,
-                    },
-                    primary_parsed=primary_parsed,
-                    ref_parsed=ref_parsed,
-                    diff_fields=diff_fields,
-                )
+            ))
 
         # -- S6: Query confusion --
         if p_query != r_query and (p_query or r_query):
             if not _is_trivial_query_diff(p_query, r_query):
-                return self._make_finding(
+                all_findings.append(self._make_finding(
                     inp=inp,
                     result=primary,
                     ref_index=ref_index,
@@ -648,11 +722,12 @@ class UrlConfusionStrategy:
                             "waf_bypass",
                             "cache_key_confusion",
                         ],
+                        "mechanism": "presence" if not p_query or not r_query else "value_diff",
                     },
                     primary_parsed=primary_parsed,
                     ref_parsed=ref_parsed,
                     diff_fields=diff_fields,
-                )
+                ))
 
         # -- S7: Fragment confusion --
         if p_fragment != r_fragment and (p_fragment or r_fragment):
@@ -670,7 +745,7 @@ class UrlConfusionStrategy:
                     severity = Severity.LOW
                     attack_vectors = ["dom_xss", "fragment_value_confusion"]
 
-                return self._make_finding(
+                all_findings.append(self._make_finding(
                     inp=inp,
                     result=primary,
                     ref_index=ref_index,
@@ -684,13 +759,14 @@ class UrlConfusionStrategy:
                         "primary_fragment": p_fragment,
                         "ref_fragment": r_fragment,
                         "attack_vectors": attack_vectors,
+                        "mechanism": "presence" if bool(p_fragment) != bool(r_fragment) else "value_diff",
                     },
                     primary_parsed=primary_parsed,
                     ref_parsed=ref_parsed,
                     diff_fields=diff_fields,
-                )
+                ))
 
-        return None
+        return all_findings or None
 
     def _check_one_sided(
         self,
@@ -730,6 +806,7 @@ class UrlConfusionStrategy:
                     "accepting_side": side,
                     "host": host,
                     "scheme": scheme,
+                    "mechanism": "internal_host",
                 },
                 primary_parsed=primary_parsed or {},
                 ref_parsed=ref_parsed or {},
@@ -751,6 +828,7 @@ class UrlConfusionStrategy:
                     "accepting_side": side,
                     "scheme": scheme,
                     "host": host,
+                    "mechanism": _scheme_mechanism(scheme, ""),
                 },
                 primary_parsed=primary_parsed or {},
                 ref_parsed=ref_parsed or {},
@@ -773,6 +851,7 @@ class UrlConfusionStrategy:
                     "scheme": scheme,
                     "host": host,
                     "attack_vectors": ["xss_via_scheme"],
+                    "mechanism": _scheme_mechanism(scheme, ""),
                 },
                 primary_parsed=primary_parsed or {},
                 ref_parsed=ref_parsed or {},
@@ -858,6 +937,7 @@ class PortConfusionStrategy:
                 "ref_index": ref_index,
                 "primary_port": p_port,
                 "ref_port": r_port,
+                "mechanism": "default_port" if not p_port or not r_port else "port_value",
             },
         )
 
@@ -900,6 +980,7 @@ class QueryConfusionStrategy:
                 "ref_index": ref_index,
                 "primary_query": p_query,
                 "ref_query": r_query,
+                "mechanism": "presence" if not p_query or not r_query else "value_diff",
             },
         )
 
@@ -946,6 +1027,7 @@ class FragmentConfusionStrategy:
                 "ref_index": ref_index,
                 "primary_fragment": p_frag,
                 "ref_fragment": r_frag,
+                "mechanism": "presence" if bool(p_frag) != bool(r_frag) else "value_diff",
             },
         )
 

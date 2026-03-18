@@ -1,0 +1,2 @@
+<embed src="javascript:alert(1)" type="text/html">
+<embed src="data:text/html,<script>alert(1)</script>">

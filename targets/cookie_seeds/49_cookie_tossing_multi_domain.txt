@@ -1,0 +1,2 @@
+session=original; Domain=.example.com; Path=/
+session=tossed; Domain=sub.example.com; Path=/

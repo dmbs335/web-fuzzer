@@ -1,0 +1,7 @@
+query DeprecatedAccess {
+  user(id: "1") {
+    id
+    name
+    oldField
+  }
+}

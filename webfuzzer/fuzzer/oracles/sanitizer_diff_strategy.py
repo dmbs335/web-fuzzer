@@ -109,6 +109,7 @@ class SanitizerBypassStrategy:
                     metadata={
                         "strategy": self.name,
                         "category": category,
+                        "mechanism": signal,
                         "signal": signal,
                         "allowing_side": allowing,
                         "blocking_side": blocking,
@@ -152,6 +153,7 @@ class SanitizerBypassStrategy:
                     metadata={
                         "strategy": self.name,
                         "category": category,
+                        "mechanism": signal,
                         "signal": signal,
                         "parsed_side": parsed_side,
                         "ref_index": ref_index,
@@ -220,6 +222,7 @@ class SanitizerNamespaceDivergenceStrategy:
             metadata={
                 "strategy": self.name,
                 "category": "namespace_divergence",
+                "mechanism": "svg" if any("svg" in e for e in (only_primary | only_ref)) else "math" if any("math" in e for e in (only_primary | only_ref)) else "mixed",
                 "primary_ns": sorted(p_ns),
                 "ref_ns": sorted(r_ns),
                 "only_primary": sorted(only_primary),
@@ -300,6 +303,7 @@ class SanitizerStructuralMutationStrategy:
             metadata={
                 "strategy": self.name,
                 "category": "structural_mutation",
+                "mechanism": "security_element" if (only_primary | only_ref) & frozenset({"script", "iframe", "object", "embed", "applet", "base", "form"}) else "structural",
                 "only_primary": sorted(only_primary),
                 "only_ref": sorted(only_ref),
                 "ref_index": ref_index,
@@ -363,6 +367,7 @@ class SanitizerDomClobberingStrategy:
             metadata={
                 "strategy": self.name,
                 "category": "dom_clobbering",
+                "mechanism": "id_clobbering" if "id" in ((p_attrs & _CLOBBER_ATTRS) | (r_attrs & _CLOBBER_ATTRS)) else "name_clobbering",
                 "primary_clobber_attrs": sorted(p_attrs & _CLOBBER_ATTRS),
                 "ref_clobber_attrs": sorted(r_attrs & _CLOBBER_ATTRS),
                 "primary_clobber_elems": sorted(p_elems & _CLOBBER_ELEMENTS),

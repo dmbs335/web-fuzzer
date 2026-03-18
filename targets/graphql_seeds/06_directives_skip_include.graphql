@@ -1,0 +1,9 @@
+query DirectiveTest($showEmail: Boolean!, $hideRole: Boolean!) {
+  user(id: "1") {
+    id
+    name
+    email @include(if: $showEmail)
+    role @skip(if: $hideRole)
+    status
+  }
+}

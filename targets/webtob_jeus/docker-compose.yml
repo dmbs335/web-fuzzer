@@ -1,0 +1,46 @@
+services:
+  webtob:
+    image: whjin5804/webtob:v2
+    container_name: webtob
+    hostname: webtob
+    privileged: true
+    environment:
+      - WEBTOB_HOME=/root/webtob
+      - WEBTOBDIR=/root/webtob
+      - WEBTOB_CONFIG_FILE=/root/webtob/config/http.m
+      - NODE_NAME=webtob
+      - HTTP_PORT=80
+    ports:
+      - "20080:80"
+      - "29900:9900"
+    volumes:
+      - ./webtob_config/http.m:/root/webtob/config/http.m:ro
+      - ./cores:/tmp/cores
+    networks:
+      - webtob-jeus
+
+  jeus:
+    image: tmaxsoftofficial/jeus:8.5.266025.1-jdk8-openjdk-alpine
+    container_name: jeus8_wb
+    hostname: jeus8
+    environment:
+      - JEUS_USER=jeus
+      - PASSWORD=jeus
+      - SERVERNAME=jeus8
+      - BASE_PORT=9736
+      - HTTP_PORT=8080
+      - HTTP_THREAD_MIN=10
+      - HTTP_THREAD_MAX=50
+    ports:
+      - "29736:9736"
+      - "28080:8080"
+    volumes:
+      - ./jeus_config/domain.xml:/home/tmax/jeus8_5/domains/domain1/config/domain.xml
+    depends_on:
+      - webtob
+    networks:
+      - webtob-jeus
+
+networks:
+  webtob-jeus:
+    driver: bridge

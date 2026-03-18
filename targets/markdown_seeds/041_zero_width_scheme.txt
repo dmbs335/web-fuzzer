@@ -1,0 +1,4 @@
+[zw1](j&#x200B;avascript:alert(1))
+[zw2](j&#x200C;avascript:alert(1))
+[zw3](j&#xFEFF;avascript:alert(1))
+[zw4](java&#x200D;script:alert(1))

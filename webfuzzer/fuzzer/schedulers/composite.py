@@ -46,3 +46,9 @@ class CompositeScheduler:
     def update(self, seed: Seed, result: ScheduleResult) -> None:
         self.primary.update(seed, result)
         self.secondary.update(seed, result)
+
+    def cleanup_removed(self, removed_ids: set[int]) -> None:
+        """Propagate cleanup to both sub-schedulers."""
+        for sched in (self.primary, self.secondary):
+            if hasattr(sched, 'cleanup_removed'):
+                sched.cleanup_removed(removed_ids)

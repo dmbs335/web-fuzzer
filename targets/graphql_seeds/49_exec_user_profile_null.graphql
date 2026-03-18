@@ -1,0 +1,1 @@
+{ user(id: "2") { id name profile { bio avatar } } }

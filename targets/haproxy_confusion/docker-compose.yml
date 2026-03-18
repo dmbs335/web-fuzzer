@@ -1,0 +1,14 @@
+services:
+  haproxy:
+    image: haproxy:latest
+    ports: ["9600:80"]
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - backend
+
+  backend:
+    image: nginx:latest
+    volumes:
+      - ./backend.conf:/etc/nginx/nginx.conf:ro
+      - ./backend_html:/usr/share/nginx/html:ro

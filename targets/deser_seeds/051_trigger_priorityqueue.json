@@ -1,0 +1,15 @@
+{
+  "chain_type": "Fragment: PriorityQueue root trigger",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→siftDown→comparator.compare",
+  "links": [
+    {
+      "class": "PLACEHOLDER_COMPARATOR",
+      "field_overrides": {
+        "transformer": null,
+        "decorated": null
+      }
+    }
+  ],
+  "sink_method": "PLACEHOLDER"
+}

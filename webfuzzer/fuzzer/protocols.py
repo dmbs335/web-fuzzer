@@ -40,6 +40,9 @@ class Input:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+_JSON_NOT_CACHED = object()
+
+
 @dataclass
 class ExecutionResult:
     """Result of executing an Input against a Target."""
@@ -50,6 +53,27 @@ class ExecutionResult:
     duration_ms: float = 0.0
     coverage_data: Any = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    # Cached JSON parse of stdout — avoids redundant json.loads across
+    # coverage collector, oracle, and diff strategies (~60K→~5K calls).
+    _parsed_json: Any = field(default=_JSON_NOT_CACHED, repr=False, compare=False)
+
+    def parsed_json(self) -> dict | None:
+        """Return parsed JSON from stdout, caching the result."""
+        if self._parsed_json is not _JSON_NOT_CACHED:
+            return self._parsed_json
+        import json
+        try:
+            text = self.stdout.strip()
+            if text:
+                data = json.loads(text)
+                if isinstance(data, dict):
+                    self._parsed_json = data
+                    return data
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError, RecursionError):
+            pass
+        self._parsed_json = None
+        return None
 
 
 @dataclass

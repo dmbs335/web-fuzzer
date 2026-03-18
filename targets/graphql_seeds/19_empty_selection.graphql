@@ -1,0 +1,3 @@
+query EmptySelection {
+  user(id: "1") { }
+}

