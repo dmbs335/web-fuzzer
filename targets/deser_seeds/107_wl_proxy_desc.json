@@ -1,0 +1,14 @@
+{
+  "chain_type": "readresolve_chain",
+  "description": "WebLogic ProxyDesc: readResolve triggers proxy creation (potential 2nd-order)",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject\u2192hash\u2192hashCode",
+  "links": [
+    {
+      "class": "weblogic.iiop.ProxyDesc",
+      "role": "bridge",
+      "field_overrides": {}
+    }
+  ],
+  "sink_method": "ProxyDesc.readResolve"
+}

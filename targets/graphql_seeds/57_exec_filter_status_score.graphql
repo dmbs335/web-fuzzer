@@ -1,0 +1,1 @@
+{ users(filter: { status: ACTIVE, scoreAbove: 50.0 }) { id name score } }

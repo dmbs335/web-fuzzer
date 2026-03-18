@@ -1,0 +1,15 @@
+services:
+  nginx_test:
+    image: nginx:latest
+    ports: ["9500:80"]
+    volumes:
+      - ./nginx_rewrite_break.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+
+  backend:
+    image: nginx:latest
+    volumes:
+      - ./backend.conf:/etc/nginx/nginx.conf:ro
+      - ./backend_html:/usr/share/nginx/html:ro
+

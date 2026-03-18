@@ -1,0 +1,8 @@
+{
+  "merge_fn": "recursive_merge",
+  "payload": {
+    "\u005f\u005fclass\u005f\u005f": {
+      "admin": true
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "merge_fn": "setattr_loop",
+  "payload": {
+    "admin": true,
+    "role": "admin",
+    "is_authenticated": true
+  }
+}

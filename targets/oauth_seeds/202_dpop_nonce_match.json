@@ -1,0 +1,1 @@
+{"type":"dpop_proof","proof_jwt":"eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2In0.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9hdXRoLmV4YW1wbGUuY29tL3Rva2VuIiwiaWF0IjoxNzA5MTM2MDAwLCJqdGkiOiJ0ZXN0LWp0aS0yMDIiLCJub25jZSI6Im5vbmNlX3h5eiJ9.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","http_method":"POST","http_uri":"https://auth.example.com/token","server_nonce":"nonce_xyz"}

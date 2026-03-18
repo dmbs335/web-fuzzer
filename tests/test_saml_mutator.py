@@ -11,8 +11,7 @@ from webfuzzer.fuzzer.mutators.saml_mutator import (
     _make_evil_assertion,
     _find_element_span,
     _resign_assertion_bytes,
-    _NEEDS_RESIGN,
-    _BLOCKS_RESIGN,
+    _RESIGN_ACTION,
     _RE_ASSERTION_OPEN,
     _RE_ASSERTION_CLOSE,
     _RE_NAMEID,
@@ -114,8 +113,8 @@ class TestSamlMutator:
             assert len(result.data) <= MAX_OUTPUT_SIZE
 
     def test_strategy_count(self, mutator):
-        assert len(mutator._strategies) == 62
-        assert len(mutator._weights) == 62
+        assert len(mutator._strategies) == 101
+        assert len(mutator._weights) == 101
 
     def test_weights_positive(self, mutator):
         for w in mutator._weights:
@@ -188,15 +187,29 @@ class TestSamlMutator:
             result = mutator.mutate(inp, [])
             assert "resigned" in result.metadata
 
-    def test_resign_groups_disjoint(self):
-        """_NEEDS_RESIGN and _BLOCKS_RESIGN must not overlap."""
-        overlap = _NEEDS_RESIGN & _BLOCKS_RESIGN
+    def test_resign_groups_disjoint(self, mutator):
+        """_needs_resign and _blocks_resign must not overlap."""
+        overlap = mutator._needs_resign & mutator._blocks_resign
         assert not overlap, f"Overlapping strategy indices: {overlap}"
 
-    def test_resign_indices_in_range(self):
+    def test_resign_indices_in_range(self, mutator):
         """All resign indices must be valid strategy indices."""
-        for idx in _NEEDS_RESIGN | _BLOCKS_RESIGN:
-            assert 0 <= idx < 62, f"Index {idx} out of range"
+        total = len(mutator._strategies)
+        for idx in mutator._needs_resign | mutator._blocks_resign:
+            assert 0 <= idx < total, f"Index {idx} out of range"
+
+    def test_resign_action_names_exist(self, mutator):
+        """Every name in _RESIGN_ACTION must correspond to an actual strategy."""
+        strategy_names = set(mutator._strategy_names)
+        for name in _RESIGN_ACTION:
+            assert name in strategy_names, (
+                f"_RESIGN_ACTION references '{name}' but no such strategy exists"
+            )
+
+    def test_xsw_indices_cover_s1(self, mutator):
+        """XSW indices should include S1 group (first 8 strategies)."""
+        s1_indices = set(range(8))
+        assert s1_indices.issubset(mutator._xsw_indices)
 
 
 @pytest.mark.skipif(not _can_resign, reason="signxml or IdP fixtures unavailable")
@@ -349,8 +362,8 @@ class TestResigning:
             name_to_idx = {fn.__name__.lstrip("_"): i
                            for i, fn in enumerate(mutator._strategies)}
             indices = {name_to_idx.get(s, -1) for s in strategies}
-            has_needs = bool(indices & _NEEDS_RESIGN)
-            has_blocks = bool(indices & _BLOCKS_RESIGN)
+            has_needs = bool(indices & mutator._needs_resign)
+            has_blocks = bool(indices & mutator._blocks_resign)
             if has_blocks and not has_needs:
                 assert not result.metadata.get("resigned"), (
                     f"Group A-only mutation should not be resigned: {strategies}"
@@ -366,3 +379,187 @@ class TestResigning:
         for _ in range(100):
             result = mutator.mutate(inp, [])
             assert isinstance(result.metadata.get("resigned"), bool)
+
+    def test_resign_finds_referenced_assertion(self):
+        """Re-sign should follow Reference URI to find the correct assertion."""
+        from lxml import etree
+
+        signed_xml = self._make_signed_sample()
+        root = etree.fromstring(signed_xml)
+        SAML = "urn:oasis:names:tc:SAML:2.0:assertion"
+
+        # Insert evil assertion BEFORE the signed one (XSW1 pattern)
+        evil = etree.SubElement(root, f"{{{SAML}}}Assertion")
+        evil.set("Version", "2.0")
+        evil.set("ID", "_evil_first")
+        iss = etree.SubElement(evil, f"{{{SAML}}}Issuer")
+        iss.text = "https://evil.com"
+        subj = etree.SubElement(evil, f"{{{SAML}}}Subject")
+        nid = etree.SubElement(subj, f"{{{SAML}}}NameID")
+        nid.text = "attacker@evil.com"
+
+        # Move evil to index 0 (before original assertion)
+        root.remove(evil)
+        root.insert(0, evil)
+
+        xsw_xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+
+        # Re-sign should find _assert_test via Reference URI, not evil_first
+        resigned = _resign_assertion_bytes(xsw_xml)
+        assert resigned is not None
+
+        # Verify: the signed assertion should be _assert_test
+        re_root = etree.fromstring(resigned)
+        DS = "http://www.w3.org/2000/09/xmldsig#"
+        refs = list(re_root.iter(f"{{{DS}}}Reference"))
+        assert len(refs) > 0
+        ref_uri = refs[0].get("URI", "")
+        assert ref_uri == "#_assert_test", f"Expected #_assert_test, got {ref_uri}"
+
+        # Evil assertion should still be unsigned
+        assertions = re_root.findall(f".//{{{SAML}}}Assertion")
+        assert len(assertions) >= 2
+        evil_a = [a for a in assertions if a.get("ID") == "_evil_first"]
+        assert len(evil_a) == 1
+        evil_sigs = evil_a[0].findall(f"{{{DS}}}Signature")
+        assert len(evil_sigs) == 0, "Evil assertion should not be signed"
+
+    def test_resign_finds_enveloped_assertion(self):
+        """When Reference URI is absent, re-sign should find assertion with Signature child."""
+        from lxml import etree
+
+        signed_xml = self._make_signed_sample()
+        # Remove the Reference URI attribute to force strategy 2
+        root = etree.fromstring(signed_xml)
+        DS = "http://www.w3.org/2000/09/xmldsig#"
+        for ref in root.iter(f"{{{DS}}}Reference"):
+            if "URI" in ref.attrib:
+                del ref.attrib["URI"]
+
+        modified = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+        resigned = _resign_assertion_bytes(modified)
+        assert resigned is not None
+
+        # Should still produce a valid signature
+        re_root = etree.fromstring(resigned)
+        with open(os.path.join(_FIXTURES_DIR, "idp_cert.pem"), "rb") as f:
+            cert = f.read()
+        from signxml import XMLVerifier
+        SAML = "urn:oasis:names:tc:SAML:2.0:assertion"
+        assertion = re_root.find(f"{{{SAML}}}Assertion")
+        XMLVerifier().verify(assertion, x509_cert=cert)
+
+    def test_resign_uses_last_assertion_as_fallback(self):
+        """When no Signature exists, re-sign should pick the last assertion."""
+        from lxml import etree
+
+        SAML = "urn:oasis:names:tc:SAML:2.0:assertion"
+        SAMLP = "urn:oasis:names:tc:SAML:2.0:protocol"
+
+        # Build a doc with 2 assertions, no Signature at all
+        resp = etree.Element(f"{{{SAMLP}}}Response",
+                             nsmap={"samlp": SAMLP, "saml": SAML})
+        resp.set("ID", "_resp_test")
+        resp.set("Version", "2.0")
+
+        evil = etree.SubElement(resp, f"{{{SAML}}}Assertion")
+        evil.set("ID", "_evil")
+        evil.set("Version", "2.0")
+        nid1 = etree.SubElement(
+            etree.SubElement(evil, f"{{{SAML}}}Subject"),
+            f"{{{SAML}}}NameID")
+        nid1.text = "evil@evil.com"
+
+        legit = etree.SubElement(resp, f"{{{SAML}}}Assertion")
+        legit.set("ID", "_legit")
+        legit.set("Version", "2.0")
+        iss = etree.SubElement(legit, f"{{{SAML}}}Issuer")
+        iss.text = "https://idp.example.com"
+        nid2 = etree.SubElement(
+            etree.SubElement(legit, f"{{{SAML}}}Subject"),
+            f"{{{SAML}}}NameID")
+        nid2.text = "legit@example.com"
+
+        raw = etree.tostring(resp, xml_declaration=True, encoding="UTF-8")
+        resigned = _resign_assertion_bytes(raw)
+        assert resigned is not None
+
+        # Signature should be on _legit (last assertion)
+        re_root = etree.fromstring(resigned)
+        DS = "http://www.w3.org/2000/09/xmldsig#"
+        refs = list(re_root.iter(f"{{{DS}}}Reference"))
+        assert len(refs) > 0
+        ref_uri = refs[0].get("URI", "")
+        assert "_legit" in ref_uri, f"Expected _legit in URI, got {ref_uri}"
+
+    def test_xsw_plus_resign_produces_valid_sig(self):
+        """XSW1 + re-sign should produce a document where signxml verifies."""
+        from lxml import etree
+        from signxml import XMLVerifier
+
+        signed_xml = self._make_signed_sample()
+
+        # Simulate XSW1: insert evil assertion before original
+        SAML = "urn:oasis:names:tc:SAML:2.0:assertion"
+        root = etree.fromstring(signed_xml)
+        evil = etree.Element(f"{{{SAML}}}Assertion")
+        evil.set("Version", "2.0")
+        evil.set("ID", "_evil_xsw1")
+        evil.set("IssueInstant", "2025-01-01T00:00:00Z")
+        iss = etree.SubElement(evil, f"{{{SAML}}}Issuer")
+        iss.text = "https://evil.com"
+        subj = etree.SubElement(evil, f"{{{SAML}}}Subject")
+        nid = etree.SubElement(subj, f"{{{SAML}}}NameID")
+        nid.text = "attacker@evil.com"
+
+        # Insert at position 2 (after Issuer, Status, before Assertion)
+        root.insert(2, evil)
+        xsw_xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8")
+
+        # Re-sign should sign the original assertion (not evil)
+        resigned = _resign_assertion_bytes(xsw_xml)
+        assert resigned is not None
+
+        # Verify signature on original assertion
+        re_root = etree.fromstring(resigned)
+        orig_assertion = re_root.find(f".//{{{SAML}}}Assertion[@ID='_assert_test']")
+        assert orig_assertion is not None
+
+        with open(os.path.join(_FIXTURES_DIR, "idp_cert.pem"), "rb") as f:
+            cert = f.read()
+        XMLVerifier().verify(orig_assertion, x509_cert=cert)
+
+    def test_blocks_still_prevent_resign(self):
+        """Strategies in _blocks_resign should prevent re-signing."""
+        signed_xml = self._make_signed_sample()
+        mutator = SamlMutator(seed=99)
+        inp = Input(data=signed_xml)
+
+        # Run many mutations and verify blocks are respected
+        for _ in range(200):
+            result = mutator.mutate(inp, [])
+            strategies = result.metadata.get("strategies", [])
+            name_to_idx = {fn.__name__.lstrip("_"): i
+                           for i, fn in enumerate(mutator._strategies)}
+            indices = {name_to_idx.get(s, -1) for s in strategies}
+            has_blocks = bool(indices & mutator._blocks_resign)
+            if has_blocks:
+                assert not result.metadata.get("resigned"), (
+                    f"Blocked strategies {strategies} should prevent re-signing"
+                )
+
+    def test_opt_out_resign_increases_rate(self):
+        """With opt-out model, resign rate should be significantly higher."""
+        signed_xml = self._make_signed_sample()
+        mutator = SamlMutator(seed=42)
+        inp = Input(data=signed_xml)
+        resigned_count = 0
+        total = 200
+        for _ in range(total):
+            result = mutator.mutate(inp, [])
+            if result.metadata.get("resigned"):
+                resigned_count += 1
+        rate = resigned_count / total
+        assert rate > 0.2, (
+            f"Resign rate {rate:.1%} too low — opt-out model should achieve >20%"
+        )

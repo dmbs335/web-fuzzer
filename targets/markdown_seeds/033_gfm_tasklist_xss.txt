@@ -1,0 +1,4 @@
+- [x] normal task
+- [ ] <img src=x onerror=alert(1)>
+- [x] [click](javascript:alert(1))
+- [ ] task with `<script>alert(1)</script>` inline

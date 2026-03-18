@@ -1,0 +1,323 @@
+# =============================================================================
+# OAuth Grammar — redirect_uri + scope + PKCE + token exchange differential fuzzing
+# Generates JSON inputs for OAuth library comparison.
+# OAuthMutator handles URI manipulation, scope, PKCE, and token exchange mutations.
+# =============================================================================
+
+!root <oauth_input>
+!max_depth 3
+
+# Eight input types: redirect_uri, scope, PKCE, token_request, token_response,
+# token_exchange, dpop_proof
+<oauth_input> = <redirect_uri_input>
+<oauth_input> = <scope_input>
+<oauth_input> = <pkce_input>
+<oauth_input> = <token_request_input>
+<oauth_input> = <token_response_input>
+<oauth_input> = <token_exchange_input>
+<oauth_input> = <dpop_proof_input>
+
+# ── redirect_uri inputs ──────────────────────────────────────────
+
+<redirect_uri_input> = {"type":"redirect_uri","registered":[<registered_uris>],"candidate":"<candidate_uri>"}
+<redirect_uri_input> = {"type":"redirect_uri","registered":[<registered_uris>],"candidate":"<candidate_uri>","application_type":"native"}
+
+<registered_uris> = "<base_uri>"
+<registered_uris> = "<base_uri>","<base_uri>"
+
+# Baseline registered URIs
+<base_uri> = http://example.com/callback
+<base_uri> = https://example.com/callback
+<base_uri> = https://app.example.com/oauth/callback
+<base_uri> = http://localhost:3000/callback
+<base_uri> = http://127.0.0.1:8080/callback
+<base_uri> = http://[::1]:8080/callback
+
+# Candidate URIs — variations designed to trigger normalization differences
+<candidate_uri> = <exact_match_uri>
+<candidate_uri> = <port_variation_uri>
+<candidate_uri> = <case_variation_uri>
+<candidate_uri> = <encoding_variation_uri>
+<candidate_uri> = <path_variation_uri>
+<candidate_uri> = <fragment_uri>
+<candidate_uri> = <loopback_uri>
+<candidate_uri> = <attack_uri>
+
+# Exact matches (should always match)
+<exact_match_uri> = http://example.com/callback
+<exact_match_uri> = https://example.com/callback
+<exact_match_uri> = http://localhost:3000/callback
+
+# Port normalization (WHATWG strips :80/:443, raw string keeps them)
+<port_variation_uri> = http://example.com:80/callback
+<port_variation_uri> = https://example.com:443/callback
+<port_variation_uri> = http://example.com:8080/callback
+<port_variation_uri> = https://example.com:8443/callback
+
+# Case normalization (WHATWG lowercases scheme+host, raw string doesn't)
+<case_variation_uri> = HTTP://example.com/callback
+<case_variation_uri> = http://Example.COM/callback
+<case_variation_uri> = http://EXAMPLE.COM/callback
+<case_variation_uri> = Http://Example.Com/callback
+<case_variation_uri> = https://Example.Com/Callback
+
+# Percent-encoding normalization
+<encoding_variation_uri> = http://example.com/%63allback
+<encoding_variation_uri> = http://example.com/call%62ack
+<encoding_variation_uri> = http://example.com/%63%61llback
+<encoding_variation_uri> = http://example.com/callback%2F
+<encoding_variation_uri> = http://example.com/callback%3F
+
+# Path variations
+<path_variation_uri> = http://example.com/callback/
+<path_variation_uri> = http://example.com/callback/.
+<path_variation_uri> = http://example.com/callback/./
+<path_variation_uri> = http://example.com/other/../callback
+<path_variation_uri> = http://example.com//callback
+<path_variation_uri> = http://example.com/Callback
+
+# Fragment injection (RFC 6749 §3.1.2: MUST NOT include fragment)
+<fragment_uri> = http://example.com/callback#
+<fragment_uri> = http://example.com/callback#evil
+<fragment_uri> = http://example.com/callback#access_token=stolen
+<fragment_uri> = https://example.com/callback%23fragment
+
+# Loopback variations (RFC 8252: native apps may use different ports)
+<loopback_uri> = http://127.0.0.1/callback
+<loopback_uri> = http://127.0.0.1:3000/callback
+<loopback_uri> = http://127.0.0.1:9999/callback
+<loopback_uri> = http://[::1]/callback
+<loopback_uri> = http://[::1]:3000/callback
+<loopback_uri> = http://localhost/callback
+<loopback_uri> = http://localhost:9999/callback
+<loopback_uri> = http://[0:0:0:0:0:0:0:1]/callback
+
+# Attack URIs (open redirect attempts)
+<attack_uri> = http://evil.com/callback
+<attack_uri> = http://example.com.evil.com/callback
+<attack_uri> = http://example.com@evil.com/callback
+<attack_uri> = http://example.com%40evil.com/callback
+<attack_uri> = http://example.com\@evil.com/callback
+<attack_uri> = javascript://example.com/callback%0aalert(1)
+<attack_uri> = data:text/html,<script>alert(1)</script>
+<attack_uri> = //evil.com/callback
+
+# ── URL diff fuzzing derived patterns (S53-S54) ──────────────────
+<candidate_uri> = <unicode_uri>
+<candidate_uri> = <ip_encoding_uri>
+<candidate_uri> = <double_encoding_uri>
+<candidate_uri> = <control_char_uri>
+
+# Unicode character attacks (S53 findings)
+<unicode_uri> = http://example%ef%bc%a0evil.com/callback
+<unicode_uri> = http://evil.com%ef%bc%a0example.com/callback
+<unicode_uri> = http://example%e2%80%8b.com/callback
+<unicode_uri> = http://example%c0%aecom/callback
+<unicode_uri> = http://example.com%ef%bc%8fcallback
+<unicode_uri> = http://evil%e2%80%8b.com/callback
+
+# IP encoding (S50-S54: SSRF host confusion)
+<ip_encoding_uri> = http://0x7f000001/callback
+<ip_encoding_uri> = http://0177.0.0.1/callback
+<ip_encoding_uri> = http://2130706433/callback
+<ip_encoding_uri> = http://127.1/callback
+<ip_encoding_uri> = http://[::ffff:127.0.0.1]/callback
+<ip_encoding_uri> = http://0x7f%2e0%2e0%2e1/callback
+
+# Double/overlong encoding (S53 findings)
+<double_encoding_uri> = http://example%252ecom/callback
+<double_encoding_uri> = http://example.com/callback%252f..
+<double_encoding_uri> = http://example%c0%aecom/callback
+<double_encoding_uri> = http://example.com/..%c0%af../callback
+
+# Control characters in host (URL S54)
+<control_char_uri> = http://example.com%0d.evil.com/callback
+<control_char_uri> = http://example.com%0a.evil.com/callback
+<control_char_uri> = http://example%09.com/callback
+<control_char_uri> = http://example.com/callback;param=value
+<control_char_uri> = http://example.com;evil.com/callback
+
+# ── scope inputs ──────────────────────────────────────────────────
+
+<scope_input> = {"type":"scope","granted":"<scope_string>","requested":"<scope_string>"}
+
+<scope_string> = <basic_scope>
+<scope_string> = <multi_scope>
+<scope_string> = <edge_scope>
+<scope_string> = <hierarchic_scope>
+
+# Basic single scopes
+<basic_scope> = openid
+<basic_scope> = profile
+<basic_scope> = email
+<basic_scope> = read
+<basic_scope> = write
+<basic_scope> = admin
+
+# Multiple scopes (space-separated per RFC 6749 §3.3)
+<multi_scope> = openid profile
+<multi_scope> = openid profile email
+<multi_scope> = read write
+<multi_scope> = openid profile email address phone
+
+# Edge cases for scope parsing
+<edge_scope> = openid  profile
+<edge_scope> = openid   profile
+<edge_scope> =  openid profile
+<edge_scope> = openid profile
+<edge_scope> = openid\tprofile
+<edge_scope> = openid\nprofile
+<edge_scope> =
+<edge_scope> =
+<edge_scope> = openid profile openid
+
+# Hierarchic scopes (fosite supports dot-separated hierarchy)
+<hierarchic_scope> = api.read
+<hierarchic_scope> = api.write
+<hierarchic_scope> = api.read api.write
+<hierarchic_scope> = api
+<hierarchic_scope> = api.users.read
+<hierarchic_scope> = api.users
+<hierarchic_scope> = admin.users.delete
+
+# ── PKCE inputs (RFC 7636) ───────────────────────────────────────
+
+<pkce_input> = {"type":"pkce","method":"<pkce_method>","verifier":"<pkce_verifier>","challenge":"<pkce_challenge>"}
+<pkce_input> = {"type":"pkce","method":"<pkce_method>","verifier":"<pkce_verifier>"}
+<pkce_input> = {"type":"pkce","verifier":"<pkce_verifier>","challenge":"<pkce_challenge>"}
+<pkce_input> = {"type":"pkce","verifier":"<pkce_verifier>"}
+<pkce_input> = {"type":"pkce"}
+
+# Method variations
+<pkce_method> = S256
+<pkce_method> = plain
+<pkce_method> = s256
+<pkce_method> = Plain
+<pkce_method> = PLAIN
+<pkce_method> = S384
+<pkce_method> =
+
+# Valid verifiers (43-128 chars from [A-Za-z0-9\-._~])
+<pkce_verifier> = dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+<pkce_verifier> = E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+<pkce_verifier> = abcdefghijklmnopqrstuvwxyz0123456789-._~ABCDE
+<pkce_verifier> = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~
+
+# Edge case verifiers
+<pkce_verifier> = aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+<pkce_verifier> = a
+<pkce_verifier> =
+<pkce_verifier> = abc+def/ghi=jkl0123456789012345678901234567890
+
+# Challenges (pre-computed or mismatched)
+<pkce_challenge> = E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+<pkce_challenge> = E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM=
+<pkce_challenge> = ZtNPunH49FD35FWYhT5Tv8I7vRKQJ8uxMaL0_9eHjNA
+<pkce_challenge> = ZtNPunH49FD35FWYhT5Tv8I7vRKQJ8uxMaL0_9eHjNA=
+<pkce_challenge> = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+<pkce_challenge> = dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk
+
+# ── token_request inputs (server-side parameter validation) ───────
+
+<token_request_input> = {"type":"token_request","grant_type":"<grant_type>","code":"<auth_code>","redirect_uri":"<base_uri>","client_id":"<client_id>","client_secret":"<client_secret>","scope":"<scope_string>"}
+<token_request_input> = {"type":"token_request","grant_type":"<grant_type>","code":"<auth_code>","redirect_uri":"<base_uri>","client_id":"<client_id>","client_secret":"<client_secret>","scope":"<scope_string>","code_verifier":"<pkce_verifier>"}
+
+<grant_type> = authorization_code
+<grant_type> = Authorization_Code
+<grant_type> = AUTHORIZATION_CODE
+<grant_type> = refresh_token
+<grant_type> = client_credentials
+<grant_type> = password
+<grant_type> =
+<grant_type> = urn:ietf:params:oauth:grant-type:device_code
+<grant_type> = urn:ietf:params:oauth:grant-type:jwt-bearer
+
+<auth_code> = SplxlOBezQQYbYS6WxSbIA
+<auth_code> = abc123
+<auth_code> = a
+<auth_code> =
+<auth_code> = abc%2Fdef%3Dghi
+
+<client_id> = testclient
+<client_id> = s6BhdRkqt3
+<client_id> = client:with:colons
+<client_id> = client with space
+
+<client_secret> = secret
+<client_secret> = 7Fjfp0ZBr1KtDRbnfVdmIw
+<client_secret> =
+
+# ── token_response inputs (client-side response parsing) ──────────
+
+<token_response_input> = {"type":"token_response","status_code":<status_code>,"body":"<token_body>","requested_scope":"<scope_string>"}
+
+<status_code> = 200
+<status_code> = 400
+<status_code> = 401
+<status_code> = 500
+
+<token_body> = {\"access_token\":\"2YotnFZFEjr1zCsicMWpAA\",\"token_type\":\"<bearer_case>\",\"expires_in\":<expires_in>,\"scope\":\"<scope_string>\"}
+<token_body> = {\"error\":\"<error_code>\",\"error_description\":\"<error_desc>\"}
+<token_body> = {\"access_token\":\"tok\",\"token_type\":\"<bearer_case>\",\"expires_in\":<expires_in>}
+<token_body> =
+<token_body> = {access_token: tok}
+
+<bearer_case> = Bearer
+<bearer_case> = bearer
+<bearer_case> = BEARER
+<bearer_case> = mac
+<bearer_case> =  Bearer
+
+<expires_in> = 3600
+<expires_in> = \"3600\"
+<expires_in> = -1
+<expires_in> = 0
+<expires_in> = 3600.5
+<expires_in> = null
+<expires_in> = 999999999999
+
+<error_code> = invalid_grant
+<error_code> = invalid_client
+<error_code> = server_error
+<error_code> = invalid_request
+
+<error_desc> = code expired
+<error_desc> = bad client
+<error_desc> =
+
+# ── token_exchange inputs (RFC 6749 §4.1.3 redirect_uri revalidation) ──
+
+<token_exchange_input> = {"type":"token_exchange","registered":["<base_uri>"],"auth_redirect_uri":"<base_uri>","token_redirect_uri":"<te_candidate_uri>","grant_type":"authorization_code","code":"SplxlOBezQQYbYS6WxSbIA"}
+<token_exchange_input> = {"type":"token_exchange","registered":["<base_uri>"],"auth_redirect_uri":"<base_uri>","grant_type":"authorization_code","code":"SplxlOBezQQYbYS6WxSbIA"}
+
+<te_candidate_uri> = <base_uri>
+<te_candidate_uri> = <port_variation_uri>
+<te_candidate_uri> = <case_variation_uri>
+<te_candidate_uri> = <encoding_variation_uri>
+<te_candidate_uri> = <path_variation_uri>
+
+# ── DPoP proof inputs (RFC 9449) ───────────────────────────────────
+
+<dpop_proof_input> = {"type":"dpop_proof","proof_jwt":"<dpop_jwt>","http_method":"<dpop_http_method>","http_uri":"<dpop_uri>","access_token":"<dpop_access_token>"}
+<dpop_proof_input> = {"type":"dpop_proof","proof_jwt":"<dpop_jwt>","http_method":"<dpop_http_method>","http_uri":"<dpop_uri>","access_token":"<dpop_access_token>","server_nonce":"<dpop_nonce>"}
+
+<dpop_http_method> = POST
+<dpop_http_method> = GET
+<dpop_http_method> = PUT
+<dpop_http_method> = DELETE
+
+<dpop_uri> = https://example.com/token
+<dpop_uri> = https://example.com/resource
+<dpop_uri> = https://Example.COM/token
+<dpop_uri> = https://example.com:443/token
+
+<dpop_access_token> = 2YotnFZFEjr1zCsicMWpAA
+<dpop_access_token> = tok123
+
+<dpop_nonce> = server-nonce-abc
+<dpop_nonce> = eyJ0eXAiOiJkcG9wK2p3dCJ9
+
+# Pre-built minimal DPoP JWT (header.payload.signature)
+# These are structurally valid JWTs for grammar generation; mutator handles variations
+<dpop_jwt> = eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IkVTMjU2In0.eyJodG0iOiJQT1NUIiwiaHR1IjoiaHR0cHM6Ly9leGFtcGxlLmNvbS90b2tlbiIsImlhdCI6MTcwOTAwMDAwMCwianRpIjoiYWJjMTIzIn0.AAAA
+<dpop_jwt> = eyJ0eXAiOiJkcG9wK2p3dCIsImFsZyI6IlJTMjU2In0.eyJodG0iOiJHRVQiLCJodHUiOiJodHRwczovL2V4YW1wbGUuY29tL3Jlc291cmNlIiwiaWF0IjoxNzA5MDAwMDAwLCJqdGkiOiJkZWYxMjMifQ.BBBB

@@ -1,0 +1,8 @@
+query SearchAll {
+  search(query: "admin") {
+    __typename
+    ... on User { id name role }
+    ... on Post { id title status }
+    ... on Comment { id text }
+  }
+}

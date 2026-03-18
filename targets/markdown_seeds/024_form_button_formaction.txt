@@ -1,0 +1,2 @@
+<form><button formaction="javascript:alert(1)">submit</button></form>
+<form id="f1"><input type="submit" formaction="javascript:alert(1)" value="go"></form>

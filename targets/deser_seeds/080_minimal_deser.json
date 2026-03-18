@@ -1,0 +1,20 @@
+{
+  "chain_type": "Minimal valid deserialization — no gadgets, baseline for filter testing",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject (benign)",
+  "links": [
+    {
+      "class": "java.lang.String",
+      "field_overrides": {
+        "value": "hello"
+      }
+    },
+    {
+      "class": "java.lang.Integer",
+      "field_overrides": {
+        "value": 42
+      }
+    }
+  ],
+  "sink_method": "none"
+}

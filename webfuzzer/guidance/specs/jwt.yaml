@@ -1,0 +1,173 @@
+protocol: jwt
+version: "RFC 7515/7519/7518/7797"
+
+checkpoints:
+  sig_verify:
+    description: "Signature verification (HMAC/RSA/EC verify call)"
+    rfc: "RFC 7515 §5.2"
+    severity: critical
+    taint_sources: ["header.alg"]
+    detection_patterns:
+      - '\\.verify\s*\('
+      - 'compare_digest'
+      - '_verify_signature'
+      - 'verify_signature'
+      - 'InvalidSignatureError'
+      - 'BadSignatureError'
+      - 'InvalidJWSSignature'
+
+  alg_allowlist:
+    description: "Algorithm restricted to explicit allowlist"
+    rfc: "RFC 7515 §4.1.1"
+    severity: critical
+    taint_sources: ["header.alg"]
+    detection_patterns:
+      - 'algorithms?\b.*\bnot\s+in\b'
+      - 'allowed_alg'
+      - 'InvalidAlgorithmError'
+      - 'UnsupportedAlgorithmError'
+
+  crit_check:
+    description: "Critical header parameter processing and enforcement"
+    rfc: "RFC 7515 §4.1.11"
+    severity: critical
+    taint_sources: ["header.crit"]
+    detection_patterns:
+      - "['\"]crit['\"]"
+      - 'critical'
+      - '_check_crit'
+      - '_process_crit'
+      - '_validate_crit'
+      - 'InvalidCritHeaderParameterNameError'
+
+  key_type_match:
+    description: "Key type validated against algorithm"
+    rfc: "RFC 7518 §3"
+    severity: critical
+    taint_sources: ["header.alg", "header.jwk"]
+    detection_patterns:
+      - 'prepare_key'
+      - 'isinstance.*key'
+      - 'InvalidKeyError'
+      - '_check_key'
+
+  exp_check:
+    description: "Expiration time (exp) claim validation"
+    rfc: "RFC 7519 §4.1.4"
+    severity: high
+    taint_sources: ["payload.exp"]
+    detection_patterns:
+      - "['\"]exp['\"]"
+      - '_validate_exp'
+      - 'ExpiredSignatureError'
+      - 'ExpiredTokenError'
+
+  nbf_check:
+    description: "Not-before (nbf) claim validation"
+    rfc: "RFC 7519 §4.1.5"
+    severity: high
+    taint_sources: ["payload.nbf"]
+    detection_patterns:
+      - "['\"]nbf['\"]"
+      - '_validate_nbf'
+      - 'ImmatureSignatureError'
+
+  aud_check:
+    description: "Audience (aud) claim validation"
+    rfc: "RFC 7519 §4.1.3"
+    severity: high
+    taint_sources: ["payload.aud"]
+    detection_patterns:
+      - "['\"]aud['\"]"
+      - '_validate_aud'
+      - 'InvalidAudienceError'
+
+  iss_check:
+    description: "Issuer (iss) claim validation"
+    rfc: "RFC 7519 §4.1.1"
+    severity: high
+    taint_sources: ["payload.iss"]
+    detection_patterns:
+      - "['\"]iss['\"]"
+      - '_validate_iss'
+      - 'InvalidIssuerError'
+
+  token_type_check:
+    description: "JWS vs JWE disambiguation"
+    rfc: "RFC 7519 §7.2"
+    severity: high
+    taint_sources: ["structure.dot_count", "header.enc"]
+    detection_patterns:
+      - 'JWS.*JWE'
+      - 'JWE.*JWS'
+      - 'dot_count'
+      - 'count.*\.'
+
+  b64_check:
+    description: "Unencoded payload (b64) header processing"
+    rfc: "RFC 7797 §3"
+    severity: high
+    taint_sources: ["header.b64"]
+    detection_patterns:
+      - "['\"]b64['\"]"
+      - 'unencoded'
+      - 'RFC.?7797'
+
+attacker_controlled:
+  - field: "header.alg"
+    type: string
+    mutations:
+      - "none"
+      - "None"
+      - "NONE"
+      - "HS256"
+      - "RS256"
+
+  - field: "header.crit"
+    type: array
+    mutations:
+      - '["token_binding"]'
+      - '["alg"]'
+      - '[]'
+      - '["b64"]'
+
+  - field: "header.b64"
+    type: boolean
+    mutations:
+      - "false"
+      - "0"
+      - '"false"'
+
+  - field: "header.kid"
+    type: string
+    mutations:
+      - "../../../dev/null"
+      - "' UNION SELECT 'secret' --"
+
+  - field: "header.jku"
+    type: url
+    mutations:
+      - "https://evil.com/jwks.json"
+      - "http://169.254.169.254/"
+
+  - field: "header.jwk"
+    type: object
+    mutations:
+      - '{"kty":"RSA","n":"...","e":"AQAB"}'
+
+  - field: "header.cty"
+    type: string
+    mutations:
+      - "JWT"
+      - "application/json"
+
+  - field: "payload.exp"
+    type: integer
+    mutations:
+      - "0"
+      - "9999999999"
+
+  - field: "payload.aud"
+    type: string_or_array
+    mutations:
+      - '["legit","evil"]'

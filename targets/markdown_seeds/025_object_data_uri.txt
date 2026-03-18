@@ -1,0 +1,2 @@
+<object data="data:text/html,<script>alert(1)</script>" type="text/html"></object>
+<object data="javascript:alert(1)">fallback</object>

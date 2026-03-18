@@ -1,0 +1,1 @@
+{ users(page: { offset: 1, limit: 2 }) { id name } }

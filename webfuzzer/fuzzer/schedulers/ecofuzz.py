@@ -82,5 +82,5 @@ class EcoFuzzScheduler:
         successes = self._successes.get(sid, 0)
         if trials > 0:
             reward_rate = successes / trials
-            # Monotonically increasing energy function
-            seed.energy = max(1.0 + reward_rate * 10.0, 0.1)
+            # Monotonically increasing energy function, clamped to [0.1, 10.0]
+            seed.energy = min(max(1.0 + reward_rate * 10.0, 0.1), 10.0)

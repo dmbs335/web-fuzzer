@@ -23,8 +23,9 @@ try {
   const clean = sanitizeHtml(html);
   const result = buildResult(clean);
 
-  const dom2 = new JSDOM(`<body>${clean}</body>`);
-  const reparsed = dom2.window.document.body.innerHTML;
+  const reparseWindow = new JSDOM("<!DOCTYPE html><html><body></body></html>").window;
+  reparseWindow.document.body.innerHTML = clean;
+  const reparsed = reparseWindow.document.body.innerHTML;
   const clean2 = sanitizeHtml(clean);
 
   result.reparsed = reparsed;

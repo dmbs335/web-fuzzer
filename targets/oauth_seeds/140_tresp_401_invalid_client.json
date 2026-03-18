@@ -1,0 +1,1 @@
+{"type": "token_response", "status_code": 401, "body": "{\"error\":\"invalid_client\"}", "requested_scope": "openid"}

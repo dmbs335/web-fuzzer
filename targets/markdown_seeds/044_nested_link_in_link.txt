@@ -1,0 +1,3 @@
+[[inner](javascript:alert(1))](https://example.com)
+[outer [inner](javascript:alert(1)) text](https://safe.example.com)
+[![img](x)](javascript:alert(1))

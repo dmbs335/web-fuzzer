@@ -1,0 +1,8 @@
+```
+safe code
+```
+<img src=x onerror=alert(1)>
+
+```
+more code
+```<script>alert(1)</script>

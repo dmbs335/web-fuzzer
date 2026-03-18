@@ -1,0 +1,1 @@
+{"type":"redirect_uri","registered":["http://example.com:3000/callback"],"candidate":"http://example.com:-1/callback"}

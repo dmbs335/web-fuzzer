@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_connection","driver":"mysql","driver_class":"com.mysql.cj.jdbc.Driver","jdbc_url":"jdbc:mysql://localhost/test","url_params":{"exceptionInterceptors":"com.mysql.cj.exceptions.ExceptionInterceptorChain"},"credentials":{"user":"root","password":""},"pool":"","pool_config":{},"sql_payload":"","deser_properties":{}}

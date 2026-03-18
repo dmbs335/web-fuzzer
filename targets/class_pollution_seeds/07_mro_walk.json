@@ -1,0 +1,12 @@
+{
+  "merge_fn": "recursive_merge",
+  "payload": {
+    "__class__": {
+      "__mro__": {
+        "1": {
+          "debug": true
+        }
+      }
+    }
+  }
+}

@@ -59,14 +59,17 @@ class GrammarMutator:
 
     def mutate(self, inp: Input, corpus: list[Seed]) -> Input:
         tree: DerivationTree | None = inp.metadata.get("tree")
+        if tree is not None and not hasattr(tree, "clone"):
+            tree = None  # stale checkpoint data — not a DerivationTree
 
         if tree is None:
             # No tree available — borrow one from a corpus seed that has one.
             # This avoids discarding valuable file-based seeds entirely.
             for _ in range(min(len(corpus), 10)):
                 donor = self.rng.choice(corpus) if corpus else None
-                if donor and donor.input.metadata.get("tree"):
-                    tree = donor.input.metadata["tree"].clone()
+                dtree = donor.input.metadata.get("tree") if donor else None
+                if dtree is not None and hasattr(dtree, "clone"):
+                    tree = dtree.clone()
                     break
             if tree is None:
                 # Last resort: generate fresh (no tree-bearing seeds in corpus yet)

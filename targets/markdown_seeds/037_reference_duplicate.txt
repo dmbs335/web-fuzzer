@@ -1,0 +1,4 @@
+[click here][ref]
+
+[ref]: javascript:alert(1)
+[ref]: https://safe.example.com

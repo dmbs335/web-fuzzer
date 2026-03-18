@@ -1,0 +1,173 @@
+protocol: saml
+version: "SAML 2.0 / XML-DSig"
+
+checkpoints:
+  xml_sig_verify:
+    description: "XML digital signature verification"
+    rfc: "XML-DSig §3.2"
+    severity: critical
+    taint_sources: ["SignatureValue", "DigestValue"]
+    detection_patterns:
+      - 'verify'
+      - 'validate_sign'
+      - 'check_signature'
+      - 'SignatureError'
+      - 'InvalidSignature'
+      - 'xmldsig'
+      - 'xml_crypto'
+
+  digest_verify:
+    description: "Reference digest verification"
+    rfc: "XML-DSig §3.1.1"
+    severity: critical
+    taint_sources: ["DigestValue", "DigestMethod"]
+    detection_patterns:
+      - 'digest'
+      - 'DigestValue'
+      - 'hash'
+      - 'sha256'
+      - 'sha1'
+
+  reference_uri_validation:
+    description: "Signature Reference URI covers the correct assertion"
+    rfc: "SAML §5.4.2"
+    severity: critical
+    taint_sources: ["Reference.URI", "Assertion.ID"]
+    detection_patterns:
+      - 'Reference.*URI'
+      - 'reference_uri'
+      - 'id_attribute'
+      - 'ID.*match'
+
+  assertion_count_check:
+    description: "Only one assertion processed (XSW prevention)"
+    rfc: "SAML §5.4.2"
+    severity: critical
+    taint_sources: ["assertion_count"]
+    detection_patterns:
+      - 'assertion.*count'
+      - 'len.*assertion'
+      - 'multiple.*assertion'
+      - 'XPath.*Assertion'
+
+  c14n_algorithm_check:
+    description: "Canonicalization algorithm validation"
+    rfc: "XML-DSig §4.3"
+    severity: high
+    taint_sources: ["CanonicalizationMethod.Algorithm"]
+    detection_patterns:
+      - 'c14n'
+      - 'canonical'
+      - 'CanonicalizationMethod'
+      - 'transform'
+
+  nameid_extraction:
+    description: "NameID extraction handles child elements safely"
+    rfc: "SAML Core §2.2.2"
+    severity: critical
+    taint_sources: ["NameID.text", "NameID.children"]
+    detection_patterns:
+      - 'NameID'
+      - 'name_id'
+      - 'nameIdentifier'
+      - 'get_nameid'
+      - 'itertext'
+      - 'textContent'
+
+  schema_validation:
+    description: "XML schema enforcement"
+    rfc: "SAML Core §5"
+    severity: medium
+    taint_sources: ["xml_structure"]
+    detection_patterns:
+      - 'schema'
+      - 'validate.*xml'
+      - 'XMLSchema'
+      - 'lxml.*validate'
+
+  issuer_check:
+    description: "Issuer element validation"
+    rfc: "SAML Core §2.2.5"
+    severity: high
+    taint_sources: ["Issuer.text"]
+    detection_patterns:
+      - 'issuer'
+      - 'Issuer'
+      - 'get_issuer'
+
+  conditions_check:
+    description: "Conditions element validation (NotBefore, NotOnOrAfter, AudienceRestriction)"
+    rfc: "SAML Core §2.5"
+    severity: high
+    taint_sources: ["Conditions.NotBefore", "Conditions.NotOnOrAfter", "AudienceRestriction"]
+    detection_patterns:
+      - 'NotBefore'
+      - 'NotOnOrAfter'
+      - 'AudienceRestriction'
+      - 'validate_timestamps'
+      - 'is_valid'
+
+  replay_prevention:
+    description: "InResponseTo / assertion ID replay prevention"
+    rfc: "SAML Profiles §4.1.4.3"
+    severity: high
+    taint_sources: ["InResponseTo", "Assertion.ID"]
+    detection_patterns:
+      - 'InResponseTo'
+      - 'in_response_to'
+      - 'replay'
+      - 'used_id'
+
+attacker_controlled:
+  - field: "SignatureValue"
+    type: xml_element
+    mutations:
+      - "empty"
+      - "truncated"
+      - "different_assertion"
+
+  - field: "Reference.URI"
+    type: string
+    mutations:
+      - "#injected-id"
+      - ""
+      - "#xpointer(/)"
+
+  - field: "Assertion"
+    type: xml_element
+    mutations:
+      - "duplicate_assertion"
+      - "unsigned_assertion"
+      - "wrapped_assertion"
+
+  - field: "NameID"
+    type: xml_element
+    mutations:
+      - "admin<child/>@evil.com"
+      - "admin<!--comment-->@evil.com"
+      - "admin<?pi?>@evil.com"
+
+  - field: "CanonicalizationMethod.Algorithm"
+    type: string
+    mutations:
+      - "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
+      - "http://www.w3.org/2001/10/xml-exc-c14n#"
+      - "http://evil.com/transform"
+
+  - field: "DigestMethod.Algorithm"
+    type: string
+    mutations:
+      - "http://www.w3.org/2000/09/xmldsig#sha1"
+      - "http://www.w3.org/2001/04/xmlenc#sha256"
+
+  - field: "Conditions.NotBefore"
+    type: datetime
+    mutations:
+      - "2000-01-01T00:00:00Z"
+      - "2099-01-01T00:00:00Z"
+
+  - field: "Issuer"
+    type: string
+    mutations:
+      - "https://evil-idp.com"
+      - ""

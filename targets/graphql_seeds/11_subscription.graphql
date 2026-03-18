@@ -1,0 +1,6 @@
+subscription WatchUsers {
+  userCreated {
+    id name role email
+    createdAt
+  }
+}

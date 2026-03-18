@@ -1,0 +1,12 @@
+{
+  "merge_fn": "recursive_merge_filtered",
+  "payload": {
+    "__class__": {
+      "__init__": {
+        "__globals__": {
+          "os": {"system": "id"}
+        }
+      }
+    }
+  }
+}

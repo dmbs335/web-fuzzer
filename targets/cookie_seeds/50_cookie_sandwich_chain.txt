@@ -1,0 +1,1 @@
+$Version=1,session="absorbed_value; admin=true"; Path=/

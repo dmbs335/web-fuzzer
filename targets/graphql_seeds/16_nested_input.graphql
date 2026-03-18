@@ -1,0 +1,13 @@
+mutation NestedInput {
+  createUser(input: {
+    name: "nested"
+    email: "nested@test.com"
+    profile: {
+      bio: "test bio"
+      avatar: "https://example.com/avatar.png"
+      settings: "{\"theme\": \"dark\", \"lang\": \"en\"}"
+    }
+  }) {
+    id name profile { bio avatar settings }
+  }
+}

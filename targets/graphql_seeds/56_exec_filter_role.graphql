@@ -1,0 +1,1 @@
+{ users(filter: { role: ADMIN }) { id name role } }

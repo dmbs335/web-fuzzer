@@ -1,0 +1,3 @@
+[link](javascript:alert(document.domain&#41;)
+[link](https://example.com/path_(with)_parens_(and)_more)
+[link](javascript:alert(1&#41; "title")

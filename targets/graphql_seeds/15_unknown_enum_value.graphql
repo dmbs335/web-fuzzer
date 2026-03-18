@@ -1,0 +1,5 @@
+query UnknownEnum {
+  users(filter: { role: SUPERADMIN, status: PENDING }) {
+    id name role status
+  }
+}

@@ -44,6 +44,7 @@ class CoverageMap:
 
     bitmap: bytearray = field(default_factory=lambda: bytearray(MAP_SIZE))
     edge_count: int = 0
+    danger_lvl: int = 0  # Max danger level observed (0-6), set by diff_coverage
 
     def has_new_bits(self, other: CoverageMap) -> bool:
         """Return True if *other* contains any edge not in *self*."""
@@ -52,7 +53,7 @@ class CoverageMap:
         for i in range(MAP_SIZE):
             if other.bitmap[i] and not self.bitmap[i]:
                 return True
-            if other.bitmap[i] and _bucket(other.bitmap[i]) != _bucket(self.bitmap[i]):
+            if other.bitmap[i] and _bucket(other.bitmap[i]) > _bucket(self.bitmap[i]):
                 return True
         return False
 
@@ -77,7 +78,7 @@ class CoverageMap:
         return {i for i, b in enumerate(self.bitmap) if b}
 
     def clone(self) -> CoverageMap:
-        return CoverageMap(bitmap=bytearray(self.bitmap), edge_count=self.edge_count)
+        return CoverageMap(bitmap=bytearray(self.bitmap), edge_count=self.edge_count, danger_lvl=self.danger_lvl)
 
 
 @dataclass
@@ -117,9 +118,19 @@ class Corpus:
         self._id_index: dict[int, Seed] = {}
         # Per-edge frequency: how many seeds hit each edge
         self.edge_freq: dict[int, int] = {}
+        # Running total of input bytes (avoids O(N) sum per corpus update)
+        self._total_bytes: int = 0
+        # Monotonic counter incremented on add/remove — used by entropic
+        # scheduler to skip energy recomputation when corpus is unchanged.
+        self.generation: int = 0
 
     def __len__(self) -> int:
         return len(self.seeds)
+
+    @property
+    def total_bytes(self) -> int:
+        """Total input bytes across all seeds (O(1) via running counter)."""
+        return self._total_bytes
 
     def add(self, inp: Input, coverage: CoverageMap | None = None,
             parent_id: int | None = None, depth: int = 0) -> Seed | None:
@@ -142,6 +153,8 @@ class Corpus:
         self._next_id += 1
         self.seeds.append(seed)
         self._id_index[seed.id] = seed
+        self._total_bytes += len(inp.data)
+        self.generation += 1
 
         # Update edge frequency
         for edge in new_edges:
@@ -165,6 +178,8 @@ class Corpus:
         self._next_id += 1
         self.seeds.append(seed)
         self._id_index[seed.id] = seed
+        self._total_bytes += len(inp.data)
+        self.generation += 1
 
         for edge in new_edges:
             self.edge_freq[edge] = self.edge_freq.get(edge, 0) + 1
@@ -213,6 +228,8 @@ class Corpus:
         self._next_id += 1
         self.seeds.append(seed)
         self._id_index[seed.id] = seed
+        self._total_bytes += len(inp.data)
+        self.generation += 1
 
         for edge in new_edges:
             self.edge_freq[edge] = self.edge_freq.get(edge, 0) + 1
@@ -222,7 +239,9 @@ class Corpus:
     def remove(self, seed_id: int) -> None:
         seed = self._id_index.pop(seed_id, None)
         if seed:
+            self._total_bytes -= len(seed.input.data)
             self.seeds = [s for s in self.seeds if s.id != seed_id]
+            self.generation += 1
 
     def get_by_id(self, seed_id: int) -> Seed | None:
         return self._id_index.get(seed_id)
@@ -266,26 +285,33 @@ class Corpus:
 
         self.seeds = kept
         self._id_index = {s.id: s for s in kept}
+        self._total_bytes = sum(len(s.input.data) for s in kept)
 
-    def compact(self, min_seeds: int = 50) -> int:
+    def compact(self, min_seeds: int = 50, max_seeds: int = 0) -> set[int]:
         """Soft compaction — remove redundant seeds while preserving diversity.
 
         Unlike ``minimize()`` (aggressive set-cover), this keeps seeds
-        that have findings or contribute unique edges. Returns the number
-        of seeds removed.
+        that have findings or contribute unique edges. Returns the set of
+        removed seed IDs (for FeatureStore cleanup).
+
+        Args:
+            min_seeds: Never compact below this count.
+            max_seeds: Hard cap — if corpus exceeds this, aggressively trim.
+                       0 means no hard cap.
 
         Strategy:
           1. Always keep: seeds with findings, or contributing unique edges.
           2. Remove: seeds with empty feature_set and no findings.
-          3. If still over threshold: run greedy minimize but keep at
-             least ``min_seeds``.
+             Size-aware: large seeds (>10KB) removed first.
+          3. If still over max_seeds: remove lowest-value large seeds.
+          4. If still bloated: run greedy minimize.
         """
         if len(self.seeds) <= min_seeds:
-            return 0
+            return set()
 
-        before = len(self.seeds)
+        before_ids = {s.id for s in self.seeds}
 
-        # Phase 1: Remove zero-contribution seeds
+        # Phase 1: Remove zero-contribution seeds (large ones first)
         essential: list[Seed] = []
         removable: list[Seed] = []
         for seed in self.seeds:
@@ -297,16 +323,42 @@ class Corpus:
         if removable:
             self.seeds = essential
             self._id_index = {s.id: s for s in essential}
+            self._total_bytes = sum(len(s.input.data) for s in essential)
 
-        # Phase 2: If still bloated, run greedy minimize
+        # Phase 2: If over max_seeds, remove large low-value seeds
+        if max_seeds and len(self.seeds) > max_seeds:
+            # Score: lower = more likely to remove
+            # Penalize large size, reward unique features and findings
+            def _value(s: Seed) -> float:
+                size_penalty = len(s.input.data) / 1024.0  # KB
+                feature_reward = len(s.feature_set) * 10.0
+                finding_reward = s.finding_count * 50.0
+                return feature_reward + finding_reward - size_penalty
+
+            scored = sorted(self.seeds, key=_value)
+            # Remove lowest-value seeds until under max_seeds
+            to_remove = len(self.seeds) - max_seeds
+            removed = scored[:to_remove]
+            removed_ids_phase2 = {s.id for s in removed}
+            self.seeds = [s for s in self.seeds if s.id not in removed_ids_phase2]
+            self._id_index = {s.id: s for s in self.seeds}
+            self._total_bytes = sum(len(s.input.data) for s in self.seeds)
+
+        # Phase 3: If still bloated, run greedy minimize
         if len(self.seeds) > min_seeds * 4:
             self.minimize()
-            # Ensure we don't go below min_seeds
-            if len(self.seeds) < min_seeds:
-                # Shouldn't happen (minimize covers all edges), but safety check
-                pass
 
-        return before - len(self.seeds)
+        after_ids = {s.id for s in self.seeds}
+        removed_ids = before_ids - after_ids
+
+        # Rebuild edge_freq from surviving seeds to stay in sync.
+        if removed_ids:
+            self.edge_freq.clear()
+            for seed in self.seeds:
+                for edge in (seed.feature_set or set()):
+                    self.edge_freq[edge] = self.edge_freq.get(edge, 0) + 1
+
+        return removed_ids
 
     def save(self, path: Path) -> None:
         """Save corpus to directory (one file per seed)."""
@@ -419,6 +471,7 @@ class Corpus:
         # Restore seeds
         self.seeds.clear()
         self._id_index.clear()
+        self._total_bytes = 0
         if seeds_dir.is_dir():
             for seed_file in sorted(seeds_dir.glob("id_*")):
                 if seed_file.suffix == ".meta":
@@ -449,5 +502,6 @@ class Corpus:
                 )
                 self.seeds.append(seed)
                 self._id_index[seed.id] = seed
+                self._total_bytes += len(data)
 
         return True

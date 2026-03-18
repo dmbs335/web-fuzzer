@@ -1,37 +1,97 @@
 /**
  * js-xss combined mXSS + diff module for persistent wrapper.
  *
- * Outputs BOTH:
- *   - Security signal fields (elements_kept, has_script, ...) for diff coverage
- *   - mXSS fields (reparsed, mxss, idempotency) for mXSS oracle
- *
- * This unified schema enables both differential coverage AND mXSS detection.
+ * Outputs:
+ *   - Security signal fields for sanitized AND reparsed output
+ *   - Near-miss signals (dangerous tag survived but attr stripped)
+ *   - Danger escalation (reparse introduces new danger)
+ *   - mXSS fields (reparsed, mxss, idempotency) for oracle
  */
 "use strict";
 
 const { JSDOM } = require("jsdom");
 const xss = require("xss");
-const { buildResult } = require("./sanitizer_diff_common");
+const { analyzeHtml, buildResult } = require("./sanitizer_diff_common");
+
+const _RECYCLE_EVERY = 500;
+let _reparseWindow = new JSDOM("<!DOCTYPE html><html><body></body></html>").window;
+let _reparseCallCount = 0;
+
+function _getReparseWindow() {
+  if (++_reparseCallCount >= _RECYCLE_EVERY) {
+    _reparseCallCount = 0;
+    _reparseWindow.close();
+    _reparseWindow = new JSDOM("<!DOCTYPE html><html><body></body></html>").window;
+  }
+  return _reparseWindow;
+}
 
 module.exports.sanitize = (html) => {
-  // Step 1: sanitize with js-xss
   const clean = xss(html);
-
-  // Step 2: extract security signals (same as diff targets)
   const result = buildResult(clean);
 
-  // Step 3: double-parse (simulate innerHTML assignment)
-  const dom2 = new JSDOM(`<body>${clean}</body>`);
-  const reparsed = dom2.window.document.body.innerHTML;
+  // Reparse: simulate innerHTML assignment
+  const rw = _getReparseWindow();
+  rw.document.body.innerHTML = clean;
+  const reparsed = rw.document.body.innerHTML;
 
-  // Step 4: idempotency check
+  // Idempotency check
   const clean2 = xss(clean);
 
-  // Detect differences
   const mxss = clean !== reparsed;
   const idempotency = clean !== clean2;
 
-  // Build diff details for mXSS
+  // ── Reparsed analysis: detect danger AFTER reparse ──
+  const rAnalysis = analyzeHtml(reparsed);
+  result.r_has_script = rAnalysis.hasScript;
+  result.r_has_event_handler = rAnalysis.hasEventHandler;
+  result.r_has_javascript_uri = rAnalysis.hasJavascriptUri;
+  result.r_has_data_uri = rAnalysis.hasDataUri;
+  result.r_has_svg = rAnalysis.hasSvg;
+  result.r_has_math = rAnalysis.hasMath;
+  result.r_has_style = rAnalysis.hasStyle;
+  result.r_has_iframe = rAnalysis.hasIframe;
+  result.r_has_noscript = rAnalysis.hasNoscript;
+  result.r_elements = rAnalysis.elements;
+  result.r_ns_transitions = rAnalysis.nsTransitions;
+  result.r_max_depth = rAnalysis.maxDepth;
+
+  // ── Danger escalation: did reparse introduce new danger? ──
+  // This is THE signal — sanitizer thought safe, but reparse makes dangerous.
+  result.danger_escalation = (
+    (!result.has_script && rAnalysis.hasScript) ||
+    (!result.has_event_handler && rAnalysis.hasEventHandler) ||
+    (!result.has_javascript_uri && rAnalysis.hasJavascriptUri) ||
+    (!result.has_iframe && rAnalysis.hasIframe) ||
+    (!result.has_object_embed && rAnalysis.hasObjectEmbed)
+  );
+
+  // ── Near-miss signals: sanitizer allowed the tag but stripped the danger ──
+  // These guide the fuzzer to explore attribute/value variations of surviving tags.
+  const elems = new Set(result.elements_kept);
+  result.near_miss_img = elems.has("img") && !result.has_event_handler;
+  result.near_miss_a_href = elems.has("a") && !result.has_javascript_uri;
+  result.near_miss_style = elems.has("style");
+  result.near_miss_form = elems.has("form");
+  result.near_miss_svg = result.has_svg && !result.has_script;
+  result.near_miss_math = result.has_math && !result.has_script;
+
+  // ── New elements after reparse (not in sanitized) ──
+  const rElems = new Set(rAnalysis.elements);
+  const newElems = [...rElems].filter(e => !elems.has(e));
+  result.new_elements_after_reparse = newElems;
+
+  // ── Security-relevant mXSS (filter out benign entity/whitespace diffs) ──
+  result.mxss_security = mxss && (
+    result.danger_escalation ||
+    newElems.length > 0 ||
+    rAnalysis.nsTransitions !== (result.ns_transitions || 0) ||
+    rAnalysis.hasScript !== result.has_script ||
+    rAnalysis.hasEventHandler !== result.has_event_handler ||
+    rAnalysis.hasJavascriptUri !== result.has_javascript_uri
+  );
+
+  // Standard mXSS diff
   let mxssDiff = null;
   if (mxss) {
     let diffPos = 0;
@@ -62,7 +122,6 @@ module.exports.sanitize = (html) => {
     };
   }
 
-  // Merge: security signals + mXSS fields
   result.reparsed = reparsed;
   result.resanitized = clean2;
   result.mxss = mxss;

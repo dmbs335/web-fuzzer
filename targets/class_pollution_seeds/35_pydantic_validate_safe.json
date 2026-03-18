@@ -1,0 +1,1 @@
+{"model":"user","method":"validate","payload":{"is_admin":true,"role":"admin"}}

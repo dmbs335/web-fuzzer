@@ -1,0 +1,1 @@
+{ node(id: "3") { id ... on User { name email role } } }

@@ -1,0 +1,4 @@
+<base href="https://evil.com/">
+
+[click here](page.html)
+![logo](logo.png)

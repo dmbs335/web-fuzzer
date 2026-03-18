@@ -1,5 +1,6 @@
 """Tests for the fuzzer framework — protocols, corpus, mutators, schedulers, oracles."""
 
+import json
 import pytest
 import random
 
@@ -7,6 +8,13 @@ from webfuzzer.fuzzer.protocols import (
     Input, ExecutionResult, Finding, Severity, ScheduleResult,
 )
 from webfuzzer.fuzzer.corpus import CoverageMap, Seed, Corpus, MAP_SIZE
+
+
+def _first(result):
+    """Unwrap list or single Finding from compare()/check() for test assertions."""
+    if isinstance(result, list):
+        return result[0]
+    return result
 
 
 # ── CoverageMap tests ────────────────────────────────────────────
@@ -128,8 +136,8 @@ class TestCorpus:
         corpus.force_add(self._make_input(b"empty"))
         corpus.force_add(self._make_input(b"empty2"))
         assert len(corpus) == 3
-        removed = corpus.compact(min_seeds=1)
-        assert removed == 2
+        removed_ids = corpus.compact(min_seeds=1)
+        assert len(removed_ids) == 2
         assert len(corpus) == 1
         assert corpus.seeds[0].input.data == b"good"
 
@@ -142,14 +150,14 @@ class TestCorpus:
         corpus.force_add(self._make_input(b"edges"), self._make_coverage(5))
         # Truly empty seed
         corpus.force_add(self._make_input(b"empty"))
-        removed = corpus.compact(min_seeds=1)
-        assert removed == 1  # only the empty one removed
+        removed_ids = corpus.compact(min_seeds=1)
+        assert len(removed_ids) == 1  # only the empty one removed
         assert len(corpus) == 2
 
     def test_compact_noop_when_small(self):
         corpus = Corpus()
         corpus.force_add(self._make_input(b"s1"))
-        assert corpus.compact(min_seeds=50) == 0
+        assert corpus.compact(min_seeds=50) == set()
 
     # ── add_finding_seed tests ─────────────────────────────────
 
@@ -736,6 +744,137 @@ class TestXssOracle:
         assert finding is None
 
 
+class TestMxssOracle:
+    """Tests for mXSS oracle _has_dangerous_pattern (DOM-level detection)."""
+
+    def test_detects_real_event_handler(self):
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        assert _has_dangerous_pattern('<img src=x onerror=alert(1)>') == "event handler"
+
+    def test_detects_script_tag(self):
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        assert _has_dangerous_pattern('<script>alert(1)</script>') == "script element"
+
+    def test_detects_javascript_uri(self):
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        assert _has_dangerous_pattern('<a href="javascript:alert(1)">click</a>') == "javascript URI"
+
+    def test_detects_iframe(self):
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        assert _has_dangerous_pattern('<iframe src="http://evil.com"></iframe>') == "iframe element"
+
+    def test_ignores_event_handler_in_attr_value(self):
+        """FP fix: onerror inside attribute value is not a real event handler."""
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        # This was the exact FP pattern from session findings
+        assert _has_dangerous_pattern(
+            '<form id="x &lt;img src=x onerror=alert(1)&gt;"></form>'
+        ) is None
+
+    def test_ignores_script_in_attr_value(self):
+        """FP fix: <script> text inside attribute value is not a real tag."""
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        assert _has_dangerous_pattern(
+            '<div title="<script>alert(1)</script>">safe</div>'
+        ) is None
+
+    def test_safe_html_returns_none(self):
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        assert _has_dangerous_pattern('<div><span>hello</span></div>') is None
+        assert _has_dangerous_pattern('') is None
+        assert _has_dangerous_pattern('<p>text</p>') is None
+
+    def test_detects_data_uri(self):
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        result = _has_dangerous_pattern('<embed src="data:text/html,<script>alert(1)</script>">')
+        assert result is not None  # embed element or data:text/html URI
+
+    def test_malformed_html_no_crash(self):
+        """Malformed HTML should not crash, just return None or a finding."""
+        from webfuzzer.fuzzer.oracles.mxss_oracle import _has_dangerous_pattern
+
+        # Should not raise
+        _has_dangerous_pattern('<<<>>><<<')
+        _has_dangerous_pattern('<div attr="unclosed')
+        _has_dangerous_pattern('')
+
+
+    def test_browser_mxss_critical_on_dangerous(self):
+        """Browser mXSS with dangerous pattern in browser_reparsed → CRITICAL."""
+        from webfuzzer.fuzzer.oracles.mxss_oracle import MxssOracle
+
+        oracle = MxssOracle()
+        inp = Input(data=b"<div>test</div>")
+        # Simulate browser target output where browser re-parse introduces onerror
+        output = json.dumps({
+            "sanitized": "<div>safe</div>",
+            "reparsed": "<div>safe</div>",
+            "resanitized": "<div>safe</div>",
+            "mxss": False,
+            "idempotency": False,
+            "browser_reparsed": '<div><img src=x onerror=alert(1)></div>',
+            "browser_mxss": True,
+            "browser_parser_diff": True,
+            "cascade_mxss": False,
+        }).encode()
+        result = ExecutionResult(exit_code=0, stdout=output)
+        finding = oracle.check(inp, result)
+        assert finding is not None
+        assert finding.severity == Severity.CRITICAL
+        assert "Browser mXSS" in finding.title
+        assert "event handler" in finding.title
+
+    def test_browser_mxss_structural_high(self):
+        """Browser mXSS without dangerous pattern + parser diff → HIGH."""
+        from webfuzzer.fuzzer.oracles.mxss_oracle import MxssOracle
+
+        oracle = MxssOracle()
+        inp = Input(data=b"<div>test</div>")
+        output = json.dumps({
+            "sanitized": "<div><div>safe</div></div>",
+            "reparsed": "<div><div>safe</div></div>",
+            "resanitized": "<div><div>safe</div></div>",
+            "mxss": False,
+            "idempotency": False,
+            "browser_reparsed": "<div></div><div>safe</div>",
+            "browser_mxss": True,
+            "browser_parser_diff": True,
+            "cascade_mxss": False,
+        }).encode()
+        result = ExecutionResult(exit_code=0, stdout=output)
+        finding = oracle.check(inp, result)
+        assert finding is not None
+        assert finding.severity == Severity.HIGH
+        assert "parser differential" in finding.title
+
+    def test_no_browser_fields_falls_through(self):
+        """Without browser fields, oracle uses JSDOM mxss as before."""
+        from webfuzzer.fuzzer.oracles.mxss_oracle import MxssOracle
+
+        oracle = MxssOracle()
+        inp = Input(data=b"<div>test</div>")
+        output = json.dumps({
+            "sanitized": "<div>safe</div>",
+            "reparsed": "<div>changed</div>",
+            "resanitized": "<div>safe</div>",
+            "mxss": True,
+            "idempotency": False,
+        }).encode()
+        result = ExecutionResult(exit_code=0, stdout=output)
+        finding = oracle.check(inp, result)
+        assert finding is not None
+        assert "mXSS" in finding.title
+        assert finding.metadata["category"] == "mxss_dom_mutation"
+
+
 class TestCompositeOracle:
     def test_chains_oracles(self):
         from webfuzzer.fuzzer.oracles.crash_oracle import CrashOracle
@@ -1183,7 +1322,7 @@ class TestDiffStrategy:
 
         finding = strategy.compare(inp, primary, reference, 0)
         assert finding is not None
-        assert finding.severity == Severity.HIGH
+        assert finding.severity == Severity.LOW
         assert "mismatch" in finding.title.lower()
         assert finding.input is inp  # actual input, not empty
 
@@ -1205,9 +1344,9 @@ class TestDiffStrategy:
         primary = ExecutionResult(exit_code=0, stdout=b"result A")
         reference = ExecutionResult(exit_code=0, stdout=b"result B")
 
-        finding = strategy.compare(inp, primary, reference, 0)
-        assert finding is not None
-        assert "output mismatch" in finding.title.lower()
+        findings = strategy.compare(inp, primary, reference, 0)
+        assert findings is not None
+        assert any("output mismatch" in f.title.lower() for f in findings)
 
     def test_output_strategy_ignores_whitespace(self):
         from webfuzzer.fuzzer.oracles.diff_oracle import OutputStrategy
@@ -1291,7 +1430,7 @@ class TestDiffOracle:
         inp = Input(data=b"test")
         primary_result = ExecutionResult(exit_code=0, stdout=b"ok")
 
-        finding = oracle.check(inp, primary_result)
+        finding = _first(oracle.check(inp, primary_result))
         assert finding is not None
         assert finding.oracle_name == "differential"
         assert finding.input is inp
@@ -1305,7 +1444,7 @@ class TestDiffOracle:
         inp = Input(data=b"test")
         primary_result = ExecutionResult(exit_code=0, stdout=b"original")
 
-        finding = oracle.check(inp, primary_result)
+        finding = _first(oracle.check(inp, primary_result))
         assert finding is not None
 
     def test_no_finding_when_identical(self):
@@ -1329,7 +1468,7 @@ class TestDiffOracle:
         inp = Input(data=b"test")
         primary_result = ExecutionResult(exit_code=0, stdout=b"same")
 
-        finding = oracle.check(inp, primary_result)
+        finding = _first(oracle.check(inp, primary_result))
         assert finding is not None
         # Should be ref[1] that triggered it
         assert finding.metadata.get("ref_index") == 1
@@ -1363,7 +1502,7 @@ class TestDiffOracle:
         primary_result = ExecutionResult(exit_code=0, stdout=b"ok")
 
         # Should detect divergence (primary ok, ref crashed)
-        finding = oracle.check(inp, primary_result)
+        finding = _first(oracle.check(inp, primary_result))
         assert finding is not None
 
 
@@ -1484,7 +1623,7 @@ class TestDiffE2EWithMockTargets:
         inp2 = Input(data=b"input2")
         diff_json = b'{"scheme":"https","host":"evil.com","path":"/admin"}'
         primary2 = ExecutionResult(exit_code=0, stdout=diff_json)
-        finding = oracle.check(inp2, primary2)
+        finding = _first(oracle.check(inp2, primary2))
         assert finding is not None
         assert finding.oracle_name == "differential"
         cov2 = coverage.collect_diff(inp2, primary2)
@@ -1681,3 +1820,110 @@ class TestEngineCheckpoint:
 
         assert len(engine2.corpus) == original_seeds
         assert engine2.stats.total_edges == original_edges
+
+
+# ── DangerBooster tests ──────────────────────────────────────────
+
+
+class TestDangerBooster:
+    def _make_corpus_with_lineage(self):
+        """Create a corpus with grandparent → parent → child lineage."""
+        corpus = Corpus()
+        inp = Input(data=b"test")
+        gp = corpus.force_add(inp)  # grandparent (id=0)
+        parent = corpus.force_add(inp)  # parent (id=1)
+        parent.parent_id = gp.id
+        child = corpus.force_add(inp)  # child placeholder (id=2)
+        child.parent_id = parent.id
+        return corpus, gp, parent, child
+
+    def test_basic_boost(self):
+        """Danger >= 2 boosts parent priority."""
+        from webfuzzer.fuzzer.schedulers.danger_booster import DangerBooster
+        booster = DangerBooster()
+        corpus = Corpus()
+        seed = corpus.force_add(Input(data=b"x"))
+        assert seed.priority_boost == 1.0
+
+        booster.on_execution(seed, 3, corpus)
+        assert seed.priority_boost == 3.0  # boost_table[3] = 3.0
+
+    def test_no_boost_below_threshold(self):
+        """Danger < 2 does not boost."""
+        from webfuzzer.fuzzer.schedulers.danger_booster import DangerBooster
+        booster = DangerBooster()
+        corpus = Corpus()
+        seed = corpus.force_add(Input(data=b"x"))
+
+        booster.on_execution(seed, 0, corpus)
+        assert seed.priority_boost == 1.0
+        booster.on_execution(seed, 1, corpus)
+        assert seed.priority_boost == 1.0
+
+    def test_escalation_only(self):
+        """Same danger level does not re-boost."""
+        from webfuzzer.fuzzer.schedulers.danger_booster import DangerBooster
+        booster = DangerBooster()
+        corpus = Corpus()
+        seed = corpus.force_add(Input(data=b"x"))
+
+        booster.on_execution(seed, 3, corpus)
+        boost_after_first = seed.priority_boost
+        booster.on_execution(seed, 3, corpus)  # same level
+        assert seed.priority_boost == boost_after_first  # no change
+
+        booster.on_execution(seed, 4, corpus)  # escalation
+        assert seed.priority_boost > boost_after_first  # boosted further
+
+    def test_ancestor_propagation(self):
+        """Boost propagates to grandparent with decay."""
+        from webfuzzer.fuzzer.schedulers.danger_booster import DangerBooster
+        booster = DangerBooster()
+        corpus, gp, parent, _child = self._make_corpus_with_lineage()
+
+        booster.on_execution(parent, 4, corpus)  # danger=4, boost=5.0
+
+        assert parent.priority_boost == 5.0
+        # grandparent gets 5.0 * 0.5 = 2.5
+        assert gp.priority_boost == pytest.approx(2.5, rel=0.01)
+
+    def test_decay(self):
+        """Priority decays after many execs without escalation."""
+        from webfuzzer.fuzzer.schedulers.danger_booster import DangerBooster, DangerBoostConfig
+        config = DangerBoostConfig(decay_halflife_execs=100)
+        booster = DangerBooster(config=config)
+        corpus = Corpus()
+        seed = corpus.force_add(Input(data=b"x"))
+
+        booster.on_execution(seed, 4, corpus)
+        assert seed.priority_boost == 5.0
+
+        # Simulate 100 execs (one halflife)
+        seed.exec_count = 100
+        booster.apply_decay(corpus)
+        # After one halflife: 1.0 + (5.0 - 1.0) * 0.5 = 3.0
+        assert seed.priority_boost == pytest.approx(3.0, rel=0.05)
+
+    def test_cleanup_removed(self):
+        """Cleanup removes tracking state for removed seeds."""
+        from webfuzzer.fuzzer.schedulers.danger_booster import DangerBooster
+        booster = DangerBooster()
+        corpus = Corpus()
+        seed = corpus.force_add(Input(data=b"x"))
+
+        booster.on_execution(seed, 3, corpus)
+        assert seed.id in booster._seed_max_danger
+
+        booster.cleanup_removed({seed.id})
+        assert seed.id not in booster._seed_max_danger
+
+    def test_max_boost_clamp(self):
+        """Priority boost is clamped to max_boost."""
+        from webfuzzer.fuzzer.schedulers.danger_booster import DangerBooster, DangerBoostConfig
+        config = DangerBoostConfig(max_boost=10.0)
+        booster = DangerBooster(config=config)
+        corpus = Corpus()
+        seed = corpus.force_add(Input(data=b"x"))
+
+        booster.on_execution(seed, 6, corpus)  # boost_table[6] = 20.0
+        assert seed.priority_boost == 10.0  # clamped

@@ -50,7 +50,7 @@ class MapElitesArchive:
         """
         key = self._to_key(category, ref_index)
         existing = self._grid.get(key)
-        if existing is None or len(seed.feature_set) > len(existing.feature_set):
+        if existing is None or len(seed.feature_set or ()) > len(existing.feature_set or ()):
             self._grid[key] = seed
             return True
         return False
@@ -139,5 +139,5 @@ class MapElitesScheduler:
                 )
         else:
             # No finding — bucket by coverage hash into no_finding row.
-            cov_bucket = hash(frozenset(seed.feature_set)) % MAX_REF_INDEX
+            cov_bucket = hash(frozenset(seed.feature_set or ())) % MAX_REF_INDEX
             self.archive.try_insert(seed, "no_finding", cov_bucket)

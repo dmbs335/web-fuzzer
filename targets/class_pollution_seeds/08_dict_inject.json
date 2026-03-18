@@ -1,0 +1,9 @@
+{
+  "merge_fn": "recursive_merge",
+  "payload": {
+    "__dict__": {
+      "admin": true,
+      "role": "superuser"
+    }
+  }
+}

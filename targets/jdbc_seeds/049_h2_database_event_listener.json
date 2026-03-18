@@ -1,0 +1,1 @@
+{"attack_type":"jdbc_exploit","driver":"h2","driver_class":"org.h2.Driver","jdbc_url_base":"jdbc:h2:mem:test","url_params":{"DATABASE_EVENT_LISTENER":"groovy.lang.GroovyShell"},"pool":"none","pool_config":{},"credentials":{"user":"sa","password":""},"sql_payload":null,"sink_type":"class_load","deser_properties":{}}

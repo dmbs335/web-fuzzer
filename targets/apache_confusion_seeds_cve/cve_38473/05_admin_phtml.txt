@@ -1,0 +1,1 @@
+/admin.phtml%3Fooo.php

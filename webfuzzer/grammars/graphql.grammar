@@ -1,0 +1,258 @@
+# =============================================================================
+# GraphQL Query Grammar — generates queries/mutations for differential fuzzing.
+# Targets the common schema (User, Post, Comment, SearchResult, etc.)
+# GraphqlMutator handles domain-specific mutations (directive injection,
+# depth bombs, enum coercion, variable type confusion, etc.)
+# =============================================================================
+
+!root <document>
+!max_depth 6
+
+# A document is one or more definitions
+<document> = <operation>
+<document> = <operation>\n<fragment_def>
+<document> = <operation>\n<fragment_def>\n<fragment_def>
+
+# Operations
+<operation> = <query_op>
+<operation> = <mutation_op>
+<operation> = <subscription_op>
+<operation> = <shorthand_query>
+
+# Shorthand: just selection set (implicit query)
+<shorthand_query> = { <query_selections> }
+
+# Named query
+<query_op> = query <op_name> <variable_defs_opt> <directives_opt> { <query_selections> }
+<query_op> = query <op_name> { <query_selections> }
+<query_op> = query { <query_selections> }
+
+# Named mutation
+<mutation_op> = mutation <op_name> <variable_defs_opt> { <mutation_selections> }
+<mutation_op> = mutation { <mutation_selections> }
+
+# Subscription
+<subscription_op> = subscription <op_name> { <subscription_selections> }
+<subscription_op> = subscription { <subscription_selections> }
+
+<op_name> = GetUser
+<op_name> = GetUsers
+<op_name> = GetPost
+<op_name> = SearchAll
+<op_name> = CreateUser
+<op_name> = UpdateUser
+<op_name> = NodeLookup
+<op_name> = Introspect
+<op_name> = DeepNest
+
+# Variable definitions
+<variable_defs_opt> = (<variable_def_list>)
+<variable_defs_opt> =
+
+<variable_def_list> = <variable_def>
+<variable_def_list> = <variable_def>, <variable_def>
+
+<variable_def> = $id: ID!
+<variable_def> = $id: ID
+<variable_def> = $limit: Int = 10
+<variable_def> = $limit: Int
+<variable_def> = $offset: Int = 0
+<variable_def> = $query: String!
+<variable_def> = $role: Role
+<variable_def> = $role: Role = USER
+<variable_def> = $filter: UserFilter
+<variable_def> = $input: CreateUserInput!
+<variable_def> = $name: String
+<variable_def> = $tags: [String]
+<variable_def> = $score: Float
+
+# Directives on operations/fields
+<directives_opt> = <directive>
+<directives_opt> =
+<directives_opt> = <directive> <directive>
+
+<directive> = @skip(if: <bool_val>)
+<directive> = @include(if: <bool_val>)
+<directive> = @deprecated
+<directive> = @skip(if: $flag)
+
+<bool_val> = true
+<bool_val> = false
+
+# ── Query selections ──────────────────────────────────────────
+<query_selections> = <query_field>
+<query_selections> = <query_field>\n  <query_field>
+<query_selections> = <query_field>\n  <query_field>\n  <query_field>
+
+<query_field> = <user_query>
+<query_field> = <users_query>
+<query_field> = <post_query>
+<query_field> = <search_query>
+<query_field> = <node_query>
+<query_field> = <introspection_query>
+<query_field> = <aliased_query>
+
+# user(id: ...) { ... }
+<user_query> = user(id: <id_val>) { <user_fields> }
+<user_query> = user(id: $id) { <user_fields> }
+
+<users_query> = users <users_args> { <user_fields> }
+
+<users_args> = (filter: { role: <role_val> })
+<users_args> = (filter: { status: <status_val> })
+<users_args> = (filter: { nameContains: <string_val> })
+<users_args> = (filter: { scoreAbove: <float_val> })
+<users_args> = (filter: $filter)
+<users_args> = (page: { limit: <int_val>, offset: <int_val> })
+<users_args> =
+
+<post_query> = post(id: <id_val>) { <post_fields> }
+
+<search_query> = search(query: <string_val>) { <search_fields> }
+<search_query> = search(query: <string_val>, types: [<string_val>]) { <search_fields> }
+<search_query> = search(query: $query) { <search_fields> }
+
+<node_query> = node(id: <id_val>) { <node_fields> }
+
+<introspection_query> = __schema { types { name kind } }
+<introspection_query> = __type(name: <string_val>) { name fields { name type { name } } }
+<introspection_query> = __typename
+
+<aliased_query> = <alias>: user(id: <id_val>) { <user_fields> }
+<aliased_query> = <alias>: <alias>: user(id: <id_val>) { <user_fields> }
+<aliased_query> = a: user(id: "1") { name }\n  b: user(id: "2") { name }
+
+<alias> = myUser
+<alias> = first
+<alias> = second
+<alias> = admin
+<alias> = target
+
+# ── User fields ───────────────────────────────────────────────
+<user_fields> = id name
+<user_fields> = id name email role
+<user_fields> = id name role status score
+<user_fields> = id name tags
+<user_fields> = id name email role status score tags
+<user_fields> = id name profile { <profile_fields> }
+<user_fields> = id name posts <posts_args> { <post_fields> }
+<user_fields> = id name friends { id name }
+<user_fields> = id name friends { id name friends { id name } }
+<user_fields> = id name friends { id name friends { id name friends { id name } } }
+<user_fields> = id name oldField
+<user_fields> = id <user_field_directive>
+<user_fields> = id name createdAt updatedAt
+
+<user_field_directive> = name @skip(if: true)
+<user_field_directive> = name @include(if: false)
+<user_field_directive> = role @skip(if: <bool_val>)
+<user_field_directive> = email @include(if: <bool_val>)
+
+<posts_args> = (limit: <int_val>)
+<posts_args> = (limit: <int_val>, offset: <int_val>)
+<posts_args> = (limit: $limit, offset: $offset)
+<posts_args> =
+
+<profile_fields> = bio avatar
+<profile_fields> = bio settings
+<profile_fields> = bio avatar settings
+
+# ── Post fields ───────────────────────────────────────────────
+<post_fields> = id title
+<post_fields> = id title body status
+<post_fields> = id title author { id name role }
+<post_fields> = id title comments { id text author { id name } }
+<post_fields> = id title metadata
+<post_fields> = id title body status createdAt
+
+# ── Search result fields (union) ─────────────────────────────
+<search_fields> = <search_inline_fragments>
+<search_fields> = __typename <search_inline_fragments>
+<search_fields> = ... SearchFields
+
+<search_inline_fragments> = ... on User { id name role }
+<search_inline_fragments> = ... on User { id name role } ... on Post { id title }
+<search_inline_fragments> = ... on User { id name } ... on Post { id title } ... on Comment { id text }
+
+# ── Node fields (interface) ───────────────────────────────────
+<node_fields> = id
+<node_fields> = id ... on User { name role }
+<node_fields> = id ... on User { name role } ... on Post { title }
+<node_fields> = id __typename
+
+# ── Fragment definitions ──────────────────────────────────────
+<fragment_def> = fragment UserFields on User { id name email role }
+<fragment_def> = fragment PostFields on Post { id title body status }
+<fragment_def> = fragment SearchFields on SearchResult { ... on User { id name } ... on Post { id title } }
+<fragment_def> = fragment UserFull on User { id name email role status score tags profile { bio } }
+<fragment_def> = fragment TimestampFields on Timestamped { createdAt updatedAt }
+<fragment_def> = fragment NodeFields on Node { id __typename }
+
+# ── Mutation selections ───────────────────────────────────────
+<mutation_selections> = <create_user_mutation>
+<mutation_selections> = <update_user_mutation>
+<mutation_selections> = <delete_user_mutation>
+<mutation_selections> = <create_post_mutation>
+
+<create_user_mutation> = createUser(input: <create_user_input>) { id name email role }
+<create_user_mutation> = createUser(input: $input) { id name role }
+
+<create_user_input> = { name: <string_val>, email: <string_val> }
+<create_user_input> = { name: <string_val>, email: <string_val>, role: <role_val> }
+<create_user_input> = { name: <string_val>, email: <string_val>, tags: [<string_val>] }
+<create_user_input> = { name: <string_val>, email: <string_val>, profile: { bio: <string_val> } }
+
+<update_user_mutation> = updateUser(id: <id_val>, name: <string_val>) { id name }
+<update_user_mutation> = updateUser(id: <id_val>, role: <role_val>) { id role }
+
+<delete_user_mutation> = deleteUser(id: <id_val>)
+
+<create_post_mutation> = createPost(authorId: <id_val>, title: <string_val>) { id title }
+
+# ── Subscription selections ───────────────────────────────────
+<subscription_selections> = userCreated { id name role }
+<subscription_selections> = postAdded { id title }
+<subscription_selections> = postAdded(authorId: <id_val>) { id title author { name } }
+
+# ── Literal values ────────────────────────────────────────────
+<id_val> = "1"
+<id_val> = "2"
+<id_val> = "999"
+<id_val> = "user-1"
+<id_val> = ""
+<id_val> = $id
+
+<string_val> = "test"
+<string_val> = "admin"
+<string_val> = "hello world"
+<string_val> = ""
+<string_val> = "user@example.com"
+<string_val> = "<script>alert(1)</script>"
+<string_val> = "User"
+<string_val> = "Post"
+
+<int_val> = 0
+<int_val> = 1
+<int_val> = 5
+<int_val> = 10
+<int_val> = 100
+<int_val> = -1
+<int_val> = 999999
+
+<float_val> = 0.0
+<float_val> = 3.14
+<float_val> = -1.5
+<float_val> = 99.99
+<float_val> = 1e10
+
+<role_val> = ADMIN
+<role_val> = USER
+<role_val> = GUEST
+<role_val> = admin
+<role_val> = Admin
+<role_val> = UNKNOWN_ROLE
+
+<status_val> = ACTIVE
+<status_val> = SUSPENDED
+<status_val> = DELETED
+<status_val> = active

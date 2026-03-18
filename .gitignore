@@ -12,7 +12,7 @@ build/
 *.prof
 
 # Fuzzing output (large, regeneratable)
-results/
+output/
 test_*_output/
 
 # Temp files
@@ -28,6 +28,10 @@ URL_Parser_Findings_Report.html
 
 # Vendored dependencies
 targets/vendor/
+vendor/
+
+# Scratch / temp workspace
+scratch/
 
 # Paper drafts
 paper/
@@ -55,6 +59,20 @@ targets/url_curl.exe
 
 # Research (docs + poc + reports)
 research/
+
+# Root C++ scratch files (WebLogic analysis)
+/*.cpp
+/*.h
+
+# PoC (consolidated into research/)
+poc/
+
+# Analysis scripts & tools
+scripts/
+tools/
+
+# Temp analysis files
+__*.txt
 
 # OS
 .DS_Store

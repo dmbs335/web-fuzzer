@@ -1,0 +1,10 @@
+{
+  "merge_fn": "dict_update_recursive",
+  "payload": {
+    "__class__": {
+      "admin": true,
+      "debug": true,
+      "secret_key": "pwned"
+    }
+  }
+}

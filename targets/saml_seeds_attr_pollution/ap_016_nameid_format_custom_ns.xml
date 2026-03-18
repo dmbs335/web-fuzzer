@@ -1,0 +1,20 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_resp_ap" Version="2.0" IssueInstant="2026-03-14T10:00:00Z" Destination="https://sp.example.com/acs"><saml:Issuer>https://idp.example.com</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status><saml:Assertion Version="2.0" ID="_assert_ap" IssueInstant="2026-03-14T10:00:00Z"><saml:Issuer>https://idp.example.com</saml:Issuer><saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress" custom:Format="evil" xmlns:custom="http://custom.example.com">user@example.com</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData NotOnOrAfter="2026-03-14T11:00:00Z" Recipient="https://sp.example.com/acs"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore="2026-03-14T10:00:00Z" NotOnOrAfter="2026-03-14T11:00:00Z"><saml:AudienceRestriction><saml:Audience>https://sp.example.com</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant="2026-03-14T10:00:00Z" SessionIndex="_session_ap"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement><saml:Attribute Name="role" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:basic"><saml:AttributeValue>user</saml:AttributeValue></saml:Attribute></saml:AttributeStatement><ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo><ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/><ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/><ds:Reference URI="#_assert_ap"><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/><ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/></ds:Transforms><ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/><ds:DigestValue>/psvnBLZymtuDMT5VzFfoWpJGv0JIMwI6ia5K/d+QH0=</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>BWX+exD38bTabe0glYpw5izEpKkD87uRx6fqoVXLq54yzhYW21/jJDXNXZ99Y0ZoycTKrzBKfVTxiVMJP//XD8Z0AheXyQDijoWFQU0Eo8njEscVXhed9ajN3sflLt0Ta2+/4GJqcpfoATO9kQ6kxkkf1Ai2l4bOqpnXEJ+jIph15siVZCxUpcW58Yfwe0V1EI/kLbk65TIaKBTceeijCG5jzSc0iNIge8nsufJ4YcRb8zYLcJuPC5U9xY3cFWyJUvjE97VRUo3J+7oUXh/yg397MXBdA0iVJepenNFz9iYNdnMZjvtwx9G8vMY+P50cs6U2asH4YuAsmfb8pswaAQ==</ds:SignatureValue><ds:KeyInfo><ds:X509Data><ds:X509Certificate>MIIDSTCCAjGgAwIBAgIUZugKXnpmuzTxy1PQC0dzhe5r03AwDQYJKoZIhvcNAQEL
+BQAwPjEeMBwGA1UEAwwVdGVzdC1pZHAuZnV6emVyLmxvY2FsMRwwGgYDVQQKDBNX
+ZWJGdXp6ZXIgU0FNTCBUZXN0MB4XDTI2MDIyODEzMDAxM1oXDTM2MDIyNjEzMDAx
+M1owPjEeMBwGA1UEAwwVdGVzdC1pZHAuZnV6emVyLmxvY2FsMRwwGgYDVQQKDBNX
+ZWJGdXp6ZXIgU0FNTCBUZXN0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKC
+AQEA0m2HlZnYS19iaStejKdjp6D2sHcvEm9ZlE9FMju2qj3XdTOKPna1qmRpWm9L
+OLm0xewM0Tul91XBZXousDo/te3v58OtOI/gwed1PB3Qg4i2OsGu0roa5lVRoXOS
+Qm1B7BOoakCVb51RgeutnC9ScIBZwyfWDGjQBt2jbM+V4pVsRy0ZHE5H+esjSUjP
+p2sQpadyDoS0iHC8jxEHohYCJotvJqcOOpPXC+oMGt1Dqfsuzb9gnx4q5hZXXaoE
+q1ylICxa8heYffrOk8RjK0fIyl0ch67KCi3bpGVhD28GoFTrNDpTnhuDW/xQu8Zk
+BRHVZgaQ5024vUDdkX/XES4mVwIDAQABoz8wPTAMBgNVHRMBAf8EAjAAMA4GA1Ud
+DwEB/wQEAwIHgDAdBgNVHQ4EFgQUyW9NOnyAnWXzRbIONeaJsOW5Em4wDQYJKoZI
+hvcNAQELBQADggEBACQkE3OL+8v+M2QxSdcpV4ou/+F+nZ06Tj3RGMImWnVTxWDy
++o6JIju8cAc1ej3aRtIvLrrjtp4PS47muSvkO2PUHqxnpz1bwR83NTFvGoxNGaej
+oKJj5PoH7NTPrWx0yIj7x+k4CAslRRF+M7VUyoKu0jN0vubFTS5HdiR92bGK5zHe
+1Hdekmd6MLcsQFF0H335bkK0rpAPeEIuG0BbjJD1Srq5qmaNtpKqfxzRcFh6J5hj
+t9D61nssTHzYiFuJB7jm6HLZVhYdGjk6o2rNCLqCThz83ojDCIpFv9U7thzAPYRT
+aF5E8F2LsRM2+KfjGja+N7MNwYrhsiysnruUiCc=
+</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature></saml:Assertion></samlp:Response>

