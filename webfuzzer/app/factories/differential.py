@@ -88,7 +88,10 @@ def configure_differential_oracles(
     elif has_saml:
         from ...fuzzer.oracles.saml_diff_strategy import get_saml_strategies
 
-        strategies = get_saml_strategies(target_count=1 + len(reference_targets))
+        strategies = get_saml_strategies(
+            target_count=1 + len(reference_targets),
+            include_void_c14n=True,
+        )
     elif has_cookie:
         from ...fuzzer.oracles.cookie_diff_strategy import get_cookie_strategies
 

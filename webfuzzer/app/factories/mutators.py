@@ -63,7 +63,7 @@ def build_mutators(
         "deser": lambda: DeserBinaryMutator(seed=seed),
         "deser_ir": lambda: DeserMutator(seed=seed),
         "deser_bin": lambda: DeserBinaryMutator(seed=seed),
-        "jndi": lambda: JndiMutator(seed=seed),
+        "jndi": lambda: JndiMutator(seed=seed, enable_classpath_sweep=True),
         "jdbc": lambda: JdbcMutator(seed=seed),
         "class_pollution": lambda: ClassPollutionMutator(seed=seed),
         "domclobber": lambda: DomClobberMutator(seed=seed),

@@ -16,7 +16,7 @@ Adding a new domain:
 
 from __future__ import annotations
 
-from .domain_model import DangerRung, DomainProfile, compute_danger
+from .domain_model import DangerRung, DomainProfile, _rung_matches, compute_danger
 from .domain_profiles.exploit_profiles import register_profiles as register_exploit_profiles
 from .domain_profiles.foundation_profiles import register_profiles as register_foundation_profiles
 from .domain_profiles.web_input_profiles import register_profiles as register_web_input_profiles

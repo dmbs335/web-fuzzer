@@ -6,8 +6,6 @@ Every component is injected via Protocol interfaces — swap any part freely.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import os
 import random
@@ -16,6 +14,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from .corpus import Corpus, CoverageMap, Seed
+from .browser_queueing import BrowserVerificationService
 from .checkpointing import CheckpointService
 from .command_channel import CommandChannel
 from .coverage.diff_coverage import DiffCoverageCollector
@@ -271,6 +270,7 @@ class FuzzEngine:
         self.import_findings = import_findings or []
         self.resume = resume
         self.checkpoint_interval = checkpoint_interval
+        self._verify_browser_enabled = verify_browser
 
         # Use defaults if not provided
         self.seed_scheduler: SeedScheduler = seed_scheduler or _DefaultSeedScheduler(self.rng)
@@ -308,13 +308,6 @@ class FuzzEngine:
             publisher=self._publisher,
         )
 
-        # Browser verification queue (pub-sub)
-        self._verify_queue = None
-        self._verify_seen: set[str] = set()
-        if verify_browser and output_dir:
-            from .verification_queue import create_verification_queue
-            self._verify_queue = create_verification_queue(output_dir)
-
         # Flat list of all targets for primary rotation in differential mode.
         # Round-robin rotation removes the fixed-primary bias: each target
         # takes turns as "primary" so differentials visible from any
@@ -326,47 +319,7 @@ class FuzzEngine:
         self._target_lib_names: list[str] = [
             extract_lib_name(t) for t in self.all_targets
         ]
-        self._finding_processor = FindingProcessor(
-            oracles=self.oracles,
-            deduplicator=self.deduplicator,
-            publisher=self._publisher,
-            stats=self.stats,
-            guidance_hooks=self._guidance,
-            all_targets=self.all_targets,
-            target_lib_names=self._target_lib_names,
-        )
-        self._runtime_reporting = RuntimeReportingService(
-            stats=self.stats,
-            publisher=self._publisher,
-            output_dir=self.output_dir,
-            guidance_hooks=self._guidance,
-            concolic=self._concolic,
-            corpus=self.corpus,
-            verify_queue=self._verify_queue,
-            all_targets=self.all_targets,
-            running_getter=lambda: self._running,
-            sync_deser_diag=self._sync_deser_diag,
-        )
-        self._checkpoint_service = CheckpointService(
-            output_dir=self.output_dir,
-            corpus=self.corpus,
-            stats=self.stats,
-            rng=self.rng,
-            dedup_exporter=self._export_dedup_seen,
-            dedup_importer=self._import_dedup_seen,
-        )
-        self._maintenance = RuntimeMaintenanceService(
-            corpus=self.corpus,
-            coverage=self.coverage,
-            stats=self.stats,
-            mutators=self.mutators,
-            input_source=self.input_source,
-            seed_scheduler=self.seed_scheduler,
-            danger_booster=self._danger_booster,
-            guidance_hooks=self._guidance,
-            all_targets=self.all_targets,
-            max_corpus_size=self._max_corpus_size,
-        )
+        self._bind_runtime_services()
 
         # Reusable thread pool for reference target execution (avoids
         # per-iteration ThreadPoolExecutor creation/teardown overhead).
@@ -376,6 +329,7 @@ class FuzzEngine:
         """Execute the main fuzzing loop. Returns stats when done."""
         self._running = True
         self.stats = FuzzStats(output_dir=self.output_dir)
+        self._bind_runtime_services()
         self._publisher.publish_status("started")
 
         try:
@@ -408,6 +362,55 @@ class FuzzEngine:
         self._running = False
 
     # ── Internal phases ───────────────────────────────────────────
+
+    def _bind_runtime_services(self) -> None:
+        """Recreate services that hold a direct reference to the active stats."""
+        self._browser_verification = BrowserVerificationService(
+            enabled=self._verify_browser_enabled,
+            output_dir=self.output_dir,
+            stats=self.stats,
+        )
+        self._finding_processor = FindingProcessor(
+            oracles=self.oracles,
+            deduplicator=self.deduplicator,
+            publisher=self._publisher,
+            stats=self.stats,
+            guidance_hooks=self._guidance,
+            all_targets=self.all_targets,
+            target_lib_names=self._target_lib_names,
+        )
+        self._runtime_reporting = RuntimeReportingService(
+            stats=self.stats,
+            publisher=self._publisher,
+            output_dir=self.output_dir,
+            guidance_hooks=self._guidance,
+            concolic=self._concolic,
+            corpus=self.corpus,
+            verify_queue=self._browser_verification.queue,
+            all_targets=self.all_targets,
+            running_getter=lambda: self._running,
+            sync_deser_diag=self._sync_deser_diag,
+        )
+        self._checkpoint_service = CheckpointService(
+            output_dir=self.output_dir,
+            corpus=self.corpus,
+            stats=self.stats,
+            rng=self.rng,
+            dedup_exporter=self._export_dedup_seen,
+            dedup_importer=self._import_dedup_seen,
+        )
+        self._maintenance = RuntimeMaintenanceService(
+            corpus=self.corpus,
+            coverage=self.coverage,
+            stats=self.stats,
+            mutators=self.mutators,
+            input_source=self.input_source,
+            seed_scheduler=self.seed_scheduler,
+            danger_booster=self._danger_booster,
+            guidance_hooks=self._guidance,
+            all_targets=self.all_targets,
+            max_corpus_size=self._max_corpus_size,
+        )
 
     def _setup(self) -> None:
         for i, t in enumerate(self.all_targets):
@@ -477,7 +480,7 @@ class FuzzEngine:
                 self.stats.record_strategies(strategies)
 
             # 4.1. Queue for async browser verification (fire-and-forget)
-            self._maybe_queue_for_browser(mutated_input, result)
+            self._browser_verification.maybe_queue(mutated_input, result)
 
             # 4.5. Execute refs once (cached for coverage + oracles)
             ref_results = self._execute_on_refs(refs, mutated_input)
@@ -724,88 +727,7 @@ class FuzzEngine:
             return self.coverage.collect_diff(inp, result, ref_results=ref_results)
         return self.coverage.collect(result)
 
-    # ── Browser verification queue ────────────────────────────────
 
-    def _maybe_queue_for_browser(self, inp: Input, result: ExecutionResult) -> None:
-        """Queue interesting inputs for async browser verification."""
-        if self._verify_queue is None or not result.stdout:
-            return
-        try:
-            data = json.loads(result.stdout)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return
-
-        if not self._is_browser_interesting(data):
-            return
-
-        input_hash = hashlib.md5(inp.data).hexdigest()
-        if input_hash in self._verify_seen:
-            return
-        self._verify_seen.add(input_hash)
-        # Cap to prevent unbounded set growth
-        if len(self._verify_seen) > 10_000:
-            self._verify_seen.clear()
-
-        from .verification_queue import VerificationItem
-
-        reason = self._get_trigger_reason(data)
-        item = VerificationItem(
-            id=input_hash[:16],
-            input_data=inp.data,
-            jsdom_sanitized=data.get("sanitized", ""),
-            trigger_reason=reason,
-            metadata={
-                k: data.get(k)
-                for k in (
-                    "mxss_security",
-                    "danger_escalation",
-                    "max_depth",
-                    "new_elements_after_reparse",
-                )
-            },
-            session_output_dir=str(self.output_dir) if self.output_dir else "",
-            iteration=self.stats.total_iterations,
-        )
-        try:
-            self._verify_queue.push(item)
-        except Exception as e:
-            logger.debug("Failed to queue for browser verify: %s", e)
-
-    @staticmethod
-    def _is_browser_interesting(data: dict) -> bool:
-        if data.get("mxss_security"):
-            return True
-        if data.get("danger_escalation"):
-            return True
-        if any(
-            data.get(k)
-            for k in (
-                "near_miss_img",
-                "near_miss_a_href",
-                "near_miss_style",
-                "near_miss_form",
-                "near_miss_svg",
-                "near_miss_math",
-            )
-        ):
-            return True
-        if data.get("new_elements_after_reparse"):
-            return True
-        if (data.get("max_depth") or 0) >= 400:
-            return True
-        return False
-
-    @staticmethod
-    def _get_trigger_reason(data: dict) -> str:
-        if data.get("danger_escalation"):
-            return "danger_escalation"
-        if data.get("mxss_security"):
-            return "mxss_security"
-        if (data.get("max_depth") or 0) >= 400:
-            return "depth_400+"
-        if data.get("new_elements_after_reparse"):
-            return "new_elements"
-        return "near_miss"
 
     # ── Primary rotation ─────────────────────────────────────────
 
@@ -1050,6 +972,14 @@ class FuzzEngine:
             last_checkpoint_time=self._last_checkpoint_time,
             checkpoint_interval=self.checkpoint_interval,
         )
+
+    def _save_checkpoint(self) -> None:
+        """Backward-compatible alias for explicit checkpoint saves in tests."""
+        self._checkpoint_service.save()
+
+    def _load_checkpoint(self) -> bool:
+        """Backward-compatible alias for explicit checkpoint loads in tests."""
+        return self._checkpoint_service.load()
 
 
 # ── Default implementations (minimal, used when user provides none) ──
