@@ -1345,7 +1345,11 @@ class SamlVoidC14nStrategy:
         return None
 
 
-def get_saml_strategies(target_count: int = 0) -> list:
+def get_saml_strategies(
+    target_count: int = 0,
+    *,
+    include_void_c14n: bool = False,
+) -> list:
     """Return DEFAULT + SAML differential strategies.
 
     Uses the default strategies except generic OutputStrategy, then layers
@@ -1362,8 +1366,7 @@ def get_saml_strategies(target_count: int = 0) -> list:
         tracker = SamlAcceptanceTracker(target_count)
 
     base = [s for s in DEFAULT_STRATEGIES if getattr(s, "name", "") != "output"]
-    return base + [
-        SamlVoidC14nStrategy(),
+    strategies = [
         SamlDiffStrategy(acceptance_tracker=tracker),
         SamlAlgorithmConfusionStrategy(),
         SamlIssuerConfusionStrategy(),
@@ -1375,6 +1378,9 @@ def get_saml_strategies(target_count: int = 0) -> list:
         SamlReferenceScopeStrategy(),
         SamlExtractionDivergenceStrategy(),
     ]
+    if include_void_c14n:
+        strategies.insert(0, SamlVoidC14nStrategy())
+    return base + strategies
 
 
 def get_saml_sigtrue_strategies(target_count: int = 0) -> list:

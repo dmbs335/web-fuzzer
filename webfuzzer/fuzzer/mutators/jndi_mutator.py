@@ -562,7 +562,12 @@ class JndiMutator:
 
     name = "jndi"
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(
+        self,
+        seed: int | None = None,
+        *,
+        enable_classpath_sweep: bool = False,
+    ) -> None:
         self.rng = random.Random(seed)
 
         self._strategy_names: list[str] = [name for name, _ in _STRATEGY_DEFS]
@@ -610,7 +615,7 @@ class JndiMutator:
         # ── Phase 6: Classpath sweep ──────────────────────────────
         # Send once at session start; results populate _introspected_methods
         # and _valid_ref_classes automatically.
-        self._sweep_pending: bool = True
+        self._sweep_pending: bool = enable_classpath_sweep
         self._swept_classes: list[str] = []  # classes from sweep
 
         # Load scanner-discovered factories if available

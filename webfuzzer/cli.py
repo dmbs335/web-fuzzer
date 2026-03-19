@@ -30,6 +30,11 @@ from .core.registry import GrammarRegistry
 from .app.persistent_targets import persistent_timeout_for_cmd, to_persistent_cmd
 
 
+def _build_oracles(names: str) -> list:
+    """Backward-compatible wrapper for legacy tests and callers."""
+    return build_oracles(names)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="webfuzzer",

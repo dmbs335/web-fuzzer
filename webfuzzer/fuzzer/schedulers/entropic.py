@@ -90,6 +90,7 @@ class EntropicScheduler:
         else:
             mod *= 0.99
         self._prod_mod[seed.id] = max(_MOD_FLOOR, min(mod, _MOD_CEIL))
+        self._last_corpus_gen = -1
 
     def cleanup_removed(self, removed_ids: set[int]) -> None:
         """Free tracking state for evicted seeds."""
