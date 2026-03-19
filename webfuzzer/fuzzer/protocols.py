@@ -154,6 +154,13 @@ class InputSource(Protocol):
 
 
 @runtime_checkable
+class ScheduleFeedbackInputSource(Protocol):
+    """Accepts per-execution feedback for adaptive input generation."""
+
+    def update(self, inp: Input, result: ScheduleResult) -> None: ...
+
+
+@runtime_checkable
 class SeedScheduler(Protocol):
     """Selects the next seed from the corpus for mutation.
 
@@ -173,6 +180,58 @@ class MutatorScheduler(Protocol):
 
     def select(self, mutators: list[Mutator], seed: Seed) -> Mutator: ...
     def update(self, mutator: Mutator, result: ScheduleResult) -> None: ...
+
+
+@runtime_checkable
+class StrategyWeightProvider(Protocol):
+    """Provides learned strategy weights for compatible mutators."""
+
+    def get_strategy_weights(self) -> dict[str, float]: ...
+
+
+@runtime_checkable
+class LearnedWeightMutator(Protocol):
+    """Accepts strategy weights learned by another subsystem."""
+
+    def apply_learned_weights(
+        self,
+        strategy_effectiveness: dict[str, float],
+    ) -> None: ...
+
+
+@runtime_checkable
+class StrategyFeedbackMutator(Protocol):
+    """Accepts coarse execution outcome signals to tune internal strategy mix."""
+
+    def feedback(self, strategy_name: str, signal: str) -> None: ...
+
+
+@runtime_checkable
+class ExceptionHintMutator(Protocol):
+    """Accepts exception-derived hints for targeted follow-up mutations."""
+
+    def set_exception_hint(self, hint: Any | None) -> None: ...
+
+
+@runtime_checkable
+class ResettableMutatorWeights(Protocol):
+    """Can reset dynamic mutator weights after long stalls."""
+
+    def reset_weights(self, boost_zero_finds: bool = False) -> None: ...
+
+
+@runtime_checkable
+class GuidanceWeightedMutator(Protocol):
+    """Accepts field-level guidance weights from guidance hooks."""
+
+    def apply_guidance_weights(self, field_weights: dict[str, float]) -> None: ...
+
+
+@runtime_checkable
+class CleanupAwareSeedScheduler(Protocol):
+    """Can drop scheduler state for seeds removed during corpus compaction."""
+
+    def cleanup_removed(self, removed_ids: set[int]) -> None: ...
 
 
 @runtime_checkable

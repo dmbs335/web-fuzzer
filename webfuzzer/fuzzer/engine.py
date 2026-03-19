@@ -10,31 +10,42 @@ import hashlib
 import json
 import logging
 import os
-import queue
 import random
 import sys
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .corpus import Corpus, CoverageMap, Seed
+from .checkpointing import CheckpointService
+from .command_channel import CommandChannel
 from .coverage.diff_coverage import DiffCoverageCollector
 from .coverage.adaptive_coverage import AdaptiveDiffCoverage
+from .finding_pipeline import FindingProcessor, extract_lib_name
+from .runtime_reporting import RuntimeReportingService
+from .seeding import SeedingService
 from .protocols import (
+    CleanupAwareSeedScheduler,
     CoverageCollector,
     Deduplicator,
+    ExceptionHintMutator,
     ExecutionResult,
     Finding,
+    GuidanceWeightedMutator,
     Input,
     InputSource,
+    LearnedWeightMutator,
     Mutator,
     MutatorScheduler,
     Oracle,
+    ScheduleFeedbackInputSource,
     ScheduleResult,
     SeedScheduler,
+    StrategyFeedbackMutator,
+    StrategyWeightProvider,
     Target,
+    ResettableMutatorWeights,
 )
 from .redis_publisher import RedisPublisher
 from .schedulers.danger_booster import DangerBooster
@@ -306,7 +317,10 @@ class FuzzEngine:
         self._total_target_execs = 0
         self._last_finding_metadata: list[dict] = []
         self._publisher = RedisPublisher()
-        self._cmd_queue: queue.Queue[dict] = queue.Queue()
+        self._command_channel = CommandChannel(
+            corpus=self.corpus,
+            publisher=self._publisher,
+        )
 
         # Browser verification queue (pub-sub)
         self._verify_queue = None
@@ -324,8 +338,37 @@ class FuzzEngine:
 
         # Extract library names from target commands for guidance attribution.
         self._target_lib_names: list[str] = [
-            self._extract_lib_name(t) for t in self.all_targets
+            extract_lib_name(t) for t in self.all_targets
         ]
+        self._finding_processor = FindingProcessor(
+            oracles=self.oracles,
+            deduplicator=self.deduplicator,
+            publisher=self._publisher,
+            stats=self.stats,
+            guidance_hooks=self._guidance,
+            all_targets=self.all_targets,
+            target_lib_names=self._target_lib_names,
+        )
+        self._runtime_reporting = RuntimeReportingService(
+            stats=self.stats,
+            publisher=self._publisher,
+            output_dir=self.output_dir,
+            guidance_hooks=self._guidance,
+            concolic=self._concolic,
+            corpus=self.corpus,
+            verify_queue=self._verify_queue,
+            all_targets=self.all_targets,
+            running_getter=lambda: self._running,
+            sync_deser_diag=self._sync_deser_diag,
+        )
+        self._checkpoint_service = CheckpointService(
+            output_dir=self.output_dir,
+            corpus=self.corpus,
+            stats=self.stats,
+            rng=self.rng,
+            dedup_exporter=self._export_dedup_seen,
+            dedup_importer=self._import_dedup_seen,
+        )
 
         # Reusable thread pool for reference target execution (avoids
         # per-iteration ThreadPoolExecutor creation/teardown overhead).
@@ -339,7 +382,7 @@ class FuzzEngine:
 
         try:
             self._setup()
-            if self.resume and self._load_checkpoint():
+            if self.resume and self._checkpoint_service.load():
                 self._resumed = True
                 logger.info(
                     "Resumed from checkpoint: %d seeds, %d edges, %d execs",
@@ -357,7 +400,7 @@ class FuzzEngine:
             self._publisher.publish_status("failed")
             raise
         finally:
-            self._save_checkpoint()
+            self._checkpoint_service.save()
             self._cleanup()
 
         return self.stats
@@ -372,218 +415,31 @@ class FuzzEngine:
         for i, t in enumerate(self.all_targets):
             t.setup()
             logger.info("Target [%d] set up", i)
-        self._start_command_reader()
+        self._command_channel.start_reader()
         logger.info("All %d targets set up successfully", len(self.all_targets))
 
     def _seed_corpus(self) -> None:
         """Generate initial seeds and populate the corpus."""
-        file_seed_count = 0
-
-        # Phase 0: Import finding inputs from previous sessions
-        if self.import_findings:
-            imported = 0
-            for session_dir in self.import_findings:
-                findings_dir = session_dir / "findings"
-                if not findings_dir.is_dir():
-                    logger.warning("No findings dir in %s", session_dir)
-                    continue
-                for fd in sorted(findings_dir.iterdir()):
-                    input_f = fd / "input"
-                    if not input_f.is_file():
-                        continue
-                    try:
-                        data = input_f.read_bytes()
-                        if data:
-                            inp = Input(data=data)
-                            primary, refs = self._rotate_primary()
-                            result = self._execute_on(primary, inp)
-                            ref_results = self._execute_on_refs(refs, inp)
-                            cov = self._collect_coverage(inp, result, ref_results=ref_results)
-                            self.corpus.force_add(inp, cov)
-                            self._check_oracles(inp, result, mutator_name="file_seed", ref_results=ref_results)
-                            self.stats.record_execution("file_seed")
-                            imported += 1
-                            file_seed_count += 1
-                    except Exception as e:
-                        logger.warning("Failed to import finding %s: %s", input_f, e)
-            logger.info("Imported %d finding inputs from %d session(s)", imported, len(self.import_findings))
-
-        # Phase 1: Load file-based seeds if seeds_dir is provided
-        if self.seeds_dir and self.seeds_dir.is_dir():
-            seed_files = sorted(f for f in self.seeds_dir.rglob("*") if f.is_file())
-            logger.info("Loading %d seed files from %s", len(seed_files), self.seeds_dir)
-            for sf in seed_files:
-                if sf.is_file() and not sf.name.startswith("."):
-                    try:
-                        data = sf.read_bytes()
-                        if data:
-                            inp = Input(data=data)
-                            primary, refs = self._rotate_primary()
-                            result = self._execute_on(primary, inp)
-                            # Track deser pipeline metrics during seed loading
-                            if result.stdout:
-                                try:
-                                    _rj = json.loads(result.stdout)
-                                    if isinstance(_rj, dict):
-                                        self._track_deser_result(_rj)
-                                except Exception:
-                                    pass
-                            ref_results = self._execute_on_refs(refs, inp)
-                            cov = self._collect_coverage(inp, result, ref_results=ref_results)
-                            self.corpus.force_add(inp, cov)
-                            self._check_oracles(inp, result, mutator_name="file_seed", ref_results=ref_results)
-                            self.stats.record_execution("file_seed")
-                            file_seed_count += 1
-                    except Exception as e:
-                        logger.warning("Failed to load seed %s: %s", sf, e)
-
-        # Seed validation summary — expose pipeline health immediately
-        if self._deser_total > 0:
-            self._sync_deser_diag()
-            dd = self.stats.deser_diag
-            logger.info(
-                "Seed validation: %d seeds → compiled=%d (%.0f%%) → "
-                "deserialized=%d (%.0f%%) | sinks=%s | findings=%d",
-                dd["total"], dd["compiled"],
-                dd["compiled"] / dd["total"] * 100 if dd["total"] else 0,
-                dd["deserialized"],
-                dd["deserialized"] / dd["total"] * 100 if dd["total"] else 0,
-                dd.get("sink_hits", {}),
-                self.stats.unique_findings,
-            )
-            # Print top exceptions so --add-opens issues are immediately visible
-            exc = dd.get("exceptions_top5", [])
-            if exc:
-                for cls, cnt in exc[:3]:
-                    logger.info("  Top exception: %s (%d seeds)", cls, cnt)
-
-        # Phase 1.5: Inject guidance-targeted seeds + amplified variants.
-        # Each targeted seed is injected raw, then mutated N times using
-        # the domain mutator to produce ~20% of corpus as guidance seeds.
-        guidance_seed_count = 0
-        _GUIDANCE_TARGET_PCT = 0.20  # aim for 20% of initial corpus
-        if self._guidance and self._guidance.active:
-            targeted_seeds = self._guidance.get_targeted_seeds()
-
-            # Determine how many variants to generate per seed
-            guidance_budget = max(
-                int(self.initial_seed_count * _GUIDANCE_TARGET_PCT),
-                len(targeted_seeds),
-            )
-            variants_per_seed = max(guidance_budget // max(len(targeted_seeds), 1), 1)
-
-            # Find the domain mutator for amplification
-            domain_mutator = None
-            for m in self.mutators:
-                if hasattr(m, 'apply_guidance_weights'):
-                    domain_mutator = m
-                    break
-
-            for seed_dict in targeted_seeds:
-                try:
-                    if hasattr(self.input_source, 'generate_from_fields'):
-                        inp = self.input_source.generate_from_fields(seed_dict)
-                    else:
-                        data = json.dumps(seed_dict.get("fields", seed_dict)).encode("utf-8")
-                        inp = Input(data=data, metadata={"guidance_seed": True})
-                    # Inject the original seed
-                    primary, refs = self._rotate_primary()
-                    result = self._execute_on(primary, inp)
-                    ref_results = self._execute_on_refs(refs, inp)
-                    cov = self._collect_coverage(inp, result, ref_results=ref_results)
-                    self.corpus.force_add(inp, cov)
-                    self._check_oracles(inp, result, mutator_name="guidance_seed", ref_results=ref_results)
-                    self.stats.record_execution("guidance_seed")
-                    guidance_seed_count += 1
-
-                    # Amplify: mutate this seed N times
-                    if domain_mutator:
-                        for _ in range(variants_per_seed - 1):
-                            try:
-                                mutated = domain_mutator.mutate(inp, None)
-                                if mutated is None or mutated.data == inp.data:
-                                    continue
-                                mutated.metadata["guidance_seed"] = True
-                                p2, r2 = self._rotate_primary()
-                                res2 = self._execute_on(p2, mutated)
-                                rr2 = self._execute_on_refs(r2, mutated)
-                                cov2 = self._collect_coverage(mutated, res2, ref_results=rr2)
-                                self.corpus.force_add(mutated, cov2)
-                                self._check_oracles(mutated, res2, mutator_name="guidance_seed", ref_results=rr2)
-                                self.stats.record_execution("guidance_seed")
-                                guidance_seed_count += 1
-                            except Exception:
-                                pass  # variant generation is best-effort
-                except Exception as e:
-                    logger.warning("Failed to inject guidance seed: %s", e)
-            if guidance_seed_count:
-                logger.info("Injected %d guidance seeds (%d base + %d variants)",
-                            guidance_seed_count, len(targeted_seeds),
-                            guidance_seed_count - len(targeted_seeds))
-
-            # Apply initial mutation weights from gap analysis
-            weights = self._guidance.get_initial_weights()
-            if weights:
-                self._apply_guidance_weights(weights)
-
-        # Phase 2: Fill remaining with grammar-generated seeds
-        gen_count = max(0, self.initial_seed_count - file_seed_count - guidance_seed_count)
-        logger.info("Generating %d initial seeds (%d from files, %d from guidance)...",
-                     gen_count, file_seed_count, guidance_seed_count)
-
-        for _ in range(gen_count):
-            inp = self.input_source.generate()
-            primary, refs = self._rotate_primary()
-            result = self._execute_on(primary, inp)
-
-            # Execute refs once, share results with coverage + oracles
-            ref_results = self._execute_on_refs(refs, inp)
-            cov = self._collect_coverage(inp, result, ref_results=ref_results)
-
-            # Check novelty BEFORE force_add (which merges into global coverage)
-            is_novel = bool(
-                cov and self.coverage
-                and self.coverage.is_novel(self.corpus.global_coverage, cov)
-            )
-            self.corpus.force_add(inp, cov)
-            found_crash = self._check_oracles(inp, result, mutator_name="seed", ref_results=ref_results)
-            self.stats.record_execution("seed")
-
-            # MCTS feedback: backpropagate to grammar UCB1 table
-            if hasattr(self.input_source, 'update'):
-                self.input_source.update(inp, ScheduleResult(
-                    found_new_coverage=is_novel,
-                    found_crash=found_crash,
-                ))
-
-        # Drop per-seed 65KB coverage bitmaps after seeding — feature_set
-        # and FeatureStore records are sufficient for all runtime operations.
-        for s in self.corpus.seeds:
-            s.coverage = None
-
-        self.stats.update_corpus(
-            len(self.corpus),
-            self.corpus.total_bytes,
-        )
-        self.stats.record_new_coverage(self.corpus.global_coverage.edge_count)
-        logger.info(
-            "Seeding done: %d seeds, %d edges",
-            len(self.corpus), self.corpus.global_coverage.edge_count,
-        )
-        self._publisher.publish_stats(
-            elapsed_seconds=self.stats.elapsed(),
-            total_execs=self.stats.total_executions,
-            execs_per_sec=self.stats.executions_per_second,
-            corpus_size=self.stats.corpus_size,
-            total_edges=self.stats.total_edges,
-            unique_findings=self.stats.unique_findings,
-        )
-        self._publisher.publish_coverage(
-            edge_count=self.corpus.global_coverage.edge_count,
-            elapsed_sec=self.stats.elapsed(),
-            exec_count=self.stats.total_executions,
-            corpus_size=len(self.corpus),
-        )
+        SeedingService(
+            corpus=self.corpus,
+            coverage=self.coverage,
+            input_source=self.input_source,
+            mutators=self.mutators,
+            stats=self.stats,
+            publisher=self._publisher,
+            guidance_hooks=self._guidance,
+            initial_seed_count=self.initial_seed_count,
+            seeds_dir=self.seeds_dir,
+            import_findings=self.import_findings,
+            rotate_primary=self._rotate_primary,
+            execute_on=self._execute_on,
+            execute_on_refs=self._execute_on_refs,
+            collect_coverage=self._collect_coverage,
+            check_oracles=self._check_oracles,
+            apply_guidance_weights=self._apply_guidance_weights,
+            track_deser_result=self._track_deser_result,
+            sync_deser_diag=self._sync_deser_diag,
+        ).run()
 
     def _main_loop(self) -> None:
         """The core fuzz loop."""
@@ -735,9 +591,9 @@ class FuzzEngine:
                         tr.metadata.pop("target_coverage", None)
 
                 # Feed learned strategy weights back to mutator
-                if hasattr(self._concolic, "get_strategy_weights"):
+                if isinstance(self._concolic, StrategyWeightProvider):
                     learned_weights = self._concolic.get_strategy_weights()
-                    if learned_weights and hasattr(mutator, "apply_learned_weights"):
+                    if learned_weights and isinstance(mutator, LearnedWeightMutator):
                         mutator.apply_learned_weights(learned_weights)
 
             # 6.6 Release coverage bitmaps to prevent memory growth
@@ -762,7 +618,7 @@ class FuzzEngine:
             # Signals: "finding" (highest), "stage_up" (danger escalation),
             #          "coverage" (new edges). Checked BEFORE DangerBooster
             #          updates _seed_max_danger so we can detect escalation.
-            if strategies and hasattr(mutator, 'feedback'):
+            if strategies and isinstance(mutator, StrategyFeedbackMutator):
                 _prev_max = (self._danger_booster._seed_max_danger.get(seed.id, 0)
                              if self._danger_booster else 0)
                 if found_crash:
@@ -780,7 +636,7 @@ class FuzzEngine:
                         mutator.feedback(sname, signal)
 
             # 7.4a Exception feedback for constraint-guided mutation (deser)
-            if hasattr(mutator, 'set_exception_hint') and result.stdout:
+            if isinstance(mutator, ExceptionHintMutator) and result.stdout:
                 try:
                     import json as _json
                     _rj = _json.loads(result.stdout)
@@ -799,13 +655,22 @@ class FuzzEngine:
                     pass
 
             # 7.4b Stall detection — track last finding iteration
-            if getattr(mutator, "name", "") == "jndi" and hasattr(mutator, 'set_exception_hint'):
+            if (
+                getattr(mutator, "name", "") == "jndi"
+                and isinstance(mutator, ExceptionHintMutator)
+            ):
                 mutator.set_exception_hint(_build_jndi_exception_hint(result))
 
-            if getattr(mutator, "name", "") == "jdbc" and hasattr(mutator, 'set_exception_hint'):
+            if (
+                getattr(mutator, "name", "") == "jdbc"
+                and isinstance(mutator, ExceptionHintMutator)
+            ):
                 mutator.set_exception_hint(_build_jdbc_sink_hint(result))
 
-            if getattr(mutator, "name", "") == "sandbox" and hasattr(mutator, 'set_exception_hint'):
+            if (
+                getattr(mutator, "name", "") == "sandbox"
+                and isinstance(mutator, ExceptionHintMutator)
+            ):
                 mutator.set_exception_hint(_build_sandbox_hint(result))
 
             if found_crash:
@@ -821,7 +686,7 @@ class FuzzEngine:
                 )
                 # Reset dynamic weights on all mutators that support it
                 for m in self.mutators:
-                    if hasattr(m, 'reset_weights'):
+                    if isinstance(m, ResettableMutatorWeights):
                         m.reset_weights(boost_zero_finds=True)
 
             # 7.4c Guidance iteration + weight refresh
@@ -837,7 +702,10 @@ class FuzzEngine:
                 self._danger_booster.on_execution(seed, child_danger, self.corpus)
 
             # 7.6 MCTS feedback: backpropagate to grammar UCB1 table
-            if hasattr(self.input_source, 'update') and (is_novel or found_crash):
+            if (
+                isinstance(self.input_source, ScheduleFeedbackInputSource)
+                and (is_novel or found_crash)
+            ):
                 self.input_source.update(mutated_input, schedule_result)
 
             # 7.6 CEGAR adaptive coverage check
@@ -856,7 +724,7 @@ class FuzzEngine:
                     )
 
             # 8. Process external commands (priority adjustments etc.)
-            self._process_commands()
+            self._command_channel.process_pending()
 
             # 9. Periodic danger boost decay (every 2K iterations)
             if self._danger_booster and self.stats.total_iterations % 2000 == 0:
@@ -885,7 +753,7 @@ class FuzzEngine:
                             _cov_inner._feature_store.remove(sid)
                     if self._danger_booster:
                         self._danger_booster.cleanup_removed(removed_ids)
-                    if hasattr(self.seed_scheduler, 'cleanup_removed'):
+                    if isinstance(self.seed_scheduler, CleanupAwareSeedScheduler):
                         self.seed_scheduler.cleanup_removed(removed_ids)
                     logger.info(
                         "Corpus compacted: %d seeds removed, %d remaining",
@@ -1177,105 +1045,17 @@ class FuzzEngine:
     def _check_oracles(self, inp: Input, result: ExecutionResult,
                        mutator_name: str = "",
                        ref_results: list[ExecutionResult] | None = None) -> bool:
-        """Run all oracles. Returns True if any finding was recorded.
-
-        Side-effect: populates ``self._last_finding_metadata`` with
-        metadata dicts for each unique finding (used by MAP-Elites).
-        """
-        found = False
-        self._last_finding_metadata: list[dict] = []
-        for oracle in self.oracles:
-            # DiffOracle.check_with_refs returns list[Finding]
-            if ref_results is not None and hasattr(oracle, 'check_with_refs'):
-                findings_or_one = oracle.check_with_refs(inp, result, ref_results)
-            else:
-                findings_or_one = oracle.check(inp, result)
-
-            # Normalize to list
-            if findings_or_one is None:
-                findings: list[Finding] = []
-            elif isinstance(findings_or_one, list):
-                findings = findings_or_one
-            else:
-                findings = [findings_or_one]
-
-            for finding in findings:
-                if mutator_name:
-                    finding.metadata["mutator"] = mutator_name
-                # Track which target was primary for this finding (analysis use,
-                # not included in fingerprint to avoid over-deduplication).
-                primary_idx = (self._rotation_idx - 1) % len(self.all_targets)
-                finding.metadata["primary_idx"] = primary_idx
-                # Translate relative ref_index to absolute target index so
-                # MAP-Elites archive cells have stable meaning across primary
-                # rotations (ref_index=0 means the same parser every time).
-                rel_ri = finding.metadata.get("ref_index")
-                if rel_ri is not None and len(self.all_targets) > 1:
-                    # refs = all_targets minus primary, in order
-                    abs_indices = [i for i in range(len(self.all_targets)) if i != primary_idx]
-                    if rel_ri < len(abs_indices):
-                        finding.metadata["ref_index"] = abs_indices[rel_ri]
-                # Inject library names for guidance attribution.
-                if self._target_lib_names and len(self.all_targets) > 1:
-                    md = finding.metadata
-                    p_idx = md.get("primary_idx", primary_idx)
-                    r_idx = md.get("ref_index")
-                    p_name = self._target_lib_names[p_idx] if p_idx < len(self._target_lib_names) else ""
-                    r_name = self._target_lib_names[r_idx] if r_idx is not None and r_idx < len(self._target_lib_names) else ""
-
-                    # Determine accepting/rejecting from available fields
-                    accepting_side = md.get("accepting_side")
-                    if accepting_side and r_idx is not None:
-                        if accepting_side == "primary":
-                            md["accepting_libraries"] = [p_name]
-                            md["rejecting_libraries"] = [r_name]
-                        else:
-                            md["accepting_libraries"] = [r_name]
-                            md["rejecting_libraries"] = [p_name]
-                    elif r_idx is not None:
-                        # SAML diff strategy: primary_valid/ref_valid fields
-                        p_valid = md.get("primary_valid")
-                        r_valid = md.get("ref_valid")
-                        if p_valid is True and r_valid is False:
-                            md["accepting_libraries"] = [p_name]
-                            md["rejecting_libraries"] = [r_name]
-                        elif r_valid is True and p_valid is False:
-                            md["accepting_libraries"] = [r_name]
-                            md["rejecting_libraries"] = [p_name]
-
-                finding.fingerprint = self.deduplicator.fingerprint(finding)
-                if finding.oracle_name == "deser":
-                    self._deser_oracle_positive += 1
-                if not self.deduplicator.is_duplicate(finding):
-                    self.deduplicator.register(finding)
-                    self._publisher.publish_finding(
-                        title=finding.title,
-                        severity=finding.severity.value,
-                        oracle_name=finding.oracle_name,
-                        fingerprint=finding.fingerprint,
-                        input_data=finding.input.data,
-                        exit_code=finding.result.exit_code,
-                        duration_ms=finding.result.duration_ms,
-                        metadata=finding.metadata,
-                    )
-                    # Enrich finding with guidance gap attribution
-                    if self._guidance and self._guidance.active:
-                        finding.metadata = self._guidance.on_finding(finding.metadata)
-                    logger.info(
-                        "Finding: [%s] %s (oracle=%s)",
-                        finding.severity.value, finding.title, finding.oracle_name,
-                    )
-                    # record_finding strips heavy data after incremental save
-                    self.stats.record_finding(finding, mutator_name)
-                    # Collect metadata for MAP-Elites scheduler.
-                    self._last_finding_metadata.append({
-                        "category": finding.metadata.get("category", ""),
-                        "ref_index": finding.metadata.get("ref_index", 0),
-                        "severity": finding.severity.value,
-                        "strategy": finding.metadata.get("strategy", ""),
-                    })
-                    found = True
-        return found
+        """Run all oracles and persist any unique findings."""
+        result_summary = self._finding_processor.check(
+            inp,
+            result,
+            mutator_name=mutator_name,
+            ref_results=ref_results,
+            rotation_idx=self._rotation_idx,
+        )
+        self._last_finding_metadata = result_summary.metadata
+        self._deser_oracle_positive = self._finding_processor.deser_oracle_positive
+        return result_summary.found
 
     def _recycle_persistent_targets(self) -> None:
         """Kill and restart all persistent target child processes.
@@ -1315,7 +1095,7 @@ class FuzzEngine:
         """
         applied = False
         for m in self.mutators:
-            if hasattr(m, 'apply_guidance_weights'):
+            if isinstance(m, GuidanceWeightedMutator):
                 m.apply_guidance_weights(weights)
                 applied = True
         if applied:
@@ -1325,43 +1105,6 @@ class FuzzEngine:
                 ", ".join(f"{k}={v:.1f}" for k, v in
                           sorted(weights.items(), key=lambda x: -x[1])[:5]),
             )
-
-    @staticmethod
-    def _extract_lib_name(target: "Target") -> str:
-        """Extract a library name from a target's command string.
-
-        Examples:
-            'python targets/saml_signxml.py {input}' → 'signxml'
-            'node targets/jwt_node_jose4.js {input}'  → 'jose4'
-            'targets/saml_crewjam/saml_crewjam.exe --persistent' → 'crewjam'
-        """
-        import re as _re
-        # Prefer original_cmd (set by CLI) over persistent wrapper command
-        cmd = getattr(target, 'original_cmd', None) \
-            or getattr(target, 'command_template', None) \
-            or getattr(target, 'command', '')
-        # Find the target script in the command
-        m = _re.search(r'targets/(\w+)', cmd)
-        if m:
-            script = m.group(1)
-            # Strip common prefixes and suffixes
-            for pfx in ('saml_', 'jwt_', 'oauth_', 'cookie_', 'sanitizer_',
-                        'markdown_', 'graphql_', 'deser_', 'dpop_',
-                        'jwt_node_', 'jwt_python_'):
-                if script.startswith(pfx):
-                    script = script[len(pfx):]
-                    break
-            # Strip _module, _diff, _mxss suffixes
-            for sfx in ('_module', '_diff', '_mxss', '_exec'):
-                if script.endswith(sfx):
-                    script = script[:-len(sfx)]
-            return script
-        # Fallback: last path component without extension
-        parts = cmd.replace('\\', '/').split()
-        for part in parts:
-            if 'target' in part.lower():
-                return part.rsplit('/', 1)[-1].split('.')[0]
-        return cmd[:30]
 
     def _should_stop(self) -> bool:
         if self.max_iterations and self.stats.total_iterations >= self.max_iterations:
@@ -1410,244 +1153,37 @@ class FuzzEngine:
         }
 
     def _maybe_print_status(self) -> None:
-        now = time.time()
-        if now - self._last_status_time >= self.status_interval:
-            self._last_status_time = now
-            self._sync_deser_diag()
-            guidance_status = ""
-            if self._guidance and self._guidance.active:
-                guidance_status = self._guidance.get_status_line()
-            status = self.stats.status_line()
-            if guidance_status:
-                status = f"{status} | G:{guidance_status}"
-            if self._concolic is not None:
-                status = f"{status} | {self._concolic.get_status_line()}"
-            if self._publisher.enabled or os.environ.get("FUZZER_SESSION_ID"):
-                # Orchestrator mode: newline-terminated for readline() parsing
-                print(status, flush=True, file=sys.stderr)
-            else:
-                # Terminal mode: carriage return for in-place update
-                print(f"\r{status}", end="", flush=True, file=sys.stderr)
-            self._publisher.publish_stats(
-                elapsed_seconds=self.stats.elapsed(),
-                total_execs=self.stats.total_executions,
-                execs_per_sec=self.stats.executions_per_second,
-                corpus_size=self.stats.corpus_size,
-                total_edges=self.stats.total_edges,
-                unique_findings=self.stats.unique_findings,
+        self._last_status_time, self._last_save_time = (
+            self._runtime_reporting.maybe_print_status(
+                last_status_time=self._last_status_time,
+                last_save_time=self._last_save_time,
+                status_interval=self.status_interval,
             )
-
-            # Periodically save intermediate report.json (every 30s)
-            if self.output_dir and now - self._last_save_time >= 30.0:
-                self._last_save_time = now
-                self.output_dir.mkdir(parents=True, exist_ok=True)
-                report_text = self.stats.report("json")
-                # Inject guidance section if active
-                if self._guidance and self._guidance.active:
-                    guidance_report = self._guidance.get_report_section()
-                    if guidance_report:
-                        try:
-                            report_data = json.loads(report_text)
-                            report_data["guidance"] = guidance_report
-                            report_text = json.dumps(report_data, indent=2)
-                        except Exception:
-                            pass
-                if self._concolic is not None:
-                    try:
-                        report_data = json.loads(report_text)
-                        report_data["concolic"] = self._concolic.get_stats()
-                        report_text = json.dumps(report_data, indent=2)
-                    except Exception:
-                        pass
-                (self.output_dir / "report.json").write_text(
-                    report_text, encoding="utf-8",
-                )
-
-    def _start_command_reader(self) -> None:
-        """Start a daemon thread that reads JSON commands from stdin."""
-        if not sys.stdin or not hasattr(sys.stdin, 'closed') or sys.stdin.closed:
-            return
-
-        def _reader() -> None:
-            try:
-                for line in sys.stdin:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        cmd = json.loads(line)
-                        self._cmd_queue.put(cmd)
-                    except json.JSONDecodeError:
-                        pass
-            except (EOFError, OSError, ValueError):
-                pass  # stdin closed or unavailable
-
-        t = threading.Thread(target=_reader, daemon=True, name="cmd-reader")
-        t.start()
-
-    def _process_commands(self) -> None:
-        """Process queued commands from stdin (non-blocking)."""
-        while True:
-            try:
-                cmd = self._cmd_queue.get_nowait()
-            except queue.Empty:
-                break
-
-            cmd_type = cmd.get("cmd")
-            if cmd_type == "set_priority":
-                seed_id = cmd.get("seed_id")
-                boost = cmd.get("boost", 1.0)
-                if seed_id is not None:
-                    ok = self.corpus.set_priority(seed_id, boost)
-                    if ok:
-                        self._publisher.publish_priority_update(seed_id, boost)
-                        logger.debug("Priority set: seed=%d boost=%.2f", seed_id, boost)
-            elif cmd_type == "reset_priorities":
-                self.corpus.reset_priorities()
-                logger.debug("All priorities reset to 1.0")
+        )
 
     def _cleanup(self) -> None:
-        print("", file=sys.stderr)  # newline after status line
-        if self._ref_pool is not None:
-            self._ref_pool.shutdown(wait=False)
-            self._ref_pool = None
-        for t in self.all_targets:
-            try:
-                t.teardown()
-            except Exception:
-                pass
-
-        if self.output_dir:
-            try:
-                self.stats.save(self.output_dir)
-                # Re-inject guidance section into final report.json
-                if self._guidance and self._guidance.active:
-                    rpath = self.output_dir / "report.json"
-                    if rpath.exists():
-                        try:
-                            report_data = json.loads(rpath.read_text(encoding="utf-8"))
-                            guidance_report = self._guidance.get_report_section()
-                            if guidance_report:
-                                report_data["guidance"] = guidance_report
-                                rpath.write_text(
-                                    json.dumps(report_data, indent=2),
-                                    encoding="utf-8",
-                                )
-                        except Exception:
-                            pass
-            except Exception as e:
-                logger.error("Failed to save stats: %s", e)
-            try:
-                self.corpus.save(self.output_dir / "corpus")
-            except Exception as e:
-                logger.error("Failed to save corpus: %s", e)
-            else:
-                logger.info("Results saved to %s", self.output_dir)
-
-        if self._verify_queue:
-            self._verify_queue.close()
-
-        if self._running:
-            self._publisher.publish_status("completed")
-        self._publisher.close()
+        self._runtime_reporting.cleanup(ref_pool=self._ref_pool)
+        self._ref_pool = None
 
     # ── Checkpointing ──────────────────────────────────────────────
 
-    def _checkpoint_dir(self) -> Path | None:
-        """Return checkpoint directory path, or None if output_dir not set."""
-        if self.output_dir is None:
-            return None
-        return self.output_dir / "checkpoint"
+    def _export_dedup_seen(self) -> list[str] | None:
+        """Expose deduplicator state for checkpoint persistence."""
+        if isinstance(self.deduplicator, _DefaultDeduplicator):
+            return sorted(self.deduplicator._seen)
+        return None
 
-    def _save_checkpoint(self) -> None:
-        """Save full engine state to checkpoint directory."""
-        ckpt = self._checkpoint_dir()
-        if ckpt is None:
-            return
-
-        try:
-            # Corpus (seeds + global coverage bitmap)
-            self.corpus.save_checkpoint(ckpt / "corpus")
-
-            # Stats
-            state: dict = {
-                "stats": self.stats.to_checkpoint_dict(),
-                "rng_state": self.rng.getstate(),
-            }
-
-            # Deduplicator seen set
-            if isinstance(self.deduplicator, _DefaultDeduplicator):
-                state["dedup_seen"] = sorted(self.deduplicator._seen)
-
-            ckpt.mkdir(parents=True, exist_ok=True)
-            (ckpt / "state.json").write_text(
-                json.dumps(state, default=str), encoding="utf-8",
-            )
-            logger.debug(
-                "Checkpoint saved: %d seeds, %d edges",
-                len(self.corpus), self.stats.total_edges,
-            )
-        except Exception as e:
-            logger.warning("Failed to save checkpoint: %s", e)
-
-    def _load_checkpoint(self) -> bool:
-        """Load engine state from checkpoint. Returns True if loaded."""
-        ckpt = self._checkpoint_dir()
-        if ckpt is None:
-            return False
-
-        state_file = ckpt / "state.json"
-        if not state_file.exists():
-            return False
-
-        try:
-            # Corpus
-            if not self.corpus.load_checkpoint(ckpt / "corpus"):
-                return False
-
-            # State
-            state = json.loads(state_file.read_text(encoding="utf-8"))
-
-            # Stats
-            self.stats.load_checkpoint_dict(state.get("stats", {}))
-
-            # RNG
-            rng_state = state.get("rng_state")
-            if rng_state is not None:
-                # JSON serializes tuples as lists; Random.setstate needs tuples
-                self.rng.setstate(_json_to_rng_state(rng_state))
-
-            # Deduplicator
-            dedup_seen = state.get("dedup_seen")
-            if dedup_seen and isinstance(self.deduplicator, _DefaultDeduplicator):
-                self.deduplicator._seen = set(dedup_seen)
-
-            return True
-        except Exception as e:
-            logger.warning("Failed to load checkpoint: %s", e)
-            return False
+    def _import_dedup_seen(self, dedup_seen: list[str]) -> None:
+        """Restore deduplicator state from a checkpoint."""
+        if dedup_seen and isinstance(self.deduplicator, _DefaultDeduplicator):
+            self.deduplicator._seen = set(dedup_seen)
 
     def _maybe_save_checkpoint(self) -> None:
         """Save checkpoint periodically (every checkpoint_interval seconds)."""
-        if self.output_dir is None:
-            return
-        now = time.time()
-        if now - self._last_checkpoint_time >= self.checkpoint_interval:
-            self._last_checkpoint_time = now
-            self._save_checkpoint()
-
-
-def _json_to_rng_state(raw: list) -> tuple:
-    """Convert JSON-deserialized RNG state back to the tuple format
-    expected by random.Random.setstate().
-
-    JSON serializes tuples as lists, but Random.setstate() requires:
-        (version: int, internalstate: tuple[int, ...], gauss_next: float)
-    """
-    version = raw[0]
-    internal = tuple(raw[1])
-    gauss_next = raw[2]
-    return (version, internal, gauss_next)
+        self._last_checkpoint_time = self._checkpoint_service.maybe_save(
+            last_checkpoint_time=self._last_checkpoint_time,
+            checkpoint_interval=self.checkpoint_interval,
+        )
 
 
 # ── Default implementations (minimal, used when user provides none) ──
