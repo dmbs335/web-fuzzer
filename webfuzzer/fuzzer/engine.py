@@ -15,37 +15,32 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
-
 from .corpus import Corpus, CoverageMap, Seed
 from .checkpointing import CheckpointService
 from .command_channel import CommandChannel
 from .coverage.diff_coverage import DiffCoverageCollector
 from .coverage.adaptive_coverage import AdaptiveDiffCoverage
 from .finding_pipeline import FindingProcessor, extract_lib_name
+from .maintenance import RuntimeMaintenanceService
 from .runtime_reporting import RuntimeReportingService
 from .seeding import SeedingService
 from .protocols import (
-    CleanupAwareSeedScheduler,
     CoverageCollector,
     Deduplicator,
     ExceptionHintMutator,
     ExecutionResult,
     Finding,
-    GuidanceWeightedMutator,
     Input,
     InputSource,
-    LearnedWeightMutator,
     Mutator,
     MutatorScheduler,
     Oracle,
-    ScheduleFeedbackInputSource,
     ScheduleResult,
     SeedScheduler,
     StrategyFeedbackMutator,
     StrategyWeightProvider,
     Target,
-    ResettableMutatorWeights,
+    LearnedWeightMutator,
 )
 from .redis_publisher import RedisPublisher
 from .schedulers.danger_booster import DangerBooster
@@ -283,8 +278,6 @@ class FuzzEngine:
         self.deduplicator: Deduplicator = deduplicator or _DefaultDeduplicator()
         self._danger_booster = danger_booster
         self._max_corpus_size = max_corpus_size
-        self._last_edge_count = 0
-        self._edge_growth_window = 0  # tracks recent edge growth for dynamic sizing
 
         # Guidance hooks — static analysis → mutation bias + finding attribution
         self._guidance = guidance_hooks
@@ -295,11 +288,6 @@ class FuzzEngine:
         self._running = False
         self._resumed = False
 
-        # Stall detection — track last iteration that produced a new finding.
-        # After _STALL_WINDOW_ITERS with no findings, trigger weight shuffle.
-        self._STALL_WINDOW_ITERS = 50_000
-        self._last_finding_iter = 0
-        self._stall_resets = 0
         # Deser pipeline diagnostics — per-stage counters for observability.
         # These are exposed in stats.deser_diag and printed in status/report.
         self._deser_total = 0
@@ -313,8 +301,6 @@ class FuzzEngine:
         # Persistent target recycling — kill and restart child processes
         # periodically to prevent memory accumulation in Node/Ruby/Java.
         # Memory profiling showed RSS growing ~25MB/1K iters without this.
-        self._RECYCLE_EVERY = 10_000
-        self._total_target_execs = 0
         self._last_finding_metadata: list[dict] = []
         self._publisher = RedisPublisher()
         self._command_channel = CommandChannel(
@@ -368,6 +354,18 @@ class FuzzEngine:
             rng=self.rng,
             dedup_exporter=self._export_dedup_seen,
             dedup_importer=self._import_dedup_seen,
+        )
+        self._maintenance = RuntimeMaintenanceService(
+            corpus=self.corpus,
+            coverage=self.coverage,
+            stats=self.stats,
+            mutators=self.mutators,
+            input_source=self.input_source,
+            seed_scheduler=self.seed_scheduler,
+            danger_booster=self._danger_booster,
+            guidance_hooks=self._guidance,
+            all_targets=self.all_targets,
+            max_corpus_size=self._max_corpus_size,
         )
 
         # Reusable thread pool for reference target execution (avoids
@@ -436,7 +434,7 @@ class FuzzEngine:
             execute_on_refs=self._execute_on_refs,
             collect_coverage=self._collect_coverage,
             check_oracles=self._check_oracles,
-            apply_guidance_weights=self._apply_guidance_weights,
+            apply_guidance_weights=self._maintenance.apply_guidance_weights,
             track_deser_result=self._track_deser_result,
             sync_deser_diag=self._sync_deser_diag,
         ).run()
@@ -654,7 +652,7 @@ class FuzzEngine:
                 except Exception:
                     pass
 
-            # 7.4b Stall detection — track last finding iteration
+            # 7.4b Domain-specific exception feedback
             if (
                 getattr(mutator, "name", "") == "jndi"
                 and isinstance(mutator, ExceptionHintMutator)
@@ -673,104 +671,21 @@ class FuzzEngine:
             ):
                 mutator.set_exception_hint(_build_sandbox_hint(result))
 
-            if found_crash:
-                self._last_finding_iter = self.stats.total_iterations
-            iters_since_finding = self.stats.total_iterations - self._last_finding_iter
-            if (iters_since_finding > 0
-                    and iters_since_finding % self._STALL_WINDOW_ITERS == 0):
-                self._stall_resets += 1
-                logger.warning(
-                    "STALL: %d iters since last finding (reset #%d) — "
-                    "shuffling mutator weights",
-                    iters_since_finding, self._stall_resets,
-                )
-                # Reset dynamic weights on all mutators that support it
-                for m in self.mutators:
-                    if isinstance(m, ResettableMutatorWeights):
-                        m.reset_weights(boost_zero_finds=True)
-
-            # 7.4c Guidance iteration + weight refresh
-            if self._guidance and self._guidance.active:
-                self._guidance.on_iteration()
-                if self._guidance.should_refresh_weights():
-                    weights = self._guidance.get_current_weights()
-                    if weights:
-                        self._apply_guidance_weights(weights)
-
-            # 7.5 Danger-weighted priority boost
-            if self._danger_booster and child_danger >= 2:
-                self._danger_booster.on_execution(seed, child_danger, self.corpus)
-
-            # 7.6 MCTS feedback: backpropagate to grammar UCB1 table
-            if (
-                isinstance(self.input_source, ScheduleFeedbackInputSource)
-                and (is_novel or found_crash)
-            ):
-                self.input_source.update(mutated_input, schedule_result)
-
-            # 7.6 CEGAR adaptive coverage check
-            _inner_cov = getattr(self.coverage, 'inner', self.coverage)
-            if isinstance(_inner_cov, AdaptiveDiffCoverage):
-                self.coverage.notify_execution()
-                if is_novel:
-                    self.coverage.notify_new_coverage(self.stats.total_iterations)
-                if self.coverage.check_and_adapt(self.corpus):
-                    self.stats.update_corpus(
-                        len(self.corpus),
-                        self.corpus.total_bytes,
-                    )
-                    self.stats.record_new_coverage(
-                        self.corpus.global_coverage.edge_count,
-                    )
+            self._maintenance.handle_feedback(
+                seed=seed,
+                mutated_input=mutated_input,
+                schedule_result=schedule_result,
+                is_novel=is_novel,
+                found_crash=found_crash,
+                child_danger=child_danger,
+            )
 
             # 8. Process external commands (priority adjustments etc.)
             self._command_channel.process_pending()
 
-            # 9. Periodic danger boost decay (every 2K iterations)
-            if self._danger_booster and self.stats.total_iterations % 2000 == 0:
-                self._danger_booster.apply_decay(self.corpus)
-
-            # 10. Periodic corpus compaction (every 5K iterations or size cap)
-            #     Dynamic sizing: if coverage is still growing, allow larger corpus
-            max_cap = self._max_corpus_size
-            if self.stats.total_iterations % 5000 == 0 and hasattr(self.corpus, 'global_coverage'):
-                cur_edges = self.corpus.global_coverage.edge_count
-                if cur_edges > self._last_edge_count:
-                    self._edge_growth_window = min(self._edge_growth_window + 1, 5)
-                    self._last_edge_count = cur_edges
-                else:
-                    self._edge_growth_window = max(self._edge_growth_window - 1, 0)
-                # Allow up to 2x max when actively discovering new coverage
-                if self._edge_growth_window >= 3:
-                    max_cap = self._max_corpus_size * 2
-            if (self.stats.total_iterations % 5000 == 0 or len(self.corpus) > max_cap) and len(self.corpus) > 200:
-                removed_ids = self.corpus.compact(min_seeds=100, max_seeds=max_cap)
-                if removed_ids:
-                    # Clean up FeatureStore entries for removed seeds
-                    _cov_inner = getattr(self.coverage, 'inner', self.coverage)
-                    if isinstance(_cov_inner, AdaptiveDiffCoverage):
-                        for sid in removed_ids:
-                            _cov_inner._feature_store.remove(sid)
-                    if self._danger_booster:
-                        self._danger_booster.cleanup_removed(removed_ids)
-                    if isinstance(self.seed_scheduler, CleanupAwareSeedScheduler):
-                        self.seed_scheduler.cleanup_removed(removed_ids)
-                    logger.info(
-                        "Corpus compacted: %d seeds removed, %d remaining",
-                        len(removed_ids), len(self.corpus),
-                    )
-                    self.stats.update_corpus(
-                        len(self.corpus),
-                        self.corpus.total_bytes,
-                    )
-
-            # 10.5. Periodic persistent target recycling
-            # Node/Ruby/Java child processes accumulate memory over tens of
-            # thousands of executions.  Recycle them to reset RSS.
-            self._total_target_execs += 1 + (len(refs) if ref_results else 0)
-            if self._total_target_execs >= self._RECYCLE_EVERY:
-                self._recycle_persistent_targets()
-                self._total_target_execs = 0
+            self._maintenance.handle_periodic_maintenance(
+                ref_result_count=len(ref_results) if ref_results else 0,
+            )
 
             # 11. Status output + periodic checkpoint
             self._maybe_print_status()
@@ -1056,55 +971,6 @@ class FuzzEngine:
         self._last_finding_metadata = result_summary.metadata
         self._deser_oracle_positive = self._finding_processor.deser_oracle_positive
         return result_summary.found
-
-    def _recycle_persistent_targets(self) -> None:
-        """Kill and restart all persistent target child processes.
-
-        Prevents memory accumulation in long-running Node/Ruby/Java
-        processes.  Each target's reset() calls teardown() + setup(),
-        which kills the old process tree and spawns a fresh one.
-        """
-        from .targets.persistent_target import PersistentTarget
-
-        recycled = 0
-        for t in self.all_targets:
-            if isinstance(t, PersistentTarget):
-                try:
-                    t.reset()
-                    recycled += 1
-                except Exception as e:
-                    logger.warning("Failed to recycle target %s: %s",
-                                   t.command[:60], e)
-        if recycled:
-            import gc
-            import sys as _sys
-            gc.collect()
-            msg = (
-                f"[recycle] {recycled} targets recycled at "
-                f"exec={self.stats.total_executions}"
-            )
-            logger.info(msg)
-            print(msg, file=_sys.stderr, flush=True)
-
-    def _apply_guidance_weights(self, weights: dict[str, float]) -> None:
-        """Apply guidance mutation weights to compatible mutators.
-
-        Guidance weights are field-level biases (e.g. {"header.crit": 1.0,
-        "header.alg": 0.3}).  Mutators that support `apply_guidance_weights()`
-        can translate these into strategy-level weight adjustments.
-        """
-        applied = False
-        for m in self.mutators:
-            if isinstance(m, GuidanceWeightedMutator):
-                m.apply_guidance_weights(weights)
-                applied = True
-        if applied:
-            logger.info(
-                "Guidance weights applied: %d fields → %s",
-                len(weights),
-                ", ".join(f"{k}={v:.1f}" for k, v in
-                          sorted(weights.items(), key=lambda x: -x[1])[:5]),
-            )
 
     def _should_stop(self) -> bool:
         if self.max_iterations and self.stats.total_iterations >= self.max_iterations:
