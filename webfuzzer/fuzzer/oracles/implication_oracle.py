@@ -80,11 +80,24 @@ class ImplicationSoftOracle:
 
     # ── Oracle protocol ───────────────────────────────────────────
 
-    def check(self, inp: Input, result: ExecutionResult) -> Finding | None:
+    def check(self, inp: Input, result: ExecutionResult) -> Finding | list[Finding] | None:
         """Delegate to inner oracle; side-effect: populate violation buffer."""
         primary = self._inner.check(inp, result)
-        if primary is not None:
-            self._check_violations(primary)
+        self._check_violations_any(primary)
+        return primary
+
+    def check_with_refs(
+        self,
+        inp: Input,
+        result: ExecutionResult,
+        ref_results: list,
+    ) -> Finding | list[Finding] | None:
+        """Delegate to inner oracle check_with_refs if available."""
+        if hasattr(self._inner, "check_with_refs"):
+            primary = self._inner.check_with_refs(inp, result, ref_results)
+        else:
+            primary = self._inner.check(inp, result)
+        self._check_violations_any(primary)
         return primary
 
     def setup(self) -> None:
@@ -104,6 +117,16 @@ class ImplicationSoftOracle:
         return out
 
     # ── Internal ─────────────────────────────────────────────────
+
+    def _check_violations_any(self, primary: Finding | list[Finding] | None) -> None:
+        """Dispatch to _check_violations for Finding or list[Finding]."""
+        if primary is None:
+            return
+        if isinstance(primary, list):
+            for f in primary:
+                self._check_violations(f)
+        else:
+            self._check_violations(primary)
 
     def _check_violations(self, finding: Finding) -> None:
         diff_fields = frozenset(finding.metadata.get("diff_fields") or [])

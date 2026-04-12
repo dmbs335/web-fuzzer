@@ -192,6 +192,41 @@ def test_empty_implications_no_violations():
 
 # ── Real WAF implication base smoke test ────────────────────────────────────
 
+# ── List-return inner oracle ─────────────────────────────────────────────────
+
+def test_check_handles_list_return():
+    """Inner oracle returning list[Finding] must not crash; violations are collected."""
+    findings = [
+        _make_finding(diff_fields=["a"], fp="fp1"),
+        _make_finding(diff_fields=["c", "d"], fp="fp2"),
+    ]
+    m = MagicMock()
+    m.name = "inner"
+    m.check.return_value = findings
+    oracle = ImplicationSoftOracle(m, IMPLICATIONS)
+    result = oracle.check(Input(data=b"x"), ExecutionResult())
+    assert result is findings
+    violations = oracle.drain_violations()
+    # "a" → missing "b", "c"+"d" → missing "e"
+    assert len(violations) == 2
+
+
+def test_check_with_refs_delegates_to_inner():
+    """check_with_refs delegates and populates violations."""
+    primary = _make_finding(diff_fields=["a"])
+    inner = MagicMock()
+    inner.name = "inner"
+    inner.check_with_refs = MagicMock(return_value=primary)
+    oracle = ImplicationSoftOracle(inner, IMPLICATIONS)
+    result = oracle.check_with_refs(Input(data=b"x"), ExecutionResult(), [ExecutionResult()])
+    assert result is primary
+    inner.check_with_refs.assert_called_once()
+    violations = oracle.drain_violations()
+    assert len(violations) == 1
+
+
+# ── Real WAF implication base smoke test ────────────────────────────────────
+
 def test_real_waf_implication_base_loads():
     """Smoke: loads actual waf_v61 implication_base.json without error."""
     import json
