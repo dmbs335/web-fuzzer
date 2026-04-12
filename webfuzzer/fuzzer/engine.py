@@ -43,7 +43,7 @@ from .protocols import (
 )
 from .redis_publisher import RedisPublisher
 from .schedulers.danger_booster import DangerBooster
-from .stats import FuzzStats
+from .stats import FuzzStats, hill_alpha
 
 logger = logging.getLogger(__name__)
 
@@ -527,6 +527,13 @@ class FuzzEngine:
                         self.stats.record_new_coverage(
                             self.corpus.global_coverage.edge_count, mutator_name
                         )
+                        # Phase 3C: update live α estimate every 25 novel events
+                        # once ≥ 50 entries have accumulated.
+                        _cot = self.stats.coverage_over_time
+                        if len(_cot) >= 50 and len(_cot) % 25 == 0:
+                            _alpha_hat = hill_alpha(_cot[-300:])
+                            if _alpha_hat is not None:
+                                self.stats.alpha_estimate = _alpha_hat
                         if strategies:
                             self.stats.record_strategy_coverage(strategies)
                         self.stats.update_corpus(
@@ -608,13 +615,18 @@ class FuzzEngine:
                         tr.metadata.pop("target_coverage", None)
 
                 # Feed learned strategy weights back to mutator.
-                # Phase 2B: pass pareto_alpha from the stopping signal so
-                # heavy-tail (α<2) campaigns use median normalisation.
+                # Phase 3C: prefer live alpha_estimate (Hill-MLE on current
+                # campaign) over the static lint-derived pareto_alpha so that
+                # heavy-tail (α<2) campaigns activate median normalisation
+                # even without a prior --stopping-signal lint run.
                 if isinstance(self._concolic, StrategyWeightProvider):
                     learned_weights = self._concolic.get_strategy_weights()
                     if learned_weights and isinstance(mutator, LearnedWeightMutator):
                         _ss = getattr(self.seed_scheduler, "_stopping_signal", None)
-                        _alpha = getattr(_ss, "pareto_alpha", None)
+                        _alpha = (
+                            self.stats.alpha_estimate
+                            or getattr(_ss, "pareto_alpha", None)
+                        )
                         mutator.apply_learned_weights(learned_weights, alpha=_alpha)
 
             # 6.6 Release coverage bitmaps to prevent memory growth

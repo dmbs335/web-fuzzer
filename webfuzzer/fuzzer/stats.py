@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +12,42 @@ from pathlib import Path
 from .protocols import ExecutionResult, Finding, Input, Severity
 
 logger = logging.getLogger(__name__)
+
+
+# ── Phase 3C: Hill-MLE Pareto tail-index estimator ────────────────────────────
+
+def hill_alpha(coverage_window: list[tuple[float, int]]) -> float | None:
+    """Hill-MLE estimate of Pareto tail index α from a coverage-over-time window.
+
+    Parameters
+    ----------
+    coverage_window:
+        List of ``(elapsed_sec, edge_count)`` tuples (a slice of
+        ``FuzzStats.coverage_over_time``).  Must contain ≥ 2 positive
+        coverage increments; returns ``None`` otherwise.
+
+    Returns
+    -------
+    float | None
+        Estimated α̂ = 1 + n / Σᵢ log(δᵢ / (x_min − 0.5)).  Values below
+        2 indicate heavy-tailed increments (infinite variance) where
+        ``apply_learned_weights`` should use median normalisation.
+        Returns ``None`` when the estimator is undefined (too few positive
+        deltas or degenerate sequence).
+    """
+    counts = [c for _, c in coverage_window]
+    deltas = [b - a for a, b in zip(counts, counts[1:]) if b > a]
+    n = len(deltas)
+    if n < 2:
+        return None
+    x_min = min(deltas)
+    # Continuity correction: x_min - 0.5 ensures log > 0 even when all
+    # deltas equal x_min (avoids log(1) = 0 → division by zero).
+    x_thresh = max(x_min - 0.5, 0.5)
+    denom = sum(math.log(d / x_thresh) for d in deltas)
+    if denom <= 0.0:
+        return None
+    return round(1.0 + n / denom, 4)
 
 
 @dataclass
@@ -56,6 +93,12 @@ class FuzzStats:
 
     # Deser pipeline diagnostics (populated by engine for deser oracle sessions)
     deser_diag: dict = field(default_factory=dict)
+
+    # Phase 3C: live Pareto tail-index estimate from coverage increments.
+    # Updated by the engine every 25 novel coverage events (Hill-MLE on a
+    # sliding window of the last 300 entries in coverage_over_time).
+    # None until at least 50 novel events have accumulated.
+    alpha_estimate: float | None = None
 
     # Incremental finding save
     output_dir: Path | None = field(default=None, repr=False)
