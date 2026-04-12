@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -28,6 +29,80 @@ from .app.factories import (
 from .core.generator import Generator, GenerationError
 from .core.registry import GrammarRegistry
 from .app.persistent_targets import persistent_timeout_for_cmd, to_persistent_cmd
+
+
+def _load_stopping_signal(path: Path):
+    """Parse a DG018 stopping-signal payload from ``path``.
+
+    Accepts two shapes:
+
+    * Minimal: ``{"phase": "exploitation", "missing_mass_upper": 0.005,
+      "n_samples": 9802, "tau_mix": 8.91}``
+    * Full lint output (``diffspace_geometry.lint --json``): the loader
+      walks ``checks`` for ``id == "DG018"`` and lifts ``observed`` plus
+      derives ``phase`` from ``status`` (``PASS`` → ``exploitation``,
+      anything else → ``discovery``).
+
+    Returns a :class:`StoppingSignal` or ``None`` if parsing failed
+    (which is logged to stderr but does not abort the run).
+    """
+    from .fuzzer.protocols import StoppingSignal
+
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"Warning: failed to read --stopping-signal {path}: {exc}",
+            file=sys.stderr,
+        )
+        return None
+
+    observed: dict | None = None
+    phase: str | None = None
+    source_run_id: str | None = None
+
+    if isinstance(payload, dict) and "phase" in payload:
+        observed = payload
+        phase = str(payload.get("phase") or "").strip().lower() or None
+        source_run_id = payload.get("source_run_id")
+    elif isinstance(payload, dict) and isinstance(payload.get("checks"), list):
+        source_run_id = payload.get("run_id")
+        for ck in payload["checks"]:
+            if isinstance(ck, dict) and ck.get("id") == "DG018":
+                observed = ck.get("observed") or {}
+                phase = (
+                    "exploitation"
+                    if str(ck.get("status", "")).upper() == "PASS"
+                    else "discovery"
+                )
+                break
+
+    if observed is None or phase not in {"discovery", "exploitation"}:
+        print(
+            f"Warning: --stopping-signal {path} did not contain a usable "
+            f"DG018 payload; ignoring.",
+            file=sys.stderr,
+        )
+        return None
+
+    try:
+        return StoppingSignal(
+            phase=phase,  # type: ignore[arg-type]
+            missing_mass_upper=float(observed.get("missing_mass_upper", 0.0)),
+            n_samples=int(observed.get("n_samples", 0)),
+            tau_mix=(
+                float(observed["tau_mix"])
+                if observed.get("tau_mix") is not None
+                else None
+            ),
+            source_run_id=source_run_id,
+        )
+    except (TypeError, ValueError) as exc:
+        print(
+            f"Warning: --stopping-signal {path} could not be parsed: {exc}",
+            file=sys.stderr,
+        )
+        return None
 
 
 def _build_oracles(names: str) -> list:
@@ -119,7 +194,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--mutators", default="grammar,havoc",
-        help="Comma-separated mutator list (grammar,havoc,token,splice,dictionary,mxss,structural,saml,cookie,jwt,oauth,domclobber)",
+        help="Comma-separated mutator list (grammar,havoc,token,splice,dictionary,mxss,structural,saml,cookie,jwt,oauth,pgwire,request_smuggling,domclobber)",
     )
     fuz.add_argument(
         "--scheduler", default="entropic",
@@ -127,7 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--oracle", default="crash,sanitizer",
-        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml,saml_sigtrue,saml_validator,cookie,jwt,oauth,graphql,graphql_exec,sanitizer_diff,deser,jndi,jdbc,domclobber,domclobber_diff)",
+        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml,saml_sigtrue,saml_validator,cookie,jwt,oauth,pgwire,request_smuggling,graphql,graphql_exec,sanitizer_diff,deser,jndi,jdbc,domclobber,domclobber_diff)",
     )
     fuz.add_argument(
         "--initial-seeds", type=int, default=100,
@@ -148,6 +223,44 @@ def build_parser() -> argparse.ArgumentParser:
     fuz.add_argument(
         "--diff-cmd", action="append", default=[],
         help="Reference target for differential fuzzing (repeatable)",
+    )
+    fuz.add_argument(
+        "--diff-trace", type=Path, default=None,
+        help="Append one JSONL row per differential oracle invocation to this "
+             "path (pre-dedup raw stream for E1 census / Good-Turing).",
+    )
+    fuz.add_argument(
+        "--feature-dump", type=Path, default=None,
+        help="Append one JSONL row per differential execution with input-side "
+             "features (sha1, length, applied mutator strategies, divergence, "
+             "diff_fields). Consumed by E2 preservation and E3 manifold "
+             "offline analyses.",
+    )
+    fuz.add_argument(
+        "--lattice-atoms", type=Path, default=None,
+        help="Path to strategy_atom_weights.json produced by E4 FCA. "
+             "On startup, strategies listed in this file get their base "
+             "weights boosted by their Birkhoff-atom coverage score "
+             "(SamlMutator.apply_lattice_atoms).",
+    )
+    fuz.add_argument(
+        "--automaton-witnesses", type=Path, default=None,
+        help="Path to strategy_witness_weights.json produced by "
+             "experiments.diffspace_geometry.e7_automata.strategy_witnesses. "
+             "On startup, strategies listed in this file get their base "
+             "weights boosted by their E7 disagreement-witness contribution "
+             "(SamlMutator.apply_automaton_witnesses).",
+    )
+    fuz.add_argument(
+        "--stopping-signal", type=Path, default=None,
+        help="Path to a JSON file produced by "
+             "'python -m experiments.diffspace_geometry.lint --json'. "
+             "When the embedded DG018 check reports phase=exploitation, "
+             "EntropicScheduler dampens the entropy/novelty component "
+             "and amplifies the class-saturation penalty so energy "
+             "flows to under-visited diff-pattern classes. Accepts "
+             "either the full lint JSON or a minimal "
+             "{phase, missing_mass_upper, n_samples} payload.",
     )
     fuz.add_argument(
         "--dict-file", type=Path, default=None,
@@ -185,7 +298,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     fuz.add_argument(
         "--campaign", default=None,
-        help="Campaign preset (cve_detect, patch_bypass, novel). "
+        help="Campaign preset (cve_detect, patch_bypass, novel, hrs_stable, hrs_research, hrs_hybrid, pgwire_stable, pgwire_research, pgwire_hybrid). "
              "Pre-configures oracle/mutators/seeds for the campaign goal.",
     )
 
@@ -324,7 +437,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
     text = args.separator.join(outputs)
 
     if args.output:
-        args.output.write_text(text, encoding="utf-8")
+        # Preserve exact line endings for raw-wire grammars such as HRS streams.
+        args.output.write_bytes(text.encode("utf-8"))
         print(f"Wrote {args.count} output(s) to {args.output}", file=sys.stderr)
     else:
         print(text)
@@ -455,8 +569,97 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         campaign_mode=_campaign_mode,
     )
 
+    # E4 FCA — startup-time strategy boost from Birkhoff atom coverage.
+    lattice_atoms_path = getattr(args, "lattice_atoms", None)
+    if lattice_atoms_path is not None:
+        try:
+            _atoms_payload = json.loads(
+                Path(lattice_atoms_path).read_text(encoding="utf-8"),
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            print(
+                f"Warning: failed to read --lattice-atoms {lattice_atoms_path}: "
+                f"{exc}",
+                file=sys.stderr,
+            )
+            _atoms_payload = None
+        if _atoms_payload is not None:
+            _atom_weights = _atoms_payload.get("weights") or {}
+            if isinstance(_atom_weights, dict) and _atom_weights:
+                from .fuzzer.protocols import LatticeAtomMutator
+                _boosted = 0
+                for m in mutators:
+                    if isinstance(m, LatticeAtomMutator):
+                        m.apply_lattice_atoms(_atom_weights)
+                        _boosted += 1
+                print(
+                    f"[lattice-atoms] applied {len(_atom_weights)} strategy "
+                    f"weights to {_boosted} mutator(s) from "
+                    f"{lattice_atoms_path}",
+                )
+
+    # E7 differential-SFA — startup-time strategy boost from witness scores.
+    automaton_witnesses_path = getattr(args, "automaton_witnesses", None)
+    if automaton_witnesses_path is not None:
+        try:
+            _aw_payload = json.loads(
+                Path(automaton_witnesses_path).read_text(encoding="utf-8"),
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            print(
+                f"Warning: failed to read --automaton-witnesses "
+                f"{automaton_witnesses_path}: {exc}",
+                file=sys.stderr,
+            )
+            _aw_payload = None
+        if _aw_payload is not None:
+            _aw_weights = _aw_payload.get("weights") or {}
+            if isinstance(_aw_weights, dict) and _aw_weights:
+                from .fuzzer.protocols import AutomatonWitnessMutator
+                _aw_boosted = 0
+                for m in mutators:
+                    if isinstance(m, AutomatonWitnessMutator):
+                        m.apply_automaton_witnesses(_aw_weights)
+                        _aw_boosted += 1
+                print(
+                    f"[automaton-witnesses] applied {len(_aw_weights)} "
+                    f"strategy weights to {_aw_boosted} mutator(s) from "
+                    f"{automaton_witnesses_path}",
+                )
+
     # Scheduler
     scheduler = build_seed_scheduler(args.scheduler, args.seed)
+
+    # DG018 stopping signal — optional offline PAC phase signal that
+    # tells the scheduler whether to operate in discovery or
+    # exploitation mode (see EntropicScheduler.set_stopping_signal and
+    # experiments/diffspace_geometry/lint.py DG018).
+    stopping_signal_path = getattr(args, "stopping_signal", None)
+    if stopping_signal_path is not None:
+        signal = _load_stopping_signal(stopping_signal_path)
+        if signal is not None:
+            applied = False
+            for cand in (
+                scheduler,
+                getattr(scheduler, "primary", None),
+                getattr(scheduler, "secondary", None),
+            ):
+                if cand is not None and hasattr(cand, "set_stopping_signal"):
+                    cand.set_stopping_signal(signal)
+                    applied = True
+            if applied:
+                print(
+                    f"[stopping-signal] phase={signal.phase} "
+                    f"M0_upper={signal.missing_mass_upper:.4g} "
+                    f"n={signal.n_samples} from {stopping_signal_path}",
+                )
+            else:
+                print(
+                    f"Warning: --stopping-signal supplied but scheduler "
+                    f"{type(scheduler).__name__} has no set_stopping_signal "
+                    f"method; ignoring.",
+                    file=sys.stderr,
+                )
 
     # Mutator scheduler
     mutator_scheduler = build_mutator_scheduler(
@@ -467,7 +670,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
     )
 
     # Oracles — auto-add DiffOracle in differential mode
-    _DIFF_ONLY_ORACLES = {"sanitizer_diff", "markdown", "domclobber_diff", "sandbox"}
+    _DIFF_ONLY_ORACLES = {"sanitizer_diff", "markdown", "domclobber_diff", "sandbox", "request_smuggling", "waf_bypass", "pgwire", "apache_confusion"}
     diff_only_requested = requested_oracle_names & _DIFF_ONLY_ORACLES
     if diff_only_requested and not is_diff_mode:
         names = ", ".join(sorted(diff_only_requested))
@@ -480,14 +683,32 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
 
     oracles = build_oracles(args.oracle)
     has_sanitizer_diff = False
+    diff_trace_sink: object | None = None
+    feature_dump_sink: object | None = None
     if is_diff_mode:
         diff_setup = configure_differential_oracles(
             oracles=oracles,
             oracle_csv=args.oracle,
             reference_targets=reference_targets,
+            trace_path=getattr(args, "diff_trace", None),
+            feature_dump_path=getattr(args, "feature_dump", None),
         )
         oracles = diff_setup.oracles
         has_sanitizer_diff = diff_setup.has_sanitizer_diff
+        diff_trace_sink = diff_setup.trace_sink
+        feature_dump_sink = diff_setup.feature_sink
+        if diff_trace_sink is not None:
+            print(
+                f"  Diff trace: appending pre-dedup JSONL to "
+                f"{getattr(diff_trace_sink, 'path', '(unknown)')}",
+                file=sys.stderr,
+            )
+        if feature_dump_sink is not None:
+            print(
+                f"  Feature dump: appending per-input JSONL to "
+                f"{getattr(feature_dump_sink, 'path', '(unknown)')}",
+                file=sys.stderr,
+            )
 
     coverage = build_coverage(
         args,
@@ -591,6 +812,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         target_coverage=getattr(args, "target_coverage", False),
         guidance_hooks=guidance_hooks,
         concolic=concolic_coordinator,
+        fixed_primary=_campaign_mode.startswith("waf_"),
     )
 
     print(f"Starting fuzzer: grammar={args.grammar}, target={args.target_cmd}",
@@ -660,6 +882,19 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
 
     # Print final report
     print(stats.report(), file=sys.stderr)
+
+    # Close the diff trace sink, if any, so the JSONL file is fully flushed.
+    if diff_trace_sink is not None:
+        try:
+            diff_trace_sink.close()
+        except Exception:
+            pass
+    if feature_dump_sink is not None:
+        try:
+            feature_dump_sink.close()
+        except Exception:
+            pass
+
     return 0
 
 
@@ -696,6 +931,20 @@ def cmd_verify_browser(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    import atexit
+
+    def _exit_diagnostics():
+        """Log when the process exits — helps diagnose silent crashes."""
+        try:
+            import time as _time
+            msg = f"[EXIT] Process exiting at {_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            sys.stderr.write(msg)
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+    atexit.register(_exit_diagnostics)
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -720,4 +969,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Enable faulthandler so native crashes (e.g., Rust extension segfault)
+    # dump a traceback to stderr instead of dying silently.
+    import faulthandler
+    faulthandler.enable()
     main()

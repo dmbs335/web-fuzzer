@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from .corpus import Corpus, CoverageMap, Seed
@@ -89,6 +89,37 @@ class Finding:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class StoppingSignal:
+    """Offline PAC stopping signal from diffspace-geometry lint (DG018).
+
+    Produced by running
+    ``python -m experiments.diffspace_geometry.lint --json`` on a prior
+    session and extracting the ``DG018`` observed fields (or constructed
+    by hand for tests). The signal tells the scheduler whether the
+    previous campaign's Good-Turing missing-mass upper bound already
+    cleared the PAC stopping threshold ε.
+
+    ``phase="discovery"``  — the fuzzer should keep exploring normally;
+    scheduler behaves as if no signal were supplied.
+
+    ``phase="exploitation"`` — the species pool is already near-saturated
+    (per McAllester–Schapire). The entropic scheduler dampens its
+    novelty component and strengthens the class-saturation penalty so
+    that energy flows to *under-visited* patterns rather than to the
+    rare-feature frontier (which has already been charted).
+
+    Fields are kept minimal and domain-agnostic; ``source_run_id`` is
+    only used for logging.
+    """
+
+    phase: Literal["discovery", "exploitation"]
+    missing_mass_upper: float
+    n_samples: int
+    tau_mix: float | None = None
+    source_run_id: str | None = None
+
+
 @dataclass
 class ScheduleResult:
     """Feedback from an execution — used by schedulers to update state."""
@@ -99,6 +130,9 @@ class ScheduleResult:
     new_edges: set[int] = field(default_factory=set)
     # Finding metadata for MAP-Elites: list of {category, ref_index, severity}.
     finding_metadata: list[dict[str, Any]] = field(default_factory=list)
+    # Differential pattern hashes observed this invocation (pre-dedup).
+    # Consumed by class-saturation aware schedulers (Phase 4 feedback hook).
+    diff_pattern_hashes: list[str] = field(default_factory=list)
 
 
 # ── Pluggable component Protocols ─────────────────────────────────
@@ -196,6 +230,45 @@ class LearnedWeightMutator(Protocol):
     def apply_learned_weights(
         self,
         strategy_effectiveness: dict[str, float],
+    ) -> None: ...
+
+
+@runtime_checkable
+class LatticeAtomMutator(Protocol):
+    """Accepts offline Birkhoff-atom coverage weights (E4 FCA output).
+
+    The input is a ``{strategy_name: weight in [0,1]}`` dict derived from
+    ``experiments/diffspace_geometry/e4_fca/strategy_atoms.py``. Higher
+    weights correspond to strategies whose historical findings cover a
+    larger subset of the meet-irreducible diff-field atoms of the
+    observed concept lattice. Implementations should treat this as a
+    startup-time weight initialization, not a runtime feedback channel.
+    """
+
+    def apply_lattice_atoms(
+        self,
+        atom_weights: dict[str, float],
+    ) -> None: ...
+
+
+@runtime_checkable
+class AutomatonWitnessMutator(Protocol):
+    """Accepts E7 differential-SFA witness scores as a startup boost.
+
+    Input is ``{strategy_name: score in [0, 1]}`` produced offline from
+    the E7 pairwise symmetric-difference surfaces plus the feature dump
+    (see
+    ``experiments/diffspace_geometry/e7_automata/strategy_witnesses.py``).
+    Higher scores mean the strategy historically contributed more to
+    diff-field coordinates that witness observed library-pair
+    disagreements. Implementations should treat this as a startup-time
+    initialization that composes with other boost channels without ever
+    demoting a weight already raised elsewhere.
+    """
+
+    def apply_automaton_witnesses(
+        self,
+        witness_weights: dict[str, float],
     ) -> None: ...
 
 
