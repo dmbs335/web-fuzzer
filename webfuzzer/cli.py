@@ -61,21 +61,37 @@ def _load_stopping_signal(path: Path):
     phase: str | None = None
     source_run_id: str | None = None
 
+    pareto_alpha: float | None = None
+
     if isinstance(payload, dict) and "phase" in payload:
         observed = payload
         phase = str(payload.get("phase") or "").strip().lower() or None
         source_run_id = payload.get("source_run_id")
+        if payload.get("pareto_alpha") is not None:
+            try:
+                pareto_alpha = float(payload["pareto_alpha"])
+            except (TypeError, ValueError):
+                pass
     elif isinstance(payload, dict) and isinstance(payload.get("checks"), list):
         source_run_id = payload.get("run_id")
         for ck in payload["checks"]:
-            if isinstance(ck, dict) and ck.get("id") == "DG018":
+            if not isinstance(ck, dict):
+                continue
+            if ck.get("id") == "DG018":
                 observed = ck.get("observed") or {}
                 phase = (
                     "exploitation"
                     if str(ck.get("status", "")).upper() == "PASS"
                     else "discovery"
                 )
-                break
+            elif ck.get("id") == "DG006":
+                # Extract Pareto α for heavy-tail-aware apply_learned_weights.
+                _dg006_obs = ck.get("observed") or {}
+                if _dg006_obs.get("alpha") is not None:
+                    try:
+                        pareto_alpha = float(_dg006_obs["alpha"])
+                    except (TypeError, ValueError):
+                        pass
 
     if observed is None or phase not in {"discovery", "exploitation"}:
         print(
@@ -96,6 +112,7 @@ def _load_stopping_signal(path: Path):
                 else None
             ),
             source_run_id=source_run_id,
+            pareto_alpha=pareto_alpha,
         )
     except (TypeError, ValueError) as exc:
         print(
@@ -261,6 +278,26 @@ def build_parser() -> argparse.ArgumentParser:
              "flows to under-visited diff-pattern classes. Accepts "
              "either the full lint JSON or a minimal "
              "{phase, missing_mass_upper, n_samples} payload.",
+    )
+    fuz.add_argument(
+        "--dedup-atoms", type=Path, default=None,
+        help="Path to an E4 FCA summary.json (or any JSON with a top-level "
+             "\"atoms\" list).  When supplied, the deduplicator switches from "
+             "oracle-level diff_pattern_hash fingerprinting to a Birkhoff "
+             "bitvector key: two findings that touch the same subset of "
+             "meet-irreducible lattice atoms are collapsed into one report "
+             "regardless of which mutator strategy produced them.  Findings "
+             "whose diff_fields have no overlap with the atom set fall back "
+             "to the original hash path so no coverage is lost.",
+    )
+    fuz.add_argument(
+        "--implication-base", type=Path, default=None,
+        help="Path to an E4 FCA implication_base.json.  When supplied, an "
+             "ImplicationSoftOracle is layered on top of the primary oracle: "
+             "any finding whose diff_fields satisfy a conf=1.0 implication "
+             "premise but NOT its conclusion is flagged as a novel "
+             "implication-violation finding and written to violations.jsonl "
+             "in the output directory.",
     )
     fuz.add_argument(
         "--dict-file", type=Path, default=None,
@@ -787,6 +824,74 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         print(f"  Concolic: enabled (mode={concolic_mode}, plugin={plugin_name}, budget={budget:.0%})",
               file=sys.stderr)
 
+    # Phase 2A: Birkhoff bitvector deduplicator (optional, off by default)
+    dedup_atoms_path = getattr(args, "dedup_atoms", None)
+    deduplicator = None
+    if dedup_atoms_path is not None:
+        try:
+            import json as _json
+            _dedup_raw = _json.loads(
+                Path(dedup_atoms_path).read_text(encoding="utf-8"),
+            )
+            _atoms_list = _dedup_raw.get("atoms", [])
+            if _atoms_list:
+                from .fuzzer.dedup.structural_dedup import StructuralDeduplicator
+                _sdedup = StructuralDeduplicator()
+                _sdedup.set_atoms(_atoms_list)
+                deduplicator = _sdedup
+                print(
+                    f"  Dedup: bitvector mode — {len(_atoms_list)} Birkhoff atoms "
+                    f"from {dedup_atoms_path}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"Warning: --dedup-atoms {dedup_atoms_path} has no 'atoms' list; "
+                    f"falling back to default dedup.",
+                    file=sys.stderr,
+                )
+        except Exception as exc:
+            print(
+                f"Warning: failed to load --dedup-atoms {dedup_atoms_path}: {exc}; "
+                f"falling back to default dedup.",
+                file=sys.stderr,
+            )
+
+    # Phase 2C: FCA implication soft oracle (optional, off by default)
+    implication_base_path = getattr(args, "implication_base", None)
+    if implication_base_path is not None:
+        try:
+            import json as _json
+            _implications = _json.loads(
+                Path(implication_base_path).read_text(encoding="utf-8"),
+            )
+            if isinstance(_implications, list) and _implications:
+                from .fuzzer.oracles.implication_oracle import ImplicationSoftOracle
+                # Wrap each oracle in the soft oracle; drain_violations is
+                # called by the engine's post-check hook if present, otherwise
+                # violations are silently buffered (no crash).
+                oracles = [
+                    ImplicationSoftOracle(o, _implications)
+                    for o in oracles
+                ]
+                print(
+                    f"  Implication oracle: {len(_implications)} conf=1.0 rules "
+                    f"from {implication_base_path}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"Warning: --implication-base {implication_base_path} is empty "
+                    f"or not a list; implication oracle disabled.",
+                    file=sys.stderr,
+                )
+        except Exception as exc:
+            print(
+                f"Warning: failed to load --implication-base {implication_base_path}: "
+                f"{exc}; implication oracle disabled.",
+                file=sys.stderr,
+            )
+
     # Build and run engine
     engine = FuzzEngine(
         target=target,
@@ -813,6 +918,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         guidance_hooks=guidance_hooks,
         concolic=concolic_coordinator,
         fixed_primary=_campaign_mode.startswith("waf_"),
+        deduplicator=deduplicator,
     )
 
     print(f"Starting fuzzer: grammar={args.grammar}, target={args.target_cmd}",

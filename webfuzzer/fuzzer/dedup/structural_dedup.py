@@ -13,10 +13,32 @@ from ..protocols import Finding
 
 
 class StructuralDeduplicator:
-    """Deduplicates findings using structural fingerprints."""
+    """Deduplicates findings using structural fingerprints.
+
+    When an atoms list is loaded via :meth:`set_atoms`, the fingerprint for
+    differential findings switches from the oracle-level ``diff_pattern_hash``
+    (which encodes strategy/category identity) to a Birkhoff bitvector
+    ``frozenset(diff_fields ∩ atoms)``.  Two findings that touch the same
+    subset of concept-lattice atoms are treated as the same equivalence class
+    regardless of which mutator strategy produced them.  Without an atoms list
+    the behaviour is byte-identical to the pre-Phase-2 implementation.
+    """
 
     def __init__(self) -> None:
         self._seen: set[str] = set()
+        # Birkhoff atom set loaded from e4_fca/summary.json["atoms"].
+        # None = bitvector path disabled (backward-compatible default).
+        self._atoms: frozenset[str] | None = None
+
+    def set_atoms(self, atoms: list[str]) -> None:
+        """Load the meet-irreducible atom list from the E4 FCA summary.
+
+        Once set, ``fingerprint()`` will use the bitvector path for any
+        finding whose ``diff_fields`` intersect the atom set.  Findings
+        whose diff_fields are entirely outside the atom set fall back to
+        the original ``diff_pattern_hash`` path so no coverage is lost.
+        """
+        self._atoms = frozenset(atoms)
 
     def fingerprint(self, finding: Finding) -> str:
         h = hashlib.sha256()
@@ -27,13 +49,29 @@ class StructuralDeduplicator:
         # 2. Severity
         h.update(finding.severity.value.encode())
 
-        # 3. Error signature (normalized)
-        error_sig = self._extract_error_sig(finding)
-        h.update(error_sig.encode())
+        # 3a. Bitvector path (Phase 2A): when atoms are loaded, fingerprint on
+        #     the intersection of diff_fields with the Birkhoff atom set.  This
+        #     makes the key invariant to strategy/category identity and collapses
+        #     findings that cover the same lattice concept into one bucket.
+        if self._atoms is not None:
+            diff_fields = finding.metadata.get("diff_fields") or []
+            bv = tuple(sorted(f for f in diff_fields if f in self._atoms))
+            if bv:
+                h.update(("bv:" + "|".join(bv)).encode())
+                return h.hexdigest()[:16]
+            # bv empty means no known atoms hit — fall through to path 3b so
+            # non-atom findings still get deduplicated by the original hash.
 
-        # 4. Input structural skeleton
-        skeleton = self._input_skeleton(finding)
-        h.update(skeleton.encode())
+        # 3b. Oracle-level diff_pattern_hash (high-resolution behavioral fingerprint)
+        diff_hash = finding.metadata.get("diff_pattern_hash", "")
+        if diff_hash:
+            h.update(diff_hash.encode())
+        else:
+            # Fallback: error signature + input skeleton (non-differential oracles)
+            error_sig = self._extract_error_sig(finding)
+            h.update(error_sig.encode())
+            skeleton = self._input_skeleton(finding)
+            h.update(skeleton.encode())
 
         return h.hexdigest()[:16]
 

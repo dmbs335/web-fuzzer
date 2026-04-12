@@ -1569,6 +1569,53 @@ class WafBypassMutator:
             if capped > self._family_boosts[fam]:
                 self._family_boosts[fam] = capped
 
+    # ── Runtime learned-weight feedback ──────────────────────────
+    #
+    # Optional channel for PropertyGuidedCoordinator or similar runtime
+    # feedback sources.  Uses the same family-level boost mechanic as the
+    # E4/E7 startup channels but accepts a divergence_rate map instead of
+    # an atom-coverage score.  Heavy-tail fallback (median normalization)
+    # mirrors SamlMutator.apply_learned_weights.
+
+    _learned_weights: dict[str, float] | None = None
+
+    def apply_learned_weights(
+        self,
+        strategy_effectiveness: dict[str, float],
+        alpha: float | None = None,
+    ) -> None:
+        """Apply runtime divergence-rate weights as family-level boosts.
+
+        strategy_effectiveness: {family_name: divergence_rate}
+        alpha: Pareto tail-index estimate (Hill estimator, DG006).  When
+        ``alpha < 2``, switches normalisation to median for robustness
+        against heavy-tail outliers.
+
+        Boost formula: ``1 + 2.0 * (rate / ref)``, capped at 3× so no
+        single family can starve the others.  Never demotes: uses ``max``
+        with the current boost so the three channels (E4 FCA, E7 witness,
+        runtime learned) stack monotonically.
+        """
+        if not strategy_effectiveness:
+            return
+        self._learned_weights = dict(strategy_effectiveness)
+        rates = [v for v in strategy_effectiveness.values() if v > 0]
+        if not rates:
+            return
+        if alpha is not None and alpha < 2.0:
+            import statistics
+            ref = statistics.median(rates) or 1.0
+        else:
+            ref = max(rates) or 1.0
+        for fam in _ALL_FAMILIES:
+            rate = strategy_effectiveness.get(fam, 0.0)
+            if rate <= 0:
+                continue
+            boost = 1.0 + 2.0 * (rate / ref)
+            capped = min(boost, 3.0)
+            if capped > self._family_boosts[fam]:
+                self._family_boosts[fam] = capped
+
     def _weighted_family_pick(self, families: "tuple[str, ...] | list[str]") -> str:
         """Pick one family from ``families`` weighted by ``_family_boosts``.
 

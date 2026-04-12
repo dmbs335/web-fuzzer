@@ -11,7 +11,7 @@ import os
 import random
 import sys
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from pathlib import Path
 from .corpus import Corpus, CoverageMap, Seed
 from .browser_queueing import BrowserVerificationService
@@ -242,6 +242,7 @@ class FuzzEngine:
         target_coverage: bool = False,
         guidance_hooks: "GuidanceFuzzHooks | None" = None,
         concolic: "ConcolicCoordinator | None" = None,
+        fixed_primary: bool = False,
     ):
         self.target = target
         self.reference_targets: list[Target] = reference_targets or []
@@ -312,8 +313,11 @@ class FuzzEngine:
         # Round-robin rotation removes the fixed-primary bias: each target
         # takes turns as "primary" so differentials visible from any
         # parser's perspective get discovered.
+        # Exception: WAF bypass and similar asymmetric campaigns use
+        # fixed_primary=True to keep all_targets[0] as primary always.
         self.all_targets: list[Target] = [target] + list(self.reference_targets)
         self._rotation_idx: int = 0
+        self._fixed_primary: bool = fixed_primary
 
         # Extract library names from target commands for guidance attribution.
         self._target_lib_names: list[str] = [
@@ -370,6 +374,16 @@ class FuzzEngine:
             output_dir=self.output_dir,
             stats=self.stats,
         )
+        # Phase 2C: build violation_sink if output_dir is set and at least
+        # one oracle exposes drain_violations (ImplicationSoftOracle).
+        _vsink = None
+        if self.output_dir is not None and any(
+            hasattr(o, "drain_violations") for o in self.oracles
+        ):
+            from .finding_pipeline import make_jsonl_violation_sink
+            _vsink = make_jsonl_violation_sink(
+                self.output_dir / "violations.jsonl"
+            )
         self._finding_processor = FindingProcessor(
             oracles=self.oracles,
             deduplicator=self.deduplicator,
@@ -378,6 +392,7 @@ class FuzzEngine:
             guidance_hooks=self._guidance,
             all_targets=self.all_targets,
             target_lib_names=self._target_lib_names,
+            violation_sink=_vsink,
         )
         self._runtime_reporting = RuntimeReportingService(
             stats=self.stats,
@@ -391,6 +406,7 @@ class FuzzEngine:
             running_getter=lambda: self._running,
             sync_deser_diag=self._sync_deser_diag,
         )
+        _adaptive_cov = self.coverage if isinstance(self.coverage, AdaptiveDiffCoverage) else None
         self._checkpoint_service = CheckpointService(
             output_dir=self.output_dir,
             corpus=self.corpus,
@@ -398,6 +414,7 @@ class FuzzEngine:
             rng=self.rng,
             dedup_exporter=self._export_dedup_seen,
             dedup_importer=self._import_dedup_seen,
+            adaptive_coverage=_adaptive_cov,
         )
         self._maintenance = RuntimeMaintenanceService(
             corpus=self.corpus,
@@ -471,7 +488,9 @@ class FuzzEngine:
 
             # 4. Execute with rotated primary
             primary, refs = self._rotate_primary()
-            result = self._execute_on(primary, mutated_input)
+            result, ref_results = self._execute_primary_and_refs(
+                primary, refs, mutated_input
+            )
             self.stats.record_execution(mutator_name)
 
             # Track per-strategy metrics (e.g., SAML mutator's 50 strategies)
@@ -481,9 +500,6 @@ class FuzzEngine:
 
             # 4.1. Queue for async browser verification (fire-and-forget)
             self._browser_verification.maybe_queue(mutated_input, result)
-
-            # 4.5. Execute refs once (cached for coverage + oracles)
-            ref_results = self._execute_on_refs(refs, mutated_input)
 
             # 5. Collect coverage and check novelty
             is_novel = False
@@ -591,11 +607,15 @@ class FuzzEngine:
                     for tr in (t_ref_results or []):
                         tr.metadata.pop("target_coverage", None)
 
-                # Feed learned strategy weights back to mutator
+                # Feed learned strategy weights back to mutator.
+                # Phase 2B: pass pareto_alpha from the stopping signal so
+                # heavy-tail (α<2) campaigns use median normalisation.
                 if isinstance(self._concolic, StrategyWeightProvider):
                     learned_weights = self._concolic.get_strategy_weights()
                     if learned_weights and isinstance(mutator, LearnedWeightMutator):
-                        mutator.apply_learned_weights(learned_weights)
+                        _ss = getattr(self.seed_scheduler, "_stopping_signal", None)
+                        _alpha = getattr(_ss, "pareto_alpha", None)
+                        mutator.apply_learned_weights(learned_weights, alpha=_alpha)
 
             # 6.6 Release coverage bitmaps to prevent memory growth
             # (16KB × num_targets per iteration; coverage + concolic already consumed)
@@ -611,6 +631,9 @@ class FuzzEngine:
                 execution_time_ms=result.duration_ms,
                 new_edges=new_edges,
                 finding_metadata=self._last_finding_metadata,
+                diff_pattern_hashes=list(
+                    result.metadata.get("diff_pattern_hashes") or ()
+                ),
             )
             self.seed_scheduler.update(seed, schedule_result)
             self.mutator_scheduler.update(mutator, schedule_result)
@@ -693,6 +716,7 @@ class FuzzEngine:
             # 11. Status output + periodic checkpoint
             self._maybe_print_status()
             self._maybe_save_checkpoint()
+
           except KeyboardInterrupt:
             raise
           except Exception:
@@ -738,7 +762,16 @@ class FuzzEngine:
         Each call advances the rotation counter, so every target gets
         equal time as primary.  In non-differential mode (single target)
         this always returns (target, []).
+
+        When ``_fixed_primary`` is set (WAF bypass and other asymmetric
+        campaigns), ``all_targets[0]`` is always primary — rotation is
+        disabled because the roles are not interchangeable.
         """
+        if self._fixed_primary:
+            # Keep rotation_idx pinned at 1 so finding_pipeline computes
+            # primary_idx = (1-1) % N = 0  (always the fixed primary).
+            self._rotation_idx = 1
+            return self.all_targets[0], self.all_targets[1:]
         idx = self._rotation_idx % len(self.all_targets)
         self._rotation_idx += 1
         primary = self.all_targets[idx]
@@ -798,7 +831,82 @@ class FuzzEngine:
             self._ref_pool = ThreadPoolExecutor(
                 max_workers=max(len(self.all_targets) - 1, 1),
             )
-        return list(self._ref_pool.map(_run, refs))
+        pool_timeout = getattr(refs[0], 'timeout_seconds', 10.0) * 2 + 10
+        return list(self._ref_pool.map(_run, refs, timeout=pool_timeout))
+
+    def _execute_primary_and_refs(
+        self,
+        primary,
+        refs: list,
+        inp: Input,
+    ) -> tuple[ExecutionResult, list[ExecutionResult] | None]:
+        """Execute primary + references in one call.
+
+        Fast path: if primary is a MultiDiffPersistentTarget, delegate to
+        execute_all() which fans out to all WAFs via a single subprocess and
+        Rust parallel sockets — one pipe round-trip instead of N+1.
+
+        Slow path: normal execute_on + _execute_on_refs (unchanged behaviour).
+        """
+        from .targets.persistent_target import MultiDiffPersistentTarget
+
+        if isinstance(primary, MultiDiffPersistentTarget):
+            try:
+                return primary.execute_all(inp)
+            except Exception as e:
+                logger.warning(
+                    "MultiDiffPersistentTarget.execute_all error: %s — "
+                    "falling back to normal execution",
+                    e,
+                )
+                # Fall through to normal path on unexpected failure
+
+        # Parallel path: submit primary alongside refs so all WAF subprocesses
+        # run concurrently — halves wall time vs sequential primary-then-refs.
+        if refs:
+            if self._ref_pool is None:
+                self._ref_pool = ThreadPoolExecutor(
+                    max_workers=max(len(self.all_targets), 1),
+                )
+            f_primary = self._ref_pool.submit(self._execute_on, primary, inp)
+            f_refs = [self._ref_pool.submit(self._execute_on, r, inp) for r in refs]
+            # Generous timeout: 2× target timeout + 10s for setup/warmup.
+            # Prevents permanent hang if a subprocess pipe deadlocks on
+            # Windows (no error / no traceback — the process just freezes).
+            pool_timeout = getattr(primary, 'timeout_seconds', 10.0) * 2 + 10
+            try:
+                result = f_primary.result(timeout=pool_timeout)
+                ref_results: list[ExecutionResult] | None = [
+                    f.result(timeout=pool_timeout) for f in f_refs
+                ]
+            except FutureTimeoutError:
+                logger.error(
+                    "ThreadPool future timed out after %.0fs — possible "
+                    "subprocess pipe deadlock. Cancelling and recycling.",
+                    pool_timeout,
+                )
+                # Cancel pending futures (won't stop running ones)
+                for f in [f_primary] + f_refs:
+                    f.cancel()
+                # Force-recycle all targets to break any pipe deadlock
+                for t in self.all_targets:
+                    try:
+                        t.teardown()
+                    except Exception:
+                        pass
+                    t.setup()
+                # Return a synthetic error result so the loop can continue
+                result = ExecutionResult(
+                    exit_code=-1,
+                    stderr=b"ThreadPool future timeout",
+                    metadata={"error": "pool_timeout",
+                              "error_type": "TimeoutError"},
+                )
+                ref_results = None
+            return result, ref_results
+
+        result = self._execute_on(primary, inp)
+        return result, None
 
     def _execute(self, inp: Input) -> ExecutionResult:
         """Execute input against the fixed primary target (backward compat)."""
@@ -1083,10 +1191,12 @@ class _DefaultDeduplicator:
         # regardless of how many metadata labels exist.
         dph = meta.get("diff_pattern_hash")
         if dph:
+            # Strategy/category are omitted: the diff_pattern_hash
+            # captures the behavioral signature.  Including strategy
+            # caused 3-5x inflation where the same input triggered
+            # separate findings for each of 8 WAF bypass strategies.
             parts = [
                 finding.oracle_name,
-                meta.get("strategy", ""),
-                meta.get("category", ""),
                 dph,
             ]
             # Cookie name bucket — still needed so different cookie

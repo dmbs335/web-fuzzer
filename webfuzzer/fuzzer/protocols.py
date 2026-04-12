@@ -118,6 +118,10 @@ class StoppingSignal:
     n_samples: int
     tau_mix: float | None = None
     source_run_id: str | None = None
+    # Pareto tail-index α from the DG006 Hill estimator.  When α < 2 the
+    # divergence-rate distribution has infinite variance; mutators should use
+    # median normalisation instead of max in apply_learned_weights.
+    pareto_alpha: float | None = None
 
 
 @dataclass
@@ -230,6 +234,7 @@ class LearnedWeightMutator(Protocol):
     def apply_learned_weights(
         self,
         strategy_effectiveness: dict[str, float],
+        alpha: float | None = None,
     ) -> None: ...
 
 
