@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-CAMPAIGN_PRESETS = {}
+CAMPAIGN_PRESETS = {
+    "hrs_deep": {
+        "campaign_mode": "hrs_deep",
+        "oracle": "request_smuggling",
+        "mutators": "request_smuggling,grammar,havoc",
+        "seeds_dir": "seeds/request_smuggling",
+        "grammar": "request_smuggling_stream",
+        "adaptive_coverage": True,
+        "adaptive_level": 2,
+    },
+}
 
 
 def apply_campaign_preset(args) -> str:

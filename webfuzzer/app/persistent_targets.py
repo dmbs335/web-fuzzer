@@ -310,6 +310,12 @@ def to_persistent_cmd(cmd: str, target_coverage: bool = False, lines_only: bool 
         if base_cmd.startswith("python "):
             base_cmd = f"{sys.executable} {base_cmd[7:]}"
         return base_cmd
+    if "targets/request_smuggling_target.py" in base_cmd:
+        if "--persistent" not in base_cmd:
+            base_cmd = f"{base_cmd} --persistent"
+        if base_cmd.startswith("python "):
+            base_cmd = f"{sys.executable} {base_cmd[7:]}"
+        return base_cmd
     if "--persistent" in base_cmd and base_cmd not in _NATIVE_PERSISTENT_MAP:
         return base_cmd
     if base_cmd in _NATIVE_PERSISTENT_MAP:

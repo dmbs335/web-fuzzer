@@ -11,12 +11,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
 
 from .app.campaigns import apply_campaign_preset
+from .app.experimental_features import (
+    build_guidance_hooks,
+    build_targeted_mutation_coordinator,
+)
 from .app.factories import (
     build_coverage,
     build_mutator_scheduler,
@@ -29,97 +32,13 @@ from .app.factories import (
 from .core.generator import Generator, GenerationError
 from .core.registry import GrammarRegistry
 from .app.persistent_targets import persistent_timeout_for_cmd, to_persistent_cmd
-
-
-def _load_stopping_signal(path: Path):
-    """Parse a DG018 stopping-signal payload from ``path``.
-
-    Accepts two shapes:
-
-    * Minimal: ``{"phase": "exploitation", "missing_mass_upper": 0.005,
-      "n_samples": 9802, "tau_mix": 8.91}``
-    * Full lint output from the external diffspace research workspace: the loader
-      walks ``checks`` for ``id == "DG018"`` and lifts ``observed`` plus
-      derives ``phase`` from ``status`` (``PASS`` → ``exploitation``,
-      anything else → ``discovery``).
-
-    Returns a :class:`StoppingSignal` or ``None`` if parsing failed
-    (which is logged to stderr but does not abort the run).
-    """
-    from .fuzzer.protocols import StoppingSignal
-
-    try:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        print(
-            f"Warning: failed to read --stopping-signal {path}: {exc}",
-            file=sys.stderr,
-        )
-        return None
-
-    observed: dict | None = None
-    phase: str | None = None
-    source_run_id: str | None = None
-
-    pareto_alpha: float | None = None
-
-    if isinstance(payload, dict) and "phase" in payload:
-        observed = payload
-        phase = str(payload.get("phase") or "").strip().lower() or None
-        source_run_id = payload.get("source_run_id")
-        if payload.get("pareto_alpha") is not None:
-            try:
-                pareto_alpha = float(payload["pareto_alpha"])
-            except (TypeError, ValueError):
-                pass
-    elif isinstance(payload, dict) and isinstance(payload.get("checks"), list):
-        source_run_id = payload.get("run_id")
-        for ck in payload["checks"]:
-            if not isinstance(ck, dict):
-                continue
-            if ck.get("id") == "DG018":
-                observed = ck.get("observed") or {}
-                phase = (
-                    "exploitation"
-                    if str(ck.get("status", "")).upper() == "PASS"
-                    else "discovery"
-                )
-            elif ck.get("id") == "DG006":
-                # Extract Pareto α for heavy-tail-aware apply_learned_weights.
-                _dg006_obs = ck.get("observed") or {}
-                if _dg006_obs.get("alpha") is not None:
-                    try:
-                        pareto_alpha = float(_dg006_obs["alpha"])
-                    except (TypeError, ValueError):
-                        pass
-
-    if observed is None or phase not in {"discovery", "exploitation"}:
-        print(
-            f"Warning: --stopping-signal {path} did not contain a usable "
-            f"DG018 payload; ignoring.",
-            file=sys.stderr,
-        )
-        return None
-
-    try:
-        return StoppingSignal(
-            phase=phase,  # type: ignore[arg-type]
-            missing_mass_upper=float(observed.get("missing_mass_upper", 0.0)),
-            n_samples=int(observed.get("n_samples", 0)),
-            tau_mix=(
-                float(observed["tau_mix"])
-                if observed.get("tau_mix") is not None
-                else None
-            ),
-            source_run_id=source_run_id,
-            pareto_alpha=pareto_alpha,
-        )
-    except (TypeError, ValueError) as exc:
-        print(
-            f"Warning: --stopping-signal {path} could not be parsed: {exc}",
-            file=sys.stderr,
-        )
-        return None
+from .app.research_hooks import (
+    apply_mutator_research_hooks,
+    apply_stopping_signal_hook,
+    build_research_deduplicator,
+    load_stopping_signal as _load_stopping_signal,
+    wrap_implication_oracles,
+)
 
 
 def _build_oracles(names: str) -> list:
@@ -230,6 +149,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for findings and corpus",
     )
     fuz.add_argument(
+        "--manifest-method",
+        default=None,
+        help="Override campaign_manifest.json method label for validation runs",
+    )
+    fuz.add_argument(
+        "--manifest-condition",
+        default=None,
+        choices=["baseline", "candidate", "artifact-only", "feedback-only", "negative-control"],
+        help="Override campaign_manifest.json validation condition",
+    )
+    fuz.add_argument(
         "--grammar-dir", type=Path, default=None,
         help="Additional directory to load grammars from",
     )
@@ -243,61 +173,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--diff-trace", type=Path, default=None,
-        help="Append one JSONL row per differential oracle invocation to this "
-             "path (pre-dedup raw stream for E1 census / Good-Turing).",
+        help="Append one JSONL row per differential oracle invocation. "
+             "This is an experimental pre-dedup stream for offline analysis.",
     )
     fuz.add_argument(
         "--feature-dump", type=Path, default=None,
         help="Append one JSONL row per differential execution with input-side "
              "features (sha1, length, applied mutator strategies, divergence, "
-             "diff_fields). Consumed by E2 preservation and E3 manifold "
-             "offline analyses.",
+             "diff_fields). This is an experimental offline-analysis feed.",
     )
     fuz.add_argument(
         "--lattice-atoms", type=Path, default=None,
-        help="Path to strategy_atom_weights.json produced by E4 FCA. "
-             "On startup, strategies listed in this file get their base "
-             "weights boosted by their Birkhoff-atom coverage score "
-             "(SamlMutator.apply_lattice_atoms).",
+        help="Experimental external-research hook: path to strategy atom "
+             "weights. Matching mutator strategies get startup weight boosts.",
     )
     fuz.add_argument(
         "--automaton-witnesses", type=Path, default=None,
-        help="Path to strategy_witness_weights.json produced by the external "
-             "diffspace research workspace. "
-             "On startup, strategies listed in this file get their base "
-             "weights boosted by their E7 disagreement-witness contribution "
-             "(SamlMutator.apply_automaton_witnesses).",
+        help="Experimental external-research hook: path to disagreement "
+             "witness weights. Matching mutator strategies get startup boosts.",
     )
     fuz.add_argument(
         "--stopping-signal", type=Path, default=None,
-        help="Path to a stopping-signal JSON file produced by the external "
-             "diffspace research workspace. "
-             "When the embedded DG018 check reports phase=exploitation, "
-             "EntropicScheduler dampens the entropy/novelty component "
-             "and amplifies the class-saturation penalty so energy "
-             "flows to under-visited diff-pattern classes. Accepts "
-             "either the full lint JSON or a minimal "
-             "{phase, missing_mass_upper, n_samples} payload.",
+        help="Experimental external-research hook: path to a stopping-signal "
+             "JSON file. Accepted payloads include either the full external "
+             "analysis JSON or {phase, missing_mass_upper, n_samples}.",
     )
     fuz.add_argument(
         "--dedup-atoms", type=Path, default=None,
-        help="Path to an E4 FCA summary.json (or any JSON with a top-level "
-             "\"atoms\" list).  When supplied, the deduplicator switches from "
-             "oracle-level diff_pattern_hash fingerprinting to a Birkhoff "
-             "bitvector key: two findings that touch the same subset of "
-             "meet-irreducible lattice atoms are collapsed into one report "
-             "regardless of which mutator strategy produced them.  Findings "
-             "whose diff_fields have no overlap with the atom set fall back "
-             "to the original hash path so no coverage is lost.",
+        help="Experimental external-research hook: path to a JSON file with "
+             "an atoms list. Differential findings that hit the same atom "
+             "subset share a coarse dedup key; non-overlapping findings fall "
+             "back to the normal dedup path.",
     )
     fuz.add_argument(
         "--implication-base", type=Path, default=None,
-        help="Path to an E4 FCA implication_base.json.  When supplied, an "
-             "ImplicationSoftOracle is layered on top of the primary oracle: "
-             "any finding whose diff_fields satisfy a conf=1.0 implication "
-             "premise but NOT its conclusion is flagged as a novel "
-             "implication-violation finding and written to violations.jsonl "
-             "in the output directory.",
+        help="Experimental external-research hook: path to an implication "
+             "base. Matching implication violations are written as INFO "
+             "diagnostics to violations.jsonl.",
     )
     fuz.add_argument(
         "--dict-file", type=Path, default=None,
@@ -322,7 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--persistent", action="store_true",
-        help="Use persistent target mode (keep subprocess alive, ~50x faster)",
+        help="Use persistent target mode when the target wrapper supports it",
     )
     fuz.add_argument(
         "--resume", action="store_true",
@@ -339,14 +251,15 @@ def build_parser() -> argparse.ArgumentParser:
              "Pre-configures oracle/mutators/seeds for the campaign goal.",
     )
 
-    # ── Exploration strategy flags ─────────────────────────────
+    # Exploration strategy flags. Several are research-oriented heuristics;
+    # see docs/methodology-status.md before making methodology claims.
     fuz.add_argument(
         "--mcts", action="store_true",
-        help="Use MCTS-guided grammar derivation (UCB1 production selection)",
+        help="Use experimental UCB1-guided grammar production selection",
     )
     fuz.add_argument(
         "--mcts-exploration", type=float, default=1.41,
-        help="MCTS exploration weight (UCB1 c parameter, default: 1.41)",
+        help="UCB1 exploration weight for --mcts (default: 1.41)",
     )
     fuz.add_argument(
         "--mutator-scheduler", default="random",
@@ -359,7 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--linucb-alpha", type=float, default=1.0,
-        help="LinUCB exploration parameter (default: 1.0)",
+        help="LinUCB exploration parameter for the experimental mutator scheduler (default: 1.0)",
     )
     fuz.add_argument(
         "--danger-boost", action="store_true", default=True,
@@ -371,7 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--adaptive-coverage", action="store_true",
-        help="Enable CEGAR-inspired adaptive coverage abstraction",
+        help="Enable experimental adaptive differential feature granularity",
     )
     fuz.add_argument(
         "--adaptive-level", type=int, default=1, choices=range(5),
@@ -379,7 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--adaptive-upper-pct", type=float, default=5.0,
-        help="Coarsen when corpus%% exceeds this threshold (default: 5.0)",
+        help="Refine when corpus%% exceeds this threshold (default: 5.0)",
     )
     fuz.add_argument(
         "--adaptive-check-interval", type=int, default=5000,
@@ -395,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--guidance", default=None, choices=["jwt", "saml"],
-        help="Enable static-analysis guidance for mutation bias and finding attribution",
+        help="Enable experimental regex/AST guidance for mutation bias and finding attribution",
     )
     fuz.add_argument(
         "--guidance-profiles", type=Path, default=None,
@@ -403,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--concolic", action="store_true", default=False,
-        help="Enable concolic constraint extraction and solving (SAML only)",
+        help="Enable experimental targeted mutation from constraints/properties/source hints",
     )
     fuz.add_argument(
         "--concolic-budget", type=float, default=0.10,
@@ -412,7 +325,7 @@ def build_parser() -> argparse.ArgumentParser:
     fuz.add_argument(
         "--concolic-mode", choices=["expert", "learned", "hybrid", "whitebox"],
         default="hybrid",
-        help="Concolic mode: 'hybrid' (default), 'whitebox' (coverage-guided, no expert), 'expert' (v1), 'learned' (v2)",
+        help="Targeted-mutation mode: hybrid (default), whitebox, expert, or learned",
     )
 
     # ── verify-browser subcommand ──────────────────────────────
@@ -526,6 +439,11 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_fuzz(args: argparse.Namespace) -> int:
     """Handle the 'fuzz' command."""
+    from .fuzzer.campaign_manifest import (
+        CampaignManifestInput,
+        argv_to_cli,
+        build_campaign_manifest,
+    )
     from .fuzzer.engine import FuzzEngine
     from .fuzzer.grammar_source import GrammarInputSource
 
@@ -582,7 +500,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
-    # MCTS UCB table (shared between input source and grammar mutator)
+    # UCB table for experimental grammar production selection.
     ucb_table = None
     if getattr(args, "mcts", False):
         from .fuzzer.mcts import UCBTable
@@ -606,97 +524,19 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         campaign_mode=_campaign_mode,
     )
 
-    # E4 FCA — startup-time strategy boost from Birkhoff atom coverage.
-    lattice_atoms_path = getattr(args, "lattice_atoms", None)
-    if lattice_atoms_path is not None:
-        try:
-            _atoms_payload = json.loads(
-                Path(lattice_atoms_path).read_text(encoding="utf-8"),
-            )
-        except (OSError, json.JSONDecodeError) as exc:
-            print(
-                f"Warning: failed to read --lattice-atoms {lattice_atoms_path}: "
-                f"{exc}",
-                file=sys.stderr,
-            )
-            _atoms_payload = None
-        if _atoms_payload is not None:
-            _atom_weights = _atoms_payload.get("weights") or {}
-            if isinstance(_atom_weights, dict) and _atom_weights:
-                from .fuzzer.protocols import LatticeAtomMutator
-                _boosted = 0
-                for m in mutators:
-                    if isinstance(m, LatticeAtomMutator):
-                        m.apply_lattice_atoms(_atom_weights)
-                        _boosted += 1
-                print(
-                    f"[lattice-atoms] applied {len(_atom_weights)} strategy "
-                    f"weights to {_boosted} mutator(s) from "
-                    f"{lattice_atoms_path}",
-                )
-
-    # E7 differential-SFA — startup-time strategy boost from witness scores.
-    automaton_witnesses_path = getattr(args, "automaton_witnesses", None)
-    if automaton_witnesses_path is not None:
-        try:
-            _aw_payload = json.loads(
-                Path(automaton_witnesses_path).read_text(encoding="utf-8"),
-            )
-        except (OSError, json.JSONDecodeError) as exc:
-            print(
-                f"Warning: failed to read --automaton-witnesses "
-                f"{automaton_witnesses_path}: {exc}",
-                file=sys.stderr,
-            )
-            _aw_payload = None
-        if _aw_payload is not None:
-            _aw_weights = _aw_payload.get("weights") or {}
-            if isinstance(_aw_weights, dict) and _aw_weights:
-                from .fuzzer.protocols import AutomatonWitnessMutator
-                _aw_boosted = 0
-                for m in mutators:
-                    if isinstance(m, AutomatonWitnessMutator):
-                        m.apply_automaton_witnesses(_aw_weights)
-                        _aw_boosted += 1
-                print(
-                    f"[automaton-witnesses] applied {len(_aw_weights)} "
-                    f"strategy weights to {_aw_boosted} mutator(s) from "
-                    f"{automaton_witnesses_path}",
-                )
+    apply_mutator_research_hooks(
+        mutators=mutators,
+        lattice_atoms_path=getattr(args, "lattice_atoms", None),
+        automaton_witnesses_path=getattr(args, "automaton_witnesses", None),
+    )
 
     # Scheduler
     scheduler = build_seed_scheduler(args.scheduler, args.seed)
 
-    # DG018 stopping signal — optional offline PAC phase signal that
-    # tells the scheduler whether to operate in discovery or
-    # exploitation mode (see EntropicScheduler.set_stopping_signal and
-    # the external diffspace-research lint DG018 check).
-    stopping_signal_path = getattr(args, "stopping_signal", None)
-    if stopping_signal_path is not None:
-        signal = _load_stopping_signal(stopping_signal_path)
-        if signal is not None:
-            applied = False
-            for cand in (
-                scheduler,
-                getattr(scheduler, "primary", None),
-                getattr(scheduler, "secondary", None),
-            ):
-                if cand is not None and hasattr(cand, "set_stopping_signal"):
-                    cand.set_stopping_signal(signal)
-                    applied = True
-            if applied:
-                print(
-                    f"[stopping-signal] phase={signal.phase} "
-                    f"M0_upper={signal.missing_mass_upper:.4g} "
-                    f"n={signal.n_samples} from {stopping_signal_path}",
-                )
-            else:
-                print(
-                    f"Warning: --stopping-signal supplied but scheduler "
-                    f"{type(scheduler).__name__} has no set_stopping_signal "
-                    f"method; ignoring.",
-                    file=sys.stderr,
-                )
+    apply_stopping_signal_hook(
+        scheduler=scheduler,
+        stopping_signal_path=getattr(args, "stopping_signal", None),
+    )
 
     # Mutator scheduler
     mutator_scheduler = build_mutator_scheduler(
@@ -754,143 +594,69 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         has_sanitizer_diff=has_sanitizer_diff,
     )
 
+    manifest_artifacts: dict[str, str] = {}
+    if getattr(args, "diff_trace", None):
+        manifest_artifacts["diff_trace"] = str(args.diff_trace)
+    if getattr(args, "feature_dump", None):
+        manifest_artifacts["feature_dump"] = str(args.feature_dump)
+    manifest_options = {
+        "scheduler": getattr(args, "scheduler", ""),
+        "mutator_scheduler": getattr(args, "mutator_scheduler", "random"),
+        "mcts": getattr(args, "mcts", False),
+        "adaptive_coverage": getattr(args, "adaptive_coverage", False),
+        "target_coverage": getattr(args, "target_coverage", False),
+        "guidance": getattr(args, "guidance", None),
+        "concolic": getattr(args, "concolic", False),
+        "danger_boost": getattr(args, "danger_boost", True),
+        "lattice_atoms": str(getattr(args, "lattice_atoms", "") or ""),
+        "automaton_witnesses": str(getattr(args, "automaton_witnesses", "") or ""),
+        "stopping_signal": str(getattr(args, "stopping_signal", "") or ""),
+        "dedup_atoms": str(getattr(args, "dedup_atoms", "") or ""),
+        "implication_base": str(getattr(args, "implication_base", "") or ""),
+        "initial_seed_count": getattr(args, "initial_seeds", 0),
+        "campaign": getattr(args, "campaign", None),
+        "method": getattr(args, "manifest_method", None),
+        "condition": getattr(args, "manifest_condition", None),
+    }
+    campaign_manifest = build_campaign_manifest(
+        CampaignManifestInput(
+            grammar=args.grammar,
+            target_cmd=args.target_cmd,
+            diff_cmds=tuple(diff_cmds),
+            output_dir=args.output_dir,
+            seed=args.seed,
+            count=args.count,
+            timeout=args.timeout,
+            cli=argv_to_cli(),
+            seeds_dir=getattr(args, "seeds_dir", None),
+            artifacts=manifest_artifacts,
+            options=manifest_options,
+        )
+    )
+
     # Danger-weighted seed scheduling
     from .fuzzer.schedulers.danger_booster import DangerBooster
     danger_booster = DangerBooster() if getattr(args, "danger_boost", True) else None
 
-    # Static-analysis guidance (optional)
-    guidance_hooks = None
-    if getattr(args, "guidance", None):
-        from .guidance.integration import build_guidance_engine, GuidanceFuzzHooks
-        guidance_engine = build_guidance_engine(
-            protocol=args.guidance,
-            profile_dir=getattr(args, "guidance_profiles", None),
-        )
-        if guidance_engine:
-            guidance_hooks = GuidanceFuzzHooks(guidance_engine)
-            print(f"  Guidance: {args.guidance} — "
-                  f"{guidance_engine.metrics.gaps_identified} gaps, "
-                  f"{guidance_engine.metrics.targeted_seeds_generated} seeds",
-                  file=sys.stderr)
-        else:
-            print(f"  Guidance: {args.guidance} — no libraries found, disabled",
-                  file=sys.stderr)
-
-    # Concolic constraint extraction + solving (optional, domain-agnostic)
-    concolic_coordinator = None
-    if getattr(args, "concolic", False):
-        concolic_mode = getattr(args, "concolic_mode", "hybrid")
-        budget = getattr(args, "concolic_budget", 0.10)
-
-        # Auto-detect domain plugin from oracle/grammar
-        domain_plugin = None
-        from .fuzzer.concolic.plugins.registry import get_plugin
-        oracle_name = getattr(args, "oracle", None)
-        grammar_name = getattr(args, "grammar", None)
-        domain_plugin = get_plugin(oracle=oracle_name, grammar=grammar_name)
-        plugin_name = type(domain_plugin).__name__ if domain_plugin else "default(SAML)"
-
-        if concolic_mode == "expert":
-            from .fuzzer.concolic.coordinator import ConcolicCoordinator
-            from .fuzzer.concolic.constraint_extractor import ConstraintExtractor
-            from .fuzzer.concolic.solver import ConstraintSolver
-            concolic_coordinator = ConcolicCoordinator(
-                extractor=ConstraintExtractor(),
-                solver=ConstraintSolver(seed=args.seed),
-                budget_pct=budget,
-            )
-        elif concolic_mode == "learned":
-            from .fuzzer.concolic.property_guided import PropertyGuidedCoordinator
-            concolic_coordinator = PropertyGuidedCoordinator(
-                budget_pct=budget,
-                seed=args.seed,
-            )
-        elif concolic_mode == "whitebox":
-            from .fuzzer.concolic.hybrid_coordinator import HybridCoordinator
-            concolic_coordinator = HybridCoordinator(
-                budget_pct=budget,
-                seed=args.seed,
-                use_expert=False,
-                use_coverage=True,
-                domain_plugin=domain_plugin,
-            )
-        else:  # hybrid (default)
-            from .fuzzer.concolic.hybrid_coordinator import HybridCoordinator
-            concolic_coordinator = HybridCoordinator(
-                budget_pct=budget,
-                seed=args.seed,
-                domain_plugin=domain_plugin,
-            )
-        print(f"  Concolic: enabled (mode={concolic_mode}, plugin={plugin_name}, budget={budget:.0%})",
-              file=sys.stderr)
-
-    # Phase 2A: Birkhoff bitvector deduplicator (optional, off by default)
-    dedup_atoms_path = getattr(args, "dedup_atoms", None)
-    deduplicator = None
-    if dedup_atoms_path is not None:
-        try:
-            import json as _json
-            _dedup_raw = _json.loads(
-                Path(dedup_atoms_path).read_text(encoding="utf-8"),
-            )
-            _atoms_list = _dedup_raw.get("atoms", [])
-            if _atoms_list:
-                from .fuzzer.dedup.structural_dedup import StructuralDeduplicator
-                _sdedup = StructuralDeduplicator()
-                _sdedup.set_atoms(_atoms_list)
-                deduplicator = _sdedup
-                print(
-                    f"  Dedup: bitvector mode — {len(_atoms_list)} Birkhoff atoms "
-                    f"from {dedup_atoms_path}",
-                    file=sys.stderr,
-                )
-            else:
-                print(
-                    f"Warning: --dedup-atoms {dedup_atoms_path} has no 'atoms' list; "
-                    f"falling back to default dedup.",
-                    file=sys.stderr,
-                )
-        except Exception as exc:
-            print(
-                f"Warning: failed to load --dedup-atoms {dedup_atoms_path}: {exc}; "
-                f"falling back to default dedup.",
-                file=sys.stderr,
-            )
-
-    # Phase 2C: FCA implication soft oracle (optional, off by default)
-    implication_base_path = getattr(args, "implication_base", None)
-    if implication_base_path is not None:
-        try:
-            import json as _json
-            _implications = _json.loads(
-                Path(implication_base_path).read_text(encoding="utf-8"),
-            )
-            if isinstance(_implications, list) and _implications:
-                from .fuzzer.oracles.implication_oracle import ImplicationSoftOracle
-                # Wrap each oracle in the soft oracle; drain_violations is
-                # called by the engine's post-check hook if present, otherwise
-                # violations are silently buffered (no crash).
-                oracles = [
-                    ImplicationSoftOracle(o, _implications)
-                    for o in oracles
-                ]
-                print(
-                    f"  Implication oracle: {len(_implications)} conf=1.0 rules "
-                    f"from {implication_base_path}",
-                    file=sys.stderr,
-                )
-            else:
-                print(
-                    f"Warning: --implication-base {implication_base_path} is empty "
-                    f"or not a list; implication oracle disabled.",
-                    file=sys.stderr,
-                )
-        except Exception as exc:
-            print(
-                f"Warning: failed to load --implication-base {implication_base_path}: "
-                f"{exc}; implication oracle disabled.",
-                file=sys.stderr,
-            )
+    guidance_hooks = build_guidance_hooks(
+        protocol=getattr(args, "guidance", None),
+        profile_dir=getattr(args, "guidance_profiles", None),
+    )
+    concolic_coordinator = build_targeted_mutation_coordinator(
+        enabled=getattr(args, "concolic", False),
+        mode=getattr(args, "concolic_mode", "hybrid"),
+        budget=getattr(args, "concolic_budget", 0.10),
+        seed=args.seed,
+        oracle=getattr(args, "oracle", None),
+        grammar=getattr(args, "grammar", None),
+    )
+    deduplicator = build_research_deduplicator(
+        getattr(args, "dedup_atoms", None),
+    )
+    oracles = wrap_implication_oracles(
+        oracles,
+        getattr(args, "implication_base", None),
+    )
 
     # Build and run engine
     engine = FuzzEngine(
@@ -919,6 +685,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         concolic=concolic_coordinator,
         fixed_primary=_campaign_mode.startswith("waf_"),
         deduplicator=deduplicator,
+        campaign_manifest=campaign_manifest,
     )
 
     print(f"Starting fuzzer: grammar={args.grammar}, target={args.target_cmd}",
@@ -936,15 +703,15 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         print(f"  Danger boost: enabled", file=sys.stderr)
     if getattr(args, "mcts", False):
         expl = getattr(args, "mcts_exploration", 1.41)
-        print(f"  MCTS: enabled (c={expl})", file=sys.stderr)
+        print(f"  UCB grammar selection: enabled (c={expl})", file=sys.stderr)
     if getattr(args, "target_coverage", False):
         print(f"  Target coverage: enabled (V8/settrace)", file=sys.stderr)
     if getattr(args, "adaptive_coverage", False):
         lvl = getattr(args, "adaptive_level", 1)
-        print(f"  Adaptive coverage: L{lvl} (CEGAR)", file=sys.stderr)
+        print(f"  Adaptive coverage: L{lvl} (experimental)", file=sys.stderr)
     print(f"  Initial seeds: {args.initial_seeds}", file=sys.stderr)
     if guidance_hooks and guidance_hooks.active:
-        print(f"  Guidance: {args.guidance} (static analysis → mutation bias)", file=sys.stderr)
+        print(f"  Guidance: {args.guidance} (experimental mutation bias)", file=sys.stderr)
     if getattr(args, "seeds_dir", None):
         print(f"  Seeds dir: {args.seeds_dir}", file=sys.stderr)
     if getattr(args, "import_findings", None):

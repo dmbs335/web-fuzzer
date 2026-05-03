@@ -12,7 +12,7 @@ Used by:
 - ``webfuzzer/fuzzer/finding_pipeline.py`` — annotates each finding with
   ``orbit_canonical_key``, downgrades severity on orbit-duplicates so the
   bug-bounty operator sees each distinct bug only once at full severity.
-- ``experiments/diffspace_geometry/e6_symmetry/`` — offline orbit analysis
+- ``experiments/fuzzing_formal_research/e6_symmetry/`` — offline orbit analysis
   re-exports these helpers.
 
 Design choices

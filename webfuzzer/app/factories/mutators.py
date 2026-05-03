@@ -35,6 +35,7 @@ def build_mutators(
     from ...fuzzer.mutators.markdown_mutator import MarkdownMutator
     from ...fuzzer.mutators.mxss_mutator import MxssMutator
     from ...fuzzer.mutators.oauth_mutator import OAuthMutator
+    from ...fuzzer.mutators.request_smuggling_mutator import RequestSmugglingMutator
     from ...fuzzer.mutators.saml_mutator import SamlMutator
     from ...fuzzer.mutators.sandbox_mutator import SandboxMutator
     from ...fuzzer.mutators.splice_mutator import SpliceMutator
@@ -69,6 +70,13 @@ def build_mutators(
         "domclobber": lambda: DomClobberMutator(seed=seed),
         "sandbox": lambda: SandboxMutator(seed=seed),
         "waf_bypass": lambda: WafBypassMutator(seed=seed),
+        "request_smuggling": lambda: RequestSmugglingMutator(
+            seed=seed,
+            registry=registry,
+            grammar_name=grammar_name,
+            mode=_hrs_mode(campaign_mode),
+            havoc_intensity=_hrs_havoc_intensity(campaign_mode),
+        ),
     }
 
     mutators = []
@@ -84,3 +92,24 @@ def build_mutators(
         mutators.append(HavocMutator(seed=seed))
 
     return mutators
+
+
+def _hrs_mode(campaign_mode: str) -> str:
+    """Map HRS campaign presets onto mutator operating modes."""
+    if campaign_mode == "hrs_stable":
+        return "stable"
+    if campaign_mode in {"hrs_research", "hrs_deep"}:
+        return "research"
+    if campaign_mode == "hrs_hybrid":
+        return "hybrid"
+    return "hybrid"
+
+
+def _hrs_havoc_intensity(campaign_mode: str) -> float:
+    """Return post-wire havoc intensity for HRS campaign presets."""
+    return {
+        "hrs_stable": 0.10,
+        "hrs_research": 0.15,
+        "hrs_hybrid": 0.15,
+        "hrs_deep": 0.25,
+    }.get(campaign_mode, 0.0)

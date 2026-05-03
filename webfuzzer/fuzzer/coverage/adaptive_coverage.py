@@ -1,4 +1,4 @@
-"""CEGAR-inspired adaptive coverage abstraction for differential fuzzing.
+"""Experimental adaptive feature granularity for differential fuzzing.
 
 Monitors corpus growth rate and coverage plateau signals, then
 automatically adjusts the abstraction level of the differential
@@ -6,6 +6,9 @@ feature set:
 
 - **Refine**  (level + 1) when corpus grows fast (interesting region found).
 - **Coarsen** (level − 1) when coverage stagnates (escape local optimum).
+
+This is inspired by CEGAR-style refinement/coarsening, but it is not a formal
+CEGAR loop with counterexample validation.
 
 Rationale for security fuzzing:
   Rapid corpus growth signals an interesting region being explored —
@@ -167,7 +170,7 @@ class AdaptiveDiffCoverage:
 
         Returns ``True`` if a transition occurred.
 
-        Strategy (security fuzzing CEGAR):
+        Strategy (experimental adaptive feature granularity):
           - Rapid corpus growth => REFINE (increase detail to distinguish
             valuable variants in the interesting region).
           - Stagnation => COARSEN (reduce detail to merge similar seeds

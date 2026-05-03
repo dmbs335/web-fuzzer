@@ -55,8 +55,15 @@ def configure_differential_oracles(
     has_sanitizer_diff = "sanitizer_diff" in oracle_names
     has_domclobber_diff = "domclobber_diff" in oracle_names
     has_sandbox = "sandbox" in oracle_names
+    has_request_smuggling = "request_smuggling" in oracle_names
 
-    if has_sandbox:
+    if has_request_smuggling:
+        from ...fuzzer.oracles.request_smuggling_diff_strategy import (
+            get_request_smuggling_strategies,
+        )
+
+        strategies = get_request_smuggling_strategies()
+    elif has_sandbox:
         from ...fuzzer.oracles.sandbox_diff_strategy import (
             SandboxEscapeDiffStrategy,
         )
@@ -153,7 +160,7 @@ def configure_differential_oracles(
         DiffOracle(reference_targets=reference_targets, strategies=strategies),
     )
 
-    # Build optional JSONL sinks for diffspace analysis
+    # Build optional JSONL sinks for fuzzing-formal-research analysis.
     trace_sink = None
     feature_sink = None
     if trace_path is not None:

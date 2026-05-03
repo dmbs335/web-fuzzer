@@ -1,10 +1,12 @@
-"""Python-specific static analyzer using the ast module.
+"""Python-specific lightweight analyzer using regex and the ast module.
 
 Analyzes Python JWT/SAML libraries to extract:
 - Security checkpoint presence (regex + AST)
 - Error-swallowing patterns (AST)
 - Conditional bypass patterns (AST)
 - Taint paths from attacker-controlled header fields (AST)
+
+This is heuristic guidance for fuzzing, not a complete static analyzer.
 """
 
 from __future__ import annotations

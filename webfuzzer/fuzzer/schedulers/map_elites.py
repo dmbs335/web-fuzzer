@@ -1,11 +1,12 @@
-"""MAP-Elites quality-diversity scheduler for differential fuzzing.
+"""MAP-Elites-inspired archive scheduler for differential fuzzing.
 
 Maintains a behaviour archive indexed by ``(category, ref_index)`` where
 each cell holds the "best" seed — the one with the richest coverage.
 
 Frontier exploration: preferentially selects seeds from cells adjacent
 to empty cells in the grid, driving exploration toward undiscovered
-parser disagreement patterns.
+parser disagreement patterns. Category order is a project-specific heuristic,
+not a validated behavioral distance metric, so this scheduler is experimental.
 
 References:
   Mouret & Clune, "Illuminating search spaces by mapping elites",
@@ -105,7 +106,7 @@ class MapElitesArchive:
 
 
 class MapElitesScheduler:
-    """MAP-Elites seed scheduler — quality-diversity for diff fuzzing.
+    """MAP-Elites-inspired seed scheduler for diff fuzzing.
 
     Works best when composed with ``EntropicScheduler`` via
     :class:`CompositeScheduler`.

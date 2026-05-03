@@ -58,6 +58,7 @@ def build_oracles(names: str) -> list:
         "domclobber": lambda: DomClobberOracle(),
         "domclobber_diff": lambda: None,
         "sandbox": lambda: None,
+        "request_smuggling": lambda: None,
         "oob_file": lambda: OobFileOracle(oob_dir=_oob_dir()),
         "oob_file_http": lambda: OobFileOracle(
             oob_dir=_oob_dir(), http_port=18080,
@@ -65,17 +66,19 @@ def build_oracles(names: str) -> list:
     }
 
     oracles = []
+    saw_known = False
     for name in names.split(","):
         name = name.strip()
         factory = oracle_map.get(name)
         if factory is None:
             print(f"Warning: Unknown oracle {name!r}, skipping.", file=sys.stderr)
             continue
+        saw_known = True
         oracle = factory()
         if oracle is not None:
             oracles.append(oracle)
 
-    if not oracles:
+    if not oracles and not saw_known:
         oracles.append(CrashOracle())
 
     return oracles

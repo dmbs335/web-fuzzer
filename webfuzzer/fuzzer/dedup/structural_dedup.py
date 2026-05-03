@@ -16,9 +16,9 @@ from ..protocols import Finding
 class StructuralDeduplicator:
     """Deduplicates findings using structural fingerprints.
 
-    When an atoms list is loaded via :meth:`set_atoms`, the fingerprint for
+    When an external atoms list is loaded via :meth:`set_atoms`, the fingerprint for
     differential findings switches from the oracle-level ``diff_pattern_hash``
-    (which encodes strategy/category identity) to a Birkhoff bitvector
+    (which encodes strategy/category identity) to a coarse atom-subset key
     ``frozenset(diff_fields ∩ atoms)``.  Two findings that touch the same
     subset of concept-lattice atoms are treated as the same equivalence class
     regardless of which mutator strategy produced them.  Without an atoms list
@@ -32,7 +32,7 @@ class StructuralDeduplicator:
         self._atoms: frozenset[str] | None = None
 
     def set_atoms(self, atoms: list[str]) -> None:
-        """Load the meet-irreducible atom list from the E4 FCA summary.
+        """Load an external atom list for experimental coarse dedup.
 
         Once set, ``fingerprint()`` will use the bitvector path for any
         finding whose ``diff_fields`` intersect the atom set.  Findings

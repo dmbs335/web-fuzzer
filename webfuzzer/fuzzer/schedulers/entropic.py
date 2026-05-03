@@ -121,7 +121,7 @@ class EntropicScheduler:
         self.theta = abundance_threshold
         self.base_energy = base_energy
         # Optional offline PAC stopping signal (see DG018 in the external
-        # diffspace research workspace). When present and in
+        # fuzzing-formal-research workspace). When present and in
         # exploitation phase, _update_energies dampens the novelty
         # component and amplifies the class-saturation penalty.
         self._stopping_signal: StoppingSignal | None = stopping_signal

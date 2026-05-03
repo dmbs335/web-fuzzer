@@ -1,8 +1,8 @@
 """SAML XML Signature taxonomy-driven mutator — differential bypass edition.
 
-Encodes structural attack patterns from the SAML vulnerability taxonomy
-into a semantic-level mutator.  Each strategy targets a specific bypass
-category proven effective against real-world SAML libraries.
+Encodes structural attack patterns from SAML vulnerability research into a
+semantic-level mutator. Each strategy targets a bypass category that should be
+validated against the selected SAML libraries and campaign setup.
 
 Taxonomy sections mapped to strategies:
   S1   XSW1-8 Signature Wrapping       -> xsw_* strategies
@@ -1158,7 +1158,7 @@ class SamlMutator:
                     self._base_weights[i] * 5,
                 )
 
-    # ── Birkhoff-atom feedback (E4 FCA output) ─────────────────
+    # External atom feedback (experimental research output)
 
     _lattice_atom_weights: dict[str, float] | None = None
 
@@ -1166,7 +1166,7 @@ class SamlMutator:
         """Apply startup-time weight boosts from E4 FCA atom coverage.
 
         The ``atom_weights`` dict comes from
-        the external diffspace research workspace and
+        the external fuzzing-formal-research workspace and
         maps each strategy name to a coverage score in ``[0, 1]``: the
         fraction of the concept lattice's meet-irreducible atoms
         (Birkhoff generators) that the strategy's historical findings
@@ -1910,8 +1910,9 @@ class SamlMutator:
     def _processing_instruction_inject(self, data: bytearray) -> bytearray | None:
         """PI injection inside Signature/Assertion (S2-NEW).
 
-        python3-saml's remove_pis=True parser strips PIs before
-        signature verification — proven to cause sig=TRUE.
+        python3-saml's remove_pis=True parser strips PIs before signature
+        verification in some configurations; campaign verification is still
+        required.
         """
         pi = self.rng.choice(PI_PAYLOADS)
         target = self.rng.choice([

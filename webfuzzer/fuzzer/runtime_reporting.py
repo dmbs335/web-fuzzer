@@ -13,6 +13,7 @@ from .selection_drop_analysis import (
     write_selection_shadow_replay_artifacts,
     write_selection_shadow_summary_artifacts,
 )
+from .campaign_manifest import write_campaign_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class RuntimeReportingService:
         all_targets,
         running_getter,
         sync_deser_diag,
+        campaign_manifest=None,
     ) -> None:
         self.stats = stats
         self.publisher = publisher
@@ -44,6 +46,7 @@ class RuntimeReportingService:
         self.all_targets = all_targets
         self.running_getter = running_getter
         self.sync_deser_diag = sync_deser_diag
+        self.campaign_manifest = campaign_manifest
 
     def maybe_print_status(
         self,
@@ -119,6 +122,7 @@ class RuntimeReportingService:
                 self._rewrite_selection_shadow_summary()
                 self._rewrite_selection_shadow_replay()
                 self._rewrite_final_report()
+                self._write_campaign_manifest()
             except Exception as exc:
                 logger.error("Failed to save stats: %s", exc)
             try:
@@ -246,3 +250,14 @@ class RuntimeReportingService:
             )
         except Exception:
             logger.debug("Failed to rewrite selection shadow replay artifacts", exc_info=True)
+
+    def _write_campaign_manifest(self) -> None:
+        if not self.output_dir or not self.campaign_manifest:
+            return
+        try:
+            write_campaign_manifest(
+                self.output_dir / "campaign_manifest.json",
+                self.campaign_manifest,
+            )
+        except Exception:
+            logger.debug("Failed to write campaign manifest", exc_info=True)

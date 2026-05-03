@@ -50,6 +50,9 @@ class _FakePublisher:
 
 @dataclass
 class _FakeStats:
+    def record_observed_finding(self, finding: Finding) -> None:
+        pass
+
     def record_finding(self, finding: Finding, mutator_name: str = "") -> None:
         pass
 

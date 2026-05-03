@@ -12,7 +12,8 @@ At a high level it:
 2. Executes the input against one or more targets.
 3. Collects coverage and oracle results.
 4. Stores interesting seeds and findings.
-5. Repeats the loop while optional guidance, concolic, and domain-specific feedback refine the search.
+5. Repeats the loop while optional heuristic guidance, targeted mutation, and
+   domain-specific feedback may bias the search.
 
 ## Main Runtime Flow
 
@@ -54,6 +55,8 @@ Runtime assembly layer used by the CLI.
 - `factories/schedulers.py`: scheduler assembly
 - `factories/coverage.py`: coverage collector assembly
 - `factories/differential.py`: differential oracle wiring
+- `research_hooks.py`: optional external research artifact loading/application
+- `experimental_features.py`: experimental guidance and targeted-mutation assembly
 
 If you want to know "how does a CLI flag become a concrete runtime object?", start here.
 
@@ -66,6 +69,7 @@ Runtime orchestration and shared abstractions.
 - `seeding.py`: initial corpus population
 - `finding_pipeline.py`: finding normalization, dedup, publishing, stats
 - `runtime_reporting.py`: status and artifact persistence
+- `targeted_mutation.py`: optional targeted follow-up execution lifecycle
 - `command_channel.py`: stdin command processing
 - `checkpointing.py`: checkpoint save/load
 - `corpus.py`: seed storage and global coverage state
@@ -76,11 +80,35 @@ Runtime orchestration and shared abstractions.
 
 ### `webfuzzer/guidance`
 
-Higher-level guidance hooks that bias mutation and prioritize interesting structure.
+Experimental guidance hooks that bias mutation and prioritize interesting
+structure. The current analyzers are regex/AST based and should not be treated
+as deep static analysis.
 
 ### `webfuzzer/fuzzer/concolic`
 
-Constraint extraction and targeted follow-up input generation.
+Experimental targeted follow-up input generation. Some modes use constraints,
+some use property correlations, and some use source/coverage hints. Treat this
+as targeted mutation, not as a fully validated concolic engine.
+
+### External Research Hooks
+
+The CLI still accepts several imports from external research workspaces:
+
+- `--lattice-atoms`
+- `--automaton-witnesses`
+- `--stopping-signal`
+- `--dedup-atoms`
+- `--implication-base`
+- `--diff-trace`
+- `--feature-dump`
+
+Keep those paths optional and off by default. Do not make them prerequisites
+for the normal fuzzer runtime. See `docs/methodology-status.md` for the current
+status of each method.
+
+Runtime wiring for these hooks belongs in `webfuzzer/app/research_hooks.py`.
+The CLI should pass paths and options through; it should not parse or apply
+research artifacts directly.
 
 ## Recommended Reading Order
 
@@ -114,6 +142,10 @@ Why this order works:
 - Build runtime objects through `webfuzzer/app/*`
 - Start the engine
 
+Experimental feature construction should stay in `webfuzzer/app/*` helpers.
+Avoid adding more artifact parsing, strategy boosts, or coordinator selection
+directly to `cli.py`.
+
 ### What `engine.py` should do
 
 - Coordinate the main loop
@@ -143,6 +175,9 @@ When you need to make a change, start here:
 | Change finding persistence | `webfuzzer/fuzzer/finding_pipeline.py` | `runtime_reporting.py`, `stats.py` |
 | Change initial seeding | `webfuzzer/fuzzer/seeding.py` | `cli.py`, `grammar_source.py` |
 | Change checkpoint format | `webfuzzer/fuzzer/checkpointing.py` | `engine.py` only if new callbacks are needed |
+| Add external research input | Prefer `docs/methodology-status.md` first | CLI flag only if optional and ignored safely |
+| Add a research artifact hook | `webfuzzer/app/research_hooks.py` | `protocols.py` only if a new capability contract is needed |
+| Add an experimental runtime feature | `webfuzzer/app/experimental_features.py` | a small service under `webfuzzer/fuzzer/*` if it needs loop callbacks |
 
 ## Optional Protocols
 
@@ -180,10 +215,13 @@ Prefer these patterns:
 - Put data declarations in `domain_profiles/*`.
 - Put optional behavior behind a protocol before adding more `hasattr(...)`.
 - Keep `engine.py` focused on flow, not long tables or serialization details.
+- Mark unvalidated methodology as experimental in docs and CLI help.
 
 Avoid these patterns:
 
 - Adding new large `if/elif` assembly trees in `cli.py`
 - Hiding new extension points behind string checks when a protocol would work
 - Putting more built-in domain declarations back into `domain.py`
+- Presenting paper-inspired heuristics as validated methodology without
+  reproducible campaign evidence
 

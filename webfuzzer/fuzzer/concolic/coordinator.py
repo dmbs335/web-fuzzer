@@ -1,8 +1,8 @@
-"""ConcolicCoordinator: budget-controlled concolic loop for the engine.
+"""Budget-controlled targeted-mutation coordinator for the engine.
 
 Sits between the engine and the constraint extraction/solving pipeline.
 Called after each differential execution to optionally generate targeted
-inputs.  Enforces a configurable budget cap to guarantee bounded overhead.
+inputs. Uses a configurable budget cap to limit overhead.
 """
 
 from __future__ import annotations

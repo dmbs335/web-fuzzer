@@ -1508,7 +1508,7 @@ class WafBypassMutator:
         """Apply startup-time family boosts from E4 FCA atom coverage.
 
         The ``atom_weights`` dict comes from
-        the external diffspace research workspace and
+        the external fuzzing-formal-research workspace and
         maps each family name (e.g. ``"ct_duplicate"``) to a coverage
         score in ``[0, 1]``: the fraction of the concept lattice's
         meet-irreducible atoms the family's historical findings

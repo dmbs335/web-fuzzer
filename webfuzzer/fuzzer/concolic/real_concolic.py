@@ -1,13 +1,16 @@
 """Real concolic engine: source-line coverage → AST condition → semantic negation → targeted mutation.
 
-This replaces the keyword-based ConcolicEngine with genuine concolic execution:
+This replaces the keyword-based ConcolicEngine with a source-guided targeted
+mutation path:
 1. Read _covered_lines from execution output (actual file:line tuples)
 2. Cross-reference with AST-extracted branch conditions
 3. Find uncovered branches adjacent to covered code
 4. Negate the branch condition semantically
 5. Apply the negation as a concrete XML mutation
 
-Requires --target-coverage flag (Python targets only for now).
+Requires --target-coverage flag (Python targets only for now). This is not a
+complete symbolic executor; parser-level synthetic branches and domain-specific
+mutation directives are part of the design.
 """
 
 from __future__ import annotations

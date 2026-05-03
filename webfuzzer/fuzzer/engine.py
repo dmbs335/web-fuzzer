@@ -32,6 +32,7 @@ from .heuristic_policy import (
 from .maintenance import RuntimeMaintenanceService
 from .runtime_reporting import RuntimeReportingService
 from .seeding import SeedingService
+from .targeted_mutation import TargetedMutationService
 from .protocols import (
     CoverageCollector,
     Deduplicator,
@@ -46,9 +47,7 @@ from .protocols import (
     ScheduleResult,
     SeedScheduler,
     StrategyFeedbackMutator,
-    StrategyWeightProvider,
     Target,
-    LearnedWeightMutator,
 )
 from .redis_publisher import RedisPublisher
 from .schedulers.danger_booster import DangerBooster
@@ -252,6 +251,7 @@ class FuzzEngine:
         guidance_hooks: "GuidanceFuzzHooks | None" = None,
         concolic: "ConcolicCoordinator | None" = None,
         fixed_primary: bool = False,
+        campaign_manifest: dict | None = None,
     ):
         self.target = target
         self.reference_targets: list[Target] = reference_targets or []
@@ -259,6 +259,7 @@ class FuzzEngine:
         self.mutators = mutators
         self.oracles = oracles
         self._concolic = concolic
+        self._targeted_mutation = TargetedMutationService(concolic)
 
         # Optionally wrap coverage with HybridCoverageCollector for
         # per-target code coverage augmentation.
@@ -327,6 +328,7 @@ class FuzzEngine:
         self.all_targets: list[Target] = [target] + list(self.reference_targets)
         self._rotation_idx: int = 0
         self._fixed_primary: bool = fixed_primary
+        self._campaign_manifest = campaign_manifest
 
         # Extract library names from target commands for guidance attribution.
         self._target_lib_names: list[str] = [
@@ -426,6 +428,7 @@ class FuzzEngine:
             all_targets=self.all_targets,
             running_getter=lambda: self._running,
             sync_deser_diag=self._sync_deser_diag,
+            campaign_manifest=self._campaign_manifest,
         )
         _adaptive_cov = self.coverage if isinstance(self.coverage, AdaptiveDiffCoverage) else None
         self._checkpoint_service = CheckpointService(
@@ -652,59 +655,23 @@ class FuzzEngine:
                         self.corpus.total_bytes,
                     )
 
-            # 6.5c Concolic constraint extraction + targeted mutation
-            if self._concolic is not None and ref_results:
-                targeted = self._concolic.on_differential_result(
-                    mutated_input, result, ref_results, found_crash,
-                )
-                for t_inp in targeted:
-                    t_inp.metadata["mutator"] = "concolic"
-                    primary_c, refs_c = self._rotate_primary()
-                    t_result = self._execute_on(primary_c, t_inp)
-                    t_ref_results = self._execute_on_refs(refs_c, t_inp)
-                    t_cov = self._collect_coverage(
-                        t_inp, t_result, ref_results=t_ref_results,
-                    )
-                    if self.coverage and t_cov:
-                        t_novel = self.coverage.is_novel(
-                            self.corpus.global_coverage, t_cov,
-                        )
-                        if t_novel:
-                            t_seed = self.corpus.add(
-                                t_inp, t_cov,
-                                parent_id=seed.id,
-                                depth=seed.depth + 1,
-                            )
-                            if t_seed:
-                                t_seed.coverage = None
-                                self.stats.record_new_coverage(
-                                    self.corpus.global_coverage.edge_count,
-                                    "concolic",
-                                )
-                    self._check_oracles(
-                        t_inp, t_result, "concolic",
-                        ref_results=t_ref_results,
-                    )
-                    self.stats.record_execution("concolic")
-                    # Release targeted execution coverage bitmaps
-                    t_result.metadata.pop("target_coverage", None)
-                    for tr in (t_ref_results or []):
-                        tr.metadata.pop("target_coverage", None)
-
-                # Feed learned strategy weights back to mutator.
-                # Phase 3C: prefer live alpha_estimate (Hill-MLE on current
-                # campaign) over the static lint-derived pareto_alpha so that
-                # heavy-tail (α<2) campaigns activate median normalisation
-                # even without a prior --stopping-signal lint run.
-                if isinstance(self._concolic, StrategyWeightProvider):
-                    learned_weights = self._concolic.get_strategy_weights()
-                    if learned_weights and isinstance(mutator, LearnedWeightMutator):
-                        _ss = getattr(self.seed_scheduler, "_stopping_signal", None)
-                        _alpha = (
-                            self.stats.alpha_estimate
-                            or getattr(_ss, "pareto_alpha", None)
-                        )
-                        mutator.apply_learned_weights(learned_weights, alpha=_alpha)
+            self._targeted_mutation.handle_differential_result(
+                mutated_input=mutated_input,
+                result=result,
+                ref_results=ref_results,
+                found_crash=found_crash,
+                mutator=mutator,
+                seed=seed,
+                stats=self.stats,
+                corpus=self.corpus,
+                coverage=self.coverage,
+                seed_scheduler=self.seed_scheduler,
+                rotate_primary=self._rotate_primary,
+                execute_on=self._execute_on,
+                execute_on_refs=self._execute_on_refs,
+                collect_coverage=self._collect_coverage,
+                check_oracles=self._check_oracles,
+            )
 
             # 6.6 Release coverage bitmaps to prevent memory growth
             # (16KB × num_targets per iteration; coverage + concolic already consumed)

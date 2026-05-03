@@ -91,9 +91,9 @@ class Finding:
 
 @dataclass(frozen=True)
 class StoppingSignal:
-    """Offline PAC stopping signal from diffspace-geometry lint (DG018).
+    """Offline PAC stopping signal from fuzzing-formal-research lint (DG018).
 
-    Produced by the external diffspace research workspace on a prior session
+    Produced by the external fuzzing-formal-research workspace on a prior session
     and extracting the ``DG018`` observed fields (or constructed by hand for
     tests). The signal tells the scheduler whether the
     previous campaign's Good-Turing missing-mass upper bound already
@@ -239,14 +239,12 @@ class LearnedWeightMutator(Protocol):
 
 @runtime_checkable
 class LatticeAtomMutator(Protocol):
-    """Accepts offline Birkhoff-atom coverage weights (E4 FCA output).
+    """Accepts external atom-coverage weights as a startup boost.
 
     The input is a ``{strategy_name: weight in [0,1]}`` dict derived from the
-    external diffspace research workspace. Higher
-    weights correspond to strategies whose historical findings cover a
-    larger subset of the meet-irreducible diff-field atoms of the
-    observed concept lattice. Implementations should treat this as a
-    startup-time weight initialization, not a runtime feedback channel.
+    external research workspace. Implementations should treat this as a
+    heuristic startup-time weight initialization, not a runtime feedback
+    channel or validated ranking.
     """
 
     def apply_lattice_atoms(
@@ -257,16 +255,12 @@ class LatticeAtomMutator(Protocol):
 
 @runtime_checkable
 class AutomatonWitnessMutator(Protocol):
-    """Accepts E7 differential-SFA witness scores as a startup boost.
+    """Accepts external witness scores as a startup boost.
 
     Input is ``{strategy_name: score in [0, 1]}`` produced offline from
-    the E7 pairwise symmetric-difference surfaces plus the feature dump
-    (see the external diffspace research workspace).
-    Higher scores mean the strategy historically contributed more to
-    diff-field coordinates that witness observed library-pair
-    disagreements. Implementations should treat this as a startup-time
-    initialization that composes with other boost channels without ever
-    demoting a weight already raised elsewhere.
+    an external analysis pipeline. Implementations should treat this as a
+    heuristic startup-time initialization that composes with other boost
+    channels without ever demoting a weight already raised elsewhere.
     """
 
     def apply_automaton_witnesses(

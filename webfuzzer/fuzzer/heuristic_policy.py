@@ -1,14 +1,15 @@
 """Evidence-routed policy helpers for fuzzer heuristics.
 
-This module is the implementation-side counterpart of
-``FiniteHeuristicPolicy.lean``.  Constants can still be empirical, but the
-policy shape is explicit:
+Constants are empirical, but the policy shape is explicit:
 
 * preserve only when a preservation witness exists;
 * shadow only when replayable diversity exists;
 * skip only when a short-campaign resource-risk witness exists;
 * cap without increasing priority;
 * boost without exceeding a configured cap.
+
+This module enforces local invariants for selection/drop behavior. It should
+not be read as formal validation of the underlying campaign methodology.
 """
 
 from __future__ import annotations

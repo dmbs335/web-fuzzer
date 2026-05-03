@@ -1,12 +1,12 @@
-"""MCTS-guided production selection for grammar derivation.
+"""UCB-guided production selection for grammar derivation.
 
 Tracks UCB1 scores per (rule_name, production_idx) pair.
 Used by TreeGenerator to balance exploitation (high-reward productions)
 vs exploration (untried productions) during grammar-based input generation.
 
-The key idea: grammar derivation is a sequential decision problem.
-Each rule expansion is a choice point.  MCTS learns which production
-alternatives lead to inputs that discover new coverage or findings.
+This module is intentionally narrower than full Monte Carlo Tree Search:
+there is no rollout policy, explicit tree expansion, or simulation phase.
+It is a lightweight bandit table over grammar productions.
 """
 
 from __future__ import annotations

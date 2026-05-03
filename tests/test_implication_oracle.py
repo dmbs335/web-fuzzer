@@ -270,8 +270,15 @@ def test_real_waf_implication_base_loads():
     import os
     from pathlib import Path
 
-    root = Path(os.environ.get("DIFFSPACE_RESEARCH_DIR", "../diffspace-research"))
-    p = root / "experiments/diffspace_geometry/outputs/waf_v61_20260407/e4_fca/implication_base.json"
+    root = Path(os.environ.get(
+        "FUZZING_FORMAL_RESEARCH_DIR",
+        "../fuzzing-formal-research",
+    ))
+    p = (
+        root
+        / "experiments/fuzzing_formal_research/outputs/waf_v61_20260407"
+        / "e4_fca/implication_base.json"
+    )
     if not p.exists():
         pytest.skip("waf implication_base.json not present")
     implications = json.loads(p.read_text(encoding="utf-8"))

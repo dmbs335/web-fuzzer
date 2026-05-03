@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from ...fuzzer.targets.process_target import ProcessTarget
 
@@ -26,6 +27,7 @@ def _build_target_from_cmd(
     whitebox_lines_only: bool,
     to_persistent_cmd,
     persistent_timeout_for_cmd,
+    env: dict[str, str] | None = None,
     is_reference: bool = False,
 ):
     """Build a target instance from a command line."""
@@ -44,14 +46,34 @@ def _build_target_from_cmd(
             lines_only=whitebox_lines_only,
         )
         if persistent_cmd is not None:
-            target = PersistentTarget(persistent_cmd, timeout_seconds=timeout)
+            target = PersistentTarget(
+                persistent_cmd,
+                timeout_seconds=timeout,
+                env=env,
+            )
         else:
-            target = ProcessTarget(cmd)
+            target = ProcessTarget(cmd, env=env)
     else:
-        target = ProcessTarget(cmd)
+        target = ProcessTarget(cmd, env=env)
 
     target.original_cmd = cmd
     return target
+
+
+def _target_env_for_cmd(
+    cmd: str,
+    *,
+    requested_oracle_names: set[str],
+    output_dir: Path | None,
+) -> dict[str, str] | None:
+    """Return per-target environment needed by domain-specific targets."""
+    if output_dir is None:
+        return None
+    if "request_smuggling" in requested_oracle_names or (
+        "request_smuggling_target.py" in cmd
+    ):
+        return {"WEBFUZZER_OUTPUT_DIR": str(output_dir)}
+    return None
 
 
 def build_targets(
@@ -69,6 +91,9 @@ def build_targets(
         and getattr(args, "concolic_mode", "") == "whitebox"
     )
     use_target_cov = getattr(args, "target_coverage", False)
+    output_dir = getattr(args, "output_dir", None)
+    if output_dir is not None:
+        output_dir = Path(output_dir)
 
     if not use_persistent:
         all_cmds = [args.target_cmd] + diff_cmds
@@ -84,6 +109,11 @@ def build_targets(
         whitebox_lines_only=whitebox_lines_only,
         to_persistent_cmd=to_persistent_cmd,
         persistent_timeout_for_cmd=persistent_timeout_for_cmd,
+        env=_target_env_for_cmd(
+            args.target_cmd,
+            requested_oracle_names=requested_oracle_names,
+            output_dir=output_dir,
+        ),
         is_reference=False,
     )
     reference_targets = [
@@ -96,6 +126,11 @@ def build_targets(
             whitebox_lines_only=whitebox_lines_only,
             to_persistent_cmd=to_persistent_cmd,
             persistent_timeout_for_cmd=persistent_timeout_for_cmd,
+            env=_target_env_for_cmd(
+                cmd,
+                requested_oracle_names=requested_oracle_names,
+                output_dir=output_dir,
+            ),
             is_reference=True,
         )
         for cmd in diff_cmds

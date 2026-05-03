@@ -3,6 +3,7 @@
 import json
 import pytest
 import random
+import sys
 
 from webfuzzer.fuzzer.protocols import (
     Input, ExecutionResult, Finding, Severity, ScheduleResult,
@@ -1279,7 +1280,9 @@ class TestProcessTarget:
     def test_execute_echo(self):
         from webfuzzer.fuzzer.targets.process_target import ProcessTarget
 
-        target = ProcessTarget("python -c \"import sys; print(open(sys.argv[1]).read())\" {input}")
+        target = ProcessTarget(
+            f'"{sys.executable}" -c "import sys; print(open(sys.argv[1]).read())" {{input}}'
+        )
         target.setup()
         try:
             inp = Input(data=b"hello fuzzer")
@@ -1293,7 +1296,7 @@ class TestProcessTarget:
     def test_nonzero_exit(self):
         from webfuzzer.fuzzer.targets.process_target import ProcessTarget
 
-        target = ProcessTarget("python -c \"import sys; sys.exit(42)\"")
+        target = ProcessTarget(f'"{sys.executable}" -c "import sys; sys.exit(42)"')
         target.setup()
         try:
             result = target.execute(Input(data=b"x"))
@@ -1305,7 +1308,7 @@ class TestProcessTarget:
         from webfuzzer.fuzzer.targets.process_target import ProcessTarget
 
         target = ProcessTarget(
-            "python -c \"import time; time.sleep(30)\"",
+            f'"{sys.executable}" -c "import time; time.sleep(30)"',
             timeout_seconds=1,
         )
         target.setup()

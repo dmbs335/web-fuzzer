@@ -171,6 +171,18 @@ def generate_nl(rng: random.Random, params: dict[str, str]) -> str:
     return "\n"
 
 
+@_builtin("cr")
+def generate_cr(rng: random.Random, params: dict[str, str]) -> str:
+    """Produce a carriage-return character."""
+    return "\r"
+
+
+@_builtin("crlf")
+def generate_crlf(rng: random.Random, params: dict[str, str]) -> str:
+    """Produce a CRLF line ending."""
+    return "\r\n"
+
+
 @_builtin("sp")
 def generate_sp(rng: random.Random, params: dict[str, str]) -> str:
     """Produce a space character."""

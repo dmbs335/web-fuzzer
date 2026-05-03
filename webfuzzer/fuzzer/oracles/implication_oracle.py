@@ -1,7 +1,7 @@
-"""FCA implication soft oracle (Phase 2C).
+"""Experimental implication soft oracle.
 
 Wraps any inner :class:`~webfuzzer.fuzzer.protocols.Oracle` and emits
-additional INFO-severity findings whenever a new observation violates a
+additional INFO-severity diagnostics whenever a new observation violates a
 historically conf=1.0 Duquenne–Guigues implication from the E4 FCA
 pipeline.
 
@@ -9,7 +9,7 @@ An *implication violation* occurs when a finding's ``diff_fields`` contain
 every attribute in an implication's premise but NOT every attribute in its
 conclusion.  Because every implication in the base was satisfied by 100% of
 historical observations, a violation represents a diff-field pattern that
-has never been seen before — a strong signal for a novel bug class.
+may be worth triage. It is not promoted into the main finding stream by default.
 
 Violations are collected in an internal list and drained via
 :meth:`drain_violations`.  They are **not** passed through
@@ -52,7 +52,7 @@ class ImplicationSoftOracle:
         unchanged.
     implications:
         List of implication dicts as produced by
-        the external diffspace research workspace's FCA analysis.
+        the external fuzzing-formal-research workspace's formal analysis.
         Each dict must have ``"premise"`` and ``"conclusion"`` keys whose
         values are lists of attribute (diff-field) names.  Only
         ``confidence=1.0`` implications are used; others are silently skipped
@@ -69,7 +69,7 @@ class ImplicationSoftOracle:
     ) -> None:
         self._inner = inner
         # Keep only conf=1.0 implications (or those without a confidence key,
-        # which the Duquenne–Guigues base guarantees are all sound).
+        # which the external pipeline treats as exact rules).
         self._implications: list[tuple[frozenset[str], frozenset[str]]] = [
             (frozenset(imp["premise"]), frozenset(imp["conclusion"]))
             for imp in implications

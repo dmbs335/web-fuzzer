@@ -48,6 +48,14 @@ This layer runs the fuzz loop and delegates sub-jobs to focused services.
 
 This layer tells the fuzzer how to interpret domain-specific output fields, categories, and danger ladders.
 
+### Experimental/Research Layer
+
+`webfuzzer/guidance`, `webfuzzer/fuzzer/concolic`, imports from
+`fuzzing-formal-research`, and paper-inspired schedulers are not the stable
+core. Before changing or extending them, read `docs/methodology-status.md` and
+preserve the experimental labeling unless there is reproducible campaign
+evidence.
+
 ## Best Entry File For Common Tasks
 
 ### "I need to add a new runtime component"
@@ -81,6 +89,11 @@ Search in this order:
 4. `engine.py`
 5. concrete implementation under `mutators/`, `oracles/`, `schedulers/`, or target scripts
 
+If the feature name references MCTS, MAP-Elites, LinUCB, CEGAR, concolic,
+FCA/Birkhoff, automaton witnesses, or stopping signals, also check
+`docs/methodology-status.md`. Those features may be useful, but they should be
+treated as heuristics or external research hooks unless proven otherwise.
+
 ## Change Strategy
 
 When making edits, prefer this sequence:
@@ -102,6 +115,8 @@ Use these heuristics to avoid wasted exploration:
 - If something affects seed import, grammar seeding, or initial corpus shape, the answer is usually in `seeding.py`.
 - If something affects finding dedup, publishing, or metadata normalization, the answer is usually in `finding_pipeline.py`.
 - If something looks like a long table of field names and severities, it belongs in `domain_profiles/*`.
+- If something depends on an external analysis artifact, it should stay optional
+  and be documented as an experimental research hook.
 
 ## Safe Refactoring Directions
 
@@ -111,6 +126,8 @@ These directions are aligned with the current architecture:
 - Replacing `hasattr(...)` extension points with explicit protocols
 - Moving more data declarations into dedicated modules
 - Keeping `cli.py` thin and moving selection logic into factories
+- Moving research-only behavior behind explicit experimental flags or external
+  imports
 
 ## High-Risk Refactoring Directions
 
@@ -121,6 +138,7 @@ Be more careful with:
 - changing `Corpus` semantics
 - changing the primary/reference rotation model
 - moving domain profile registration order without understanding downstream assumptions
+- turning experimental methodology into the default runtime path
 
 ## What Good Changes Look Like Here
 
