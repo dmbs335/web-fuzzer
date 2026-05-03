@@ -121,8 +121,6 @@ _PERSISTENT_MODULE_MAP = {
     "targets/class_pollution_deepdiff_target.py": ("python targets/persistent_wrapper.py", "targets/class_pollution_deepdiff_target_module.py"),
     "targets/class_pollution_pydantic_target.py": ("python targets/persistent_wrapper.py", "targets/class_pollution_pydantic_target_module.py"),
     "targets/class_pollution_reallib_target.py": ("python targets/persistent_wrapper.py", "targets/class_pollution_reallib_target_module.py"),
-    # Apache confusion targets (per-port config via env var)
-    "targets/apache_confusion_target.py": ("python targets/persistent_wrapper.py", "targets/apache_confusion_target_module.py"),
     # JS sandbox escape targets
     "node targets/sandbox_vm2_module.js": ("node --expose-gc targets/persistent_wrapper.js", "targets/sandbox_vm2_module.js"),
     "node targets/sandbox_ivm_module.js": ("node --expose-gc targets/persistent_wrapper.js", "targets/sandbox_ivm_module.js"),
@@ -353,11 +351,18 @@ def persistent_timeout_for_cmd(
     if cmd.startswith("docker "):
         return 15.0
 
+    low_cmd = cmd.lower()
+
+    # WAF differential targets perform real network round-trips against live
+    # middleware and can legitimately take longer than the generic non-Java
+    # 2s budget, especially under multi-target differential campaigns.
+    if "waf_bypass_target.py" in low_cmd:
+        return 3.0
+
     is_java = "java " in cmd or "java.exe " in cmd
     if not is_java:
         return 2.0
 
-    low_cmd = cmd.lower()
     is_jndi = (
         grammar == "jndi"
         or "jnditarget" in low_cmd

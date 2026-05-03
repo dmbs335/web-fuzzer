@@ -1,0 +1,18 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-enc-gzip-01
+X-WF-Family: enc_gzip_mismatch
+X-WF-Tags: CE.mismatch,content_encoding,compression
+X-WF-Canary-Marker: WF-CANARY-engzp00001
+X-WF-Payload-Type: sqli
+X-WF-Payload: JyBPUiAxPTEtLQ==
+X-WF-Axis-Evasion: encoding
+X-WF-Axis-Payload: sqli
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: encoding_decode
+X-WF-Axis-Variant: mismatch
+Content-Type: application/x-www-form-urlencoded
+Content-Encoding: identity
+Content-Length: 47
+
+param=WF-CANARY-engzp00001&q=' OR 1=1--&safe=1

@@ -1,0 +1,25 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-mp-fname-01
+X-WF-Family: mp_filename_inject
+X-WF-Tags: MP.filename,multipart,injection
+X-WF-Canary-Marker: WF-CANARY-mpfnm00001
+X-WF-Payload-Type: path_traversal
+X-WF-Payload: Li4vLi4vLi4vLi4vZXRjL3Bhc3N3ZA==
+X-WF-Axis-Evasion: multipart
+X-WF-Axis-Payload: path_traversal
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: multipart_parse
+X-WF-Axis-Variant: injection
+Content-Type: multipart/form-data; boundary=wf-boundary2
+Content-Length: 199
+
+--wf-boundary2
+Content-Disposition: form-data; name="file"; filename="../../../../etc/passwd"
+
+WF-CANARY-mpfnm00001
+--wf-boundary2
+Content-Disposition: form-data; name="safe"
+
+normal
+--wf-boundary2--

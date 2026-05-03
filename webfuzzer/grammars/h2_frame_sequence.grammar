@@ -1,0 +1,98 @@
+# =============================================================================
+# H2 Frame Sequence Grammar
+#
+# Generates structured H2SEQ text that H2GrammarTranslator converts to binary
+# H2c wire format.  Grammar-aware mutation (subtree splice/swap) operates on
+# the text AST so structural diversity (CONTINUATION splits, trailers, multi-
+# stream, duplicate pseudo-headers) is explored combinatorially.
+#
+# Format:
+#   H2SEQ\n followed by pseudo-headers, regular headers, optional directives
+#   (---SPLIT N---, ---BODY---, ---TRAILER---) — see h2_grammar_translator.py.
+# =============================================================================
+
+!root <sequence>
+!max_depth 4
+
+<sequence> = <simple_post>
+<sequence> = <continuation_split>
+<sequence> = <trailer_sequence>
+<sequence> = <multi_stream>
+<sequence> = <dup_pseudo_method>
+<sequence> = <dup_pseudo_path>
+<sequence> = <dup_pseudo_authority>
+<sequence> = <exotic_scheme>
+
+# =============================================================================
+# Line separator (text format, not wire)
+# =============================================================================
+<nl> = \n
+
+# =============================================================================
+# Shared terminals
+# =============================================================================
+<api_path> = /api/data
+<api_path> = /submit/grammar
+<api_path> = /search
+<api_path> = /upload
+<api_path> = /admin/panel
+<api_path> = /reflect
+
+<payload> = WF-PAYLOAD-SLOT
+<payload> = ' OR 1=1--
+<payload> = ; cat /etc/passwd
+<payload> = javascript:alert(document.cookie)
+
+<canary> = WF-CANARY-h2gram001
+
+<split_count> = 1
+<split_count> = 2
+<split_count> = 3
+
+<stream_id> = 3
+<stream_id> = 5
+<stream_id> = 7
+
+<scheme> = javascript
+<scheme> = ftp
+<scheme> = data
+<scheme> = file
+
+<extra_header> = x-extra: value
+<extra_header> = x-debug: true
+<extra_header> = x-forwarded-for: 127.0.0.1
+<extra_header> = cache-control: no-cache
+
+# =============================================================================
+# Simple POST (baseline)
+# =============================================================================
+<simple_post> = H2SEQ<nl>:method POST<nl>:path <api_path><nl>:authority target.local<nl>:scheme http<nl>content-type: application/x-www-form-urlencoded<nl>x-injection: <payload><nl><extra_header><nl>---BODY---<nl>canary=<canary>&data=test<nl>
+
+# =============================================================================
+# CONTINUATION split — header block split across frames
+# =============================================================================
+<continuation_split> = H2SEQ<nl>:method POST<nl>:path <api_path><nl>:authority target.local<nl>:scheme http<nl>content-type: application/x-www-form-urlencoded<nl>x-long-padding: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA<nl>---SPLIT <split_count>---<nl>x-injection: <payload><nl><extra_header><nl>---BODY---<nl>canary=<canary>&data=test<nl>
+
+# =============================================================================
+# Trailer sequence — payload in trailing HEADERS frame
+# =============================================================================
+<trailer_sequence> = H2SEQ<nl>:method POST<nl>:path <api_path><nl>:authority target.local<nl>:scheme http<nl>content-type: application/x-www-form-urlencoded<nl>---BODY---<nl>canary=<canary>&data=test<nl>---TRAILER---<nl>x-trailer-inject: <payload><nl>
+
+# =============================================================================
+# Multi-stream — non-default stream ID
+# =============================================================================
+<multi_stream> = H2SEQ<nl>:method POST<nl>:path <api_path><nl>:authority target.local<nl>:scheme http<nl>:stream <stream_id><nl>content-type: application/x-www-form-urlencoded<nl>x-injection: <payload><nl>---BODY---<nl>canary=<canary>&data=test<nl>
+
+# =============================================================================
+# Duplicate pseudo-headers (RFC 9113 violation)
+# =============================================================================
+<dup_pseudo_method> = H2SEQ<nl>:method POST<nl>:method get<nl>:path <api_path><nl>:authority target.local<nl>:scheme http<nl>content-type: application/x-www-form-urlencoded<nl>---BODY---<nl>canary=<canary>&data=<payload><nl>
+
+<dup_pseudo_path> = H2SEQ<nl>:method POST<nl>:path <api_path><nl>:path /<payload><nl>:authority target.local<nl>:scheme http<nl>content-type: application/x-www-form-urlencoded<nl>---BODY---<nl>canary=<canary>&data=test<nl>
+
+<dup_pseudo_authority> = H2SEQ<nl>:method POST<nl>:path <api_path><nl>:authority target.local<nl>:authority evil.attacker.invalid<nl>:scheme http<nl>content-type: application/x-www-form-urlencoded<nl>---BODY---<nl>canary=<canary>&data=test<nl>
+
+# =============================================================================
+# Exotic :scheme — non-standard values
+# =============================================================================
+<exotic_scheme> = H2SEQ<nl>:method POST<nl>:path <api_path><nl>:authority target.local<nl>:scheme <scheme><nl>content-type: application/x-www-form-urlencoded<nl>x-injection: <payload><nl>---BODY---<nl>canary=<canary>&data=test<nl>

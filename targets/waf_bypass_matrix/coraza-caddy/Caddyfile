@@ -1,0 +1,13 @@
+:8080 {
+    route {
+        coraza_waf {
+            load_owasp_crs
+            directives `
+                Include /etc/coraza/coraza.conf
+                Include /etc/coraza/crs/crs-setup.conf.example
+                Include /etc/coraza/crs/rules/*.conf
+            `
+        }
+        reverse_proxy waf_backend:8081
+    }
+}

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 
+from ..diff_fields import get_diff_fields
 from ..protocols import Finding
 
 
@@ -42,6 +43,10 @@ class StructuralDeduplicator:
 
     def fingerprint(self, finding: Finding) -> str:
         h = hashlib.sha256()
+        components: dict[str, object] = {
+            "oracle_name": finding.oracle_name,
+            "severity": finding.severity.value,
+        }
 
         # 1. Oracle identity
         h.update(finding.oracle_name.encode())
@@ -54,9 +59,24 @@ class StructuralDeduplicator:
         #     makes the key invariant to strategy/category identity and collapses
         #     findings that cover the same lattice concept into one bucket.
         if self._atoms is not None:
-            diff_fields = finding.metadata.get("diff_fields") or []
+            diff_fields = get_diff_fields(finding.metadata)
             bv = tuple(sorted(f for f in diff_fields if f in self._atoms))
             if bv:
+                components.update(
+                    {
+                        "mode": "birkhoff_bitvector",
+                        "diff_fields": sorted(diff_fields),
+                        "bitvector_atoms": list(bv),
+                        "category": finding.metadata.get("category", ""),
+                        "strategy": finding.metadata.get("strategy", ""),
+                        "accepting_side": finding.metadata.get("accepting_side", ""),
+                    },
+                )
+                finding.metadata["fingerprint_components"] = components
+                finding.metadata["fine_fingerprint"] = self._fine_fingerprint(
+                    finding,
+                    components,
+                )
                 h.update(("bv:" + "|".join(bv)).encode())
                 return h.hexdigest()[:16]
             # bv empty means no known atoms hit — fall through to path 3b so
@@ -65,6 +85,16 @@ class StructuralDeduplicator:
         # 3b. Oracle-level diff_pattern_hash (high-resolution behavioral fingerprint)
         diff_hash = finding.metadata.get("diff_pattern_hash", "")
         if diff_hash:
+            components.update(
+                {
+                    "mode": "diff_pattern_hash",
+                    "diff_pattern_hash": diff_hash,
+                    "diff_fields": sorted(get_diff_fields(finding.metadata)),
+                    "category": finding.metadata.get("category", ""),
+                    "strategy": finding.metadata.get("strategy", ""),
+                    "accepting_side": finding.metadata.get("accepting_side", ""),
+                },
+            )
             h.update(diff_hash.encode())
         else:
             # Fallback: error signature + input skeleton (non-differential oracles)
@@ -72,6 +102,19 @@ class StructuralDeduplicator:
             h.update(error_sig.encode())
             skeleton = self._input_skeleton(finding)
             h.update(skeleton.encode())
+            components.update(
+                {
+                    "mode": "fallback_error_skeleton",
+                    "error_signature": error_sig,
+                    "input_skeleton": skeleton,
+                },
+            )
+
+        finding.metadata["fingerprint_components"] = components
+        finding.metadata["fine_fingerprint"] = self._fine_fingerprint(
+            finding,
+            components,
+        )
 
         return h.hexdigest()[:16]
 
@@ -127,6 +170,33 @@ class StructuralDeduplicator:
                 skeleton.append(cls)
                 prev_class = cls
         return "".join(skeleton)[:64]
+
+    @staticmethod
+    def _fine_fingerprint(finding: Finding, components: dict[str, object]) -> str:
+        """Return a higher-resolution fingerprint for within-bucket analysis.
+
+        The coarse fingerprint intentionally collapses some semantic variation
+        for operational dedup.  ``fine_fingerprint`` preserves more of the
+        oracle-side identity so we can later audit diversity inside one coarse
+        bucket without changing the dedup decision itself.
+        """
+        h = hashlib.sha256()
+        metadata = finding.metadata
+        detail_parts = [
+            finding.oracle_name,
+            finding.severity.value,
+            str(components.get("mode", "")),
+            str(components.get("diff_pattern_hash", metadata.get("diff_pattern_hash", ""))),
+            str(components.get("error_signature", "")),
+            str(components.get("input_skeleton", "")),
+            str(metadata.get("category", "")),
+            str(metadata.get("strategy", "")),
+            str(metadata.get("accepting_side", "")),
+            "|".join(sorted(str(v) for v in get_diff_fields(metadata))),
+            "|".join(str(v) for v in components.get("bitvector_atoms", []) or []),
+        ]
+        h.update("\x1f".join(detail_parts).encode("utf-8", errors="replace"))
+        return h.hexdigest()[:16]
 
 
 def _tree_skeleton(node, depth: int = 0) -> str:

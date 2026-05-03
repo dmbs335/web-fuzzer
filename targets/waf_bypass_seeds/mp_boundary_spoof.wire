@@ -1,0 +1,25 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-mp-bound-01
+X-WF-Family: mp_boundary_spoof
+X-WF-Tags: MP.boundary,multipart,boundary_confusion
+X-WF-Canary-Marker: WF-CANARY-mpbnd00001
+X-WF-Payload-Type: xss
+X-WF-Payload: PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+X-WF-Axis-Evasion: multipart
+X-WF-Axis-Payload: xss
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: multipart_parse
+X-WF-Axis-Variant: mismatch
+Content-Type: multipart/form-data; boundary="wf-boundary"
+Content-Length: 195
+
+--wf-boundary
+Content-Disposition: form-data; name="safe"
+
+WF-CANARY-mpbnd00001
+--wf-boundary
+Content-Disposition: form-data; name="data"
+
+<script>alert(1)</script>
+--wf-boundary--

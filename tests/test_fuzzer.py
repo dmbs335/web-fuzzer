@@ -205,6 +205,210 @@ class TestCorpus:
         assert len(corpus2) == 2
 
 
+class TestSeedingService:
+    def test_shadow_replay_seeds_are_auto_loaded_from_output_dir(self, tmp_path):
+        from webfuzzer.fuzzer.seeding import SeedingService
+
+        replay_dir = tmp_path / "selection_shadow_replay"
+        replay_dir.mkdir(parents=True)
+        (replay_dir / "001_seed.bin").write_bytes(b"shadow-seed")
+        (replay_dir / "manifest.json").write_text(json.dumps([
+            {
+                "seed_path": "001_seed.bin",
+                "session_key": "session-a",
+                "prefix_depth": 2,
+                "replay_context": "shadow/replay",
+                "triage_action": "promote_shadow_bucket",
+            }
+        ]), encoding="utf-8")
+
+        class _Stats:
+            def __init__(self):
+                self.calls = []
+                self.shadow_replay_loaded_total = 0
+
+            def record_execution(self, mutator_name: str = "") -> None:
+                self.calls.append(mutator_name)
+
+            def record_shadow_replay_loaded(self, count: int = 1) -> None:
+                self.shadow_replay_loaded_total += count
+
+        corpus = Corpus()
+        stats = _Stats()
+        service = SeedingService(
+            corpus=corpus,
+            coverage=None,
+            input_source=None,
+            mutators=[],
+            stats=stats,
+            publisher=None,
+            guidance_hooks=None,
+            initial_seed_count=0,
+            max_time_seconds=0,
+            output_dir=tmp_path,
+            seeds_dir=None,
+            import_findings=[],
+            rotate_primary=lambda: (object(), []),
+            execute_on=lambda primary, inp: ExecutionResult(stdout=b"{}"),
+            execute_on_refs=lambda refs, inp: [],
+            collect_coverage=lambda inp, result, ref_results=None: None,
+            check_oracles=lambda *args, **kwargs: None,
+            apply_guidance_weights=lambda weights: None,
+            track_deser_result=lambda parsed: None,
+            sync_deser_diag=lambda: None,
+        )
+
+        count = service._load_shadow_replay_seeds()
+
+        assert count == 1
+        assert len(corpus) == 1
+        assert corpus.seeds[0].input.data == b"shadow-seed"
+        assert corpus.seeds[0].input.metadata["shadow_replay_seed"] is True
+        assert corpus.seeds[0].input.metadata["shadow_replay_triage_action"] == "promote_shadow_bucket"
+        assert corpus.seeds[0].input.metadata["session_key"] == "session-a"
+        assert corpus.seeds[0].priority_boost > 1.0
+        assert stats.calls == ["shadow_replay_seed"]
+        assert stats.shadow_replay_loaded_total == 1
+
+    def test_short_waf_campaign_skips_timeout_prone_file_seed_families(self, tmp_path):
+        from webfuzzer.fuzzer.seeding import SeedingService
+
+        seeds_dir = tmp_path / "targets" / "waf_bypass_seeds"
+        seeds_dir.mkdir(parents=True)
+        (seeds_dir / "safe_url.wire").write_bytes(
+            b"GET / HTTP/1.1\r\n"
+            b"Host: target.local\r\n"
+            b"X-WF-Family: url_double_encoding\r\n"
+            b"X-WF-Axis-Parser: url_parse\r\n\r\n"
+        )
+        (seeds_dir / "slow_multipart.wire").write_bytes(
+            b"POST /reflect HTTP/1.1\r\n"
+            b"Host: target.local\r\n"
+            b"X-WF-Family: mp_boundary_spoof\r\n"
+            b"X-WF-Axis-Parser: multipart_parse\r\n\r\n"
+            b"body"
+        )
+
+        class _Stats:
+            def __init__(self):
+                self.calls = []
+
+            def record_execution(self, mutator_name: str = "") -> None:
+                self.calls.append(mutator_name)
+
+        corpus = Corpus()
+        stats = _Stats()
+        service = SeedingService(
+            corpus=corpus,
+            coverage=None,
+            input_source=None,
+            mutators=[],
+            stats=stats,
+            publisher=None,
+            guidance_hooks=None,
+            initial_seed_count=0,
+            max_time_seconds=18,
+            output_dir=tmp_path,
+            seeds_dir=seeds_dir,
+            import_findings=[],
+            rotate_primary=lambda: (object(), []),
+            execute_on=lambda primary, inp: ExecutionResult(stdout=b"{}"),
+            execute_on_refs=lambda refs, inp: [],
+            collect_coverage=lambda inp, result, ref_results=None: None,
+            check_oracles=lambda *args, **kwargs: None,
+            apply_guidance_weights=lambda weights: None,
+            track_deser_result=lambda parsed: None,
+            sync_deser_diag=lambda: None,
+        )
+
+        count = service._load_file_seeds()
+
+        assert count == 1
+        assert len(corpus) == 1
+        assert corpus.seeds[0].input.data.startswith(b"GET / HTTP/1.1")
+        assert stats.calls == ["file_seed"]
+
+
+class TestShortWafPriorityDemotion:
+    def test_applies_to_large_short_run_waf_mutations(self):
+        from webfuzzer.fuzzer.engine import _short_waf_priority_demote
+
+        data = (
+            b"POST /reflect HTTP/1.1\r\n"
+            b"Host: target.local\r\n"
+            b"X-WF-Family: fuzz\r\n\r\n"
+            + b"A" * 650
+        )
+        assert _short_waf_priority_demote(
+            input_data=data,
+            mutator_name="waf_bypass",
+            max_time_seconds=18,
+        ) == 0.10
+
+    def test_ignores_non_waf_or_long_run_cases(self):
+        from webfuzzer.fuzzer.engine import _short_waf_priority_demote
+
+        data = b"GET / HTTP/1.1\r\nHost: x\r\nX-WF-Family: fuzz\r\n\r\n" + (b"A" * 900)
+        assert _short_waf_priority_demote(
+            input_data=data,
+            mutator_name="grammar",
+            max_time_seconds=18,
+        ) is None
+        assert _short_waf_priority_demote(
+            input_data=data,
+            mutator_name="waf_bypass",
+            max_time_seconds=120,
+        ) is None
+
+
+class TestShortWafExecutionGuard:
+    def test_skips_large_timeout_prone_short_waf_request(self):
+        from webfuzzer.fuzzer.engine import _should_skip_short_waf_execution
+
+        data = (
+            b"POST /reflect HTTP/1.1\r\n"
+            b"Host: target.local\r\n"
+            b"X-WF-Family: fuzz\r\n"
+            b"Content-Type: multipart/form-data; boundary=wf\r\n\r\n"
+            + b"A" * 700
+        )
+        assert _should_skip_short_waf_execution(
+            input_data=data,
+            mutator_name="waf_bypass",
+            max_time_seconds=18,
+        ) is True
+
+    def test_does_not_skip_small_or_non_waf_cases(self):
+        from webfuzzer.fuzzer.engine import _should_skip_short_waf_execution
+
+        assert _should_skip_short_waf_execution(
+            input_data=b"GET / HTTP/1.1\r\nHost: x\r\nX-WF-Family: fuzz\r\n\r\n",
+            mutator_name="waf_bypass",
+            max_time_seconds=18,
+        ) is False
+        assert _should_skip_short_waf_execution(
+            input_data=(
+                b"POST / HTTP/1.1\r\nHost: x\r\nX-WF-Family: fuzz\r\n"
+                b"Transfer-Encoding: chunked\r\n\r\n" + b"A" * 700
+            ),
+            mutator_name="grammar",
+            max_time_seconds=18,
+        ) is False
+
+    def test_skips_whitespace_chunked_case(self):
+        from webfuzzer.fuzzer.engine import _should_skip_short_waf_execution
+
+        chunked = (
+            b"POST / HTTP/1.1\r\nHost: x\r\nX-WF-Family: fuzz\r\n"
+            b"Transfer-Encoding:\tchunked\r\n\r\n" + b"A" * 700
+        )
+        assert _should_skip_short_waf_execution(
+            input_data=chunked,
+            mutator_name="waf_bypass",
+            max_time_seconds=18,
+        ) is True
+
+
 # ── Mutator tests ───────────────────────────────────────────────
 
 
@@ -586,6 +790,78 @@ class TestCrashOracle:
         finding = oracle.check(inp, result)
         assert finding is not None
         assert finding.severity == Severity.MEDIUM
+
+    def test_timeout_error_metadata_is_promoted_to_timeout_finding(self):
+        from webfuzzer.fuzzer.oracles.crash_oracle import CrashOracle
+
+        oracle = CrashOracle()
+        inp = Input(
+            data=(
+                b"POST / HTTP/1.1\r\n"
+                b"Host: target.local\r\n"
+                b"X-WF-Family: ct_json_field_wrapper\r\n"
+                b"X-WF-Axis-Evasion: content_type\r\n"
+                b"X-WF-Axis-Parser: body_parse\r\n"
+                b"X-WF-Axis-Variant: json_field_wrapper\r\n"
+                b"X-WF-Transforms: case_scramble,encoding_wrap\r\n\r\n"
+                b"{}"
+            )
+        )
+        result = ExecutionResult(
+            exit_code=-1,
+            duration_ms=2000,
+            stderr=b"Persistent target read timed out after 2.0s",
+            metadata={"error_type": "TimeoutError", "error": "persistent_target_error"},
+        )
+        finding = oracle.check(inp, result)
+        assert finding is not None
+        assert finding.title.startswith("Timeout:")
+        assert finding.metadata["timeout"] is True
+        assert finding.metadata["error_type"] == "TimeoutError"
+        assert finding.metadata["waf_timeout_family"] == "ct_json_field_wrapper"
+        assert finding.metadata["waf_timeout_axis_evasion"] == "content_type"
+        assert finding.metadata["waf_timeout_axis_parser"] == "body_parse"
+        assert finding.metadata["waf_timeout_axis_variant"] == "json_field_wrapper"
+        assert finding.metadata["waf_timeout_transforms"] == ["case_scramble", "encoding_wrap"]
+
+    def test_timeout_error_uses_input_metadata_when_wf_headers_are_lost(self):
+        from webfuzzer.fuzzer.oracles.crash_oracle import CrashOracle
+
+        oracle = CrashOracle()
+        inp = Input(
+            data=b"POST / HTTP/1.1\r\nHost: target.local\r\n\r\n{}",
+            metadata={
+                "variant_family": "hdr_http10_downgrade",
+                "axis_evasion": "header_leniency",
+                "axis_parser": "header_parse",
+                "axis_variant": "http10",
+                "applied_transforms": ["case_scramble"],
+            },
+        )
+        result = ExecutionResult(
+            exit_code=-1,
+            duration_ms=3000,
+            stderr=b"Persistent target read timed out after 3.0s",
+            metadata={"error_type": "TimeoutError", "error": "persistent_target_error"},
+        )
+        finding = oracle.check(inp, result)
+        assert finding is not None
+        assert finding.metadata["waf_timeout_family"] == "hdr_http10_downgrade"
+        assert finding.metadata["waf_timeout_axis_evasion"] == "header_leniency"
+        assert finding.metadata["waf_timeout_axis_parser"] == "header_parse"
+        assert finding.metadata["waf_timeout_axis_variant"] == "http10"
+        assert finding.metadata["waf_timeout_transforms"] == ["case_scramble"]
+
+    def test_structured_json_nonzero_exit_without_error_is_ignored(self):
+        from webfuzzer.fuzzer.oracles.crash_oracle import CrashOracle
+
+        oracle = CrashOracle()
+        inp = Input(data=b"test")
+        result = ExecutionResult(
+            exit_code=1,
+            stdout=b'{"response_status": 403, "waf_blocked": true}',
+        )
+        assert oracle.check(inp, result) is None
 
 
 class TestSanitizerOracle:
@@ -1039,6 +1315,17 @@ class TestProcessTarget:
             assert result.metadata.get("timeout") is True
         finally:
             target.teardown()
+
+    def test_waf_persistent_timeout_helper_uses_longer_budget(self):
+        from webfuzzer.app.persistent_targets import persistent_timeout_for_cmd
+
+        timeout = persistent_timeout_for_cmd(
+            "python targets/waf_bypass_target.py --host 127.0.0.1 --port 19101 --persistent",
+            grammar="waf_bypass_request",
+            oracle_names={"differential", "crash"},
+        )
+
+        assert timeout == 3.0
 
     def test_is_alive(self):
         from webfuzzer.fuzzer.targets.process_target import ProcessTarget

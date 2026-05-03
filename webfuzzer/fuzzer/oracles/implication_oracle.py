@@ -35,6 +35,7 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, Any
 
+from ..diff_fields import get_diff_fields
 from ..protocols import Finding, Input, Severity
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ class ImplicationSoftOracle:
         unchanged.
     implications:
         List of implication dicts as produced by
-        ``experiments/diffspace_geometry/e4_fca/duquenne_guigues.py``.
+        the external diffspace research workspace's FCA analysis.
         Each dict must have ``"premise"`` and ``"conclusion"`` keys whose
         values are lists of attribute (diff-field) names.  Only
         ``confidence=1.0`` implications are used; others are silently skipped
@@ -129,7 +130,7 @@ class ImplicationSoftOracle:
             self._check_violations(primary)
 
     def _check_violations(self, finding: Finding) -> None:
-        diff_fields = frozenset(finding.metadata.get("diff_fields") or [])
+        diff_fields = frozenset(get_diff_fields(finding.metadata))
         if not diff_fields:
             return
         for premise, conclusion in self._implications:
@@ -150,7 +151,8 @@ class ImplicationSoftOracle:
         fp = hashlib.sha256(
             f"impl_viol:{source.oracle_name}:{prem_str}:{conc_str}".encode()
         ).hexdigest()[:16]
-        missing = conclusion - frozenset(source.metadata.get("diff_fields") or [])
+        source_diff_fields = get_diff_fields(source.metadata)
+        missing = conclusion - frozenset(source_diff_fields)
         f = Finding(
             title=f"implication_violation: {{{prem_str}}} -> {{{conc_str}}}",
             severity=Severity.INFO,
@@ -164,7 +166,8 @@ class ImplicationSoftOracle:
                 "missing_conclusion_fields": sorted(missing),
                 "source_oracle": source.oracle_name,
                 "source_fingerprint": source.fingerprint,
-                "diff_fields": list(source.metadata.get("diff_fields") or []),
+                "diff_fields": list(source_diff_fields),
+                "difference_fields": list(source_diff_fields),
             },
         )
         return f

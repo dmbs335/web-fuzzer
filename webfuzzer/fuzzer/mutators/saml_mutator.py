@@ -1166,7 +1166,7 @@ class SamlMutator:
         """Apply startup-time weight boosts from E4 FCA atom coverage.
 
         The ``atom_weights`` dict comes from
-        ``experiments/diffspace_geometry/e4_fca/strategy_atoms.py`` and
+        the external diffspace research workspace and
         maps each strategy name to a coverage score in ``[0, 1]``: the
         fraction of the concept lattice's meet-irreducible atoms
         (Birkhoff generators) that the strategy's historical findings
@@ -1207,7 +1207,7 @@ class SamlMutator:
 
         ``witness_weights`` is a ``{strategy_name: score in [0, 1]}`` map
         produced by
-        ``experiments/diffspace_geometry/e7_automata/strategy_witnesses.py``.
+        its E7 automata witness analysis.
         The score is the strategy's cumulative contribution to the
         diff-field coordinates that appear in the E7 disagreement trie's
         witness prefixes, normalized across the strategy set. A strategy

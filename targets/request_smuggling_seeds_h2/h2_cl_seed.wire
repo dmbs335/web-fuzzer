@@ -1,0 +1,16 @@
+POST /cache/store HTTP/1.1
+Host: victim.local
+X-WF-Request-ID: seedh2cl01
+X-WF-Family: h2_cl
+X-WF-Tags: H2.CL,downgrade,content_length
+X-WF-Transport: h2_raw
+X-WF-Delivery: h2_raw
+X-WF-Probe: none
+X-WF-Pause-MS: 0
+X-WF-Chunk-Shape: none
+X-WF-H2-Mode: content_length_mismatch
+X-WF-H2-End-Stream: normal
+X-WF-Impact: /cache/store
+Content-Length: 5
+
+abc

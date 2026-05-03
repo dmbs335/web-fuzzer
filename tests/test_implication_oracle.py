@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from webfuzzer.fuzzer.protocols import Finding, Input, ExecutionResult, Severity
+from webfuzzer.fuzzer.oracles.diff_oracle import DiffOracle
 from webfuzzer.fuzzer.oracles.implication_oracle import ImplicationSoftOracle
 
 
@@ -211,6 +212,42 @@ def test_check_handles_list_return():
     assert len(violations) == 2
 
 
+def test_wrapped_diff_oracle_list_return_does_not_crash():
+    """Regression for the Apr 12, 2026 wrapper bug.
+
+    DiffOracle returns list[Finding] in differential mode. The implication
+    wrapper must accept that shape instead of assuming a single Finding.
+    """
+
+    class _RefTarget:
+        def execute(self, inp: Input) -> ExecutionResult:
+            return ExecutionResult(stdout=b"{}")
+
+    class _ListStrategy:
+        name = "list_strategy"
+
+        def compare(
+            self,
+            inp: Input,
+            primary: ExecutionResult,
+            reference: ExecutionResult,
+            ref_index: int,
+        ) -> list[Finding]:
+            first = _make_finding(diff_fields=["a"], fp=f"fp{ref_index}_0")
+            first.metadata["category"] = "cat_a"
+            second = _make_finding(diff_fields=["c", "d"], fp=f"fp{ref_index}_1")
+            second.metadata["category"] = "cat_cd"
+            return [first, second]
+
+    inner = DiffOracle(reference_targets=[_RefTarget()], strategies=[_ListStrategy()])
+    oracle = ImplicationSoftOracle(inner, IMPLICATIONS)
+    result = oracle.check(Input(data=b"x"), ExecutionResult(stdout=b"{}"))
+    assert isinstance(result, list)
+    assert len(result) == 2
+    violations = oracle.drain_violations()
+    assert len(violations) == 2
+
+
 def test_check_with_refs_delegates_to_inner():
     """check_with_refs delegates and populates violations."""
     primary = _make_finding(diff_fields=["a"])
@@ -230,8 +267,11 @@ def test_check_with_refs_delegates_to_inner():
 def test_real_waf_implication_base_loads():
     """Smoke: loads actual waf_v61 implication_base.json without error."""
     import json
+    import os
     from pathlib import Path
-    p = Path("experiments/diffspace_geometry/outputs/waf_v61_20260407/e4_fca/implication_base.json")
+
+    root = Path(os.environ.get("DIFFSPACE_RESEARCH_DIR", "../diffspace-research"))
+    p = root / "experiments/diffspace_geometry/outputs/waf_v61_20260407/e4_fca/implication_base.json"
     if not p.exists():
         pytest.skip("waf implication_base.json not present")
     implications = json.loads(p.read_text(encoding="utf-8"))

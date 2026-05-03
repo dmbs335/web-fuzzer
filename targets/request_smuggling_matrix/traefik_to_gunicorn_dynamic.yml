@@ -1,0 +1,13 @@
+http:
+  routers:
+    all:
+      rule: "PathPrefix(`/`)"
+      entryPoints:
+        - web
+      service: gunicorn
+
+  services:
+    gunicorn:
+      loadBalancer:
+        servers:
+          - url: "http://gunicorn_backend:8081"

@@ -37,9 +37,11 @@ public class DeserAgent implements ClassFileTransformer {
         // Reflection
         SINK_METHODS.put("java/lang/reflect/Method/invoke/(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", "reflection");
 
-        // Class loading
-        SINK_METHODS.put("java/lang/ClassLoader/loadClass/(Ljava/lang/String;)Ljava/lang/Class;", "class_load");
-        SINK_METHODS.put("java/net/URLClassLoader/newInstance/([Ljava/net/URL;)Ljava/net/URLClassLoader;", "class_load");
+        // Class loading — NOT instrumented for live server agents (ClassLoader
+        // instrumentation causes circular dependency during JEUS bootstrap).
+        // Use TemplatesImpl.newTransformer reflective sink instead.
+        // SINK_METHODS.put("java/lang/ClassLoader/loadClass/(Ljava/lang/String;)Ljava/lang/Class;", "class_load");
+        // SINK_METHODS.put("java/net/URLClassLoader/newInstance/([Ljava/net/URL;)Ljava/net/URLClassLoader;", "class_load");
 
         // Network
         SINK_METHODS.put("java/net/URL/openConnection/()Ljava/net/URLConnection;", "network");
@@ -59,8 +61,9 @@ public class DeserAgent implements ClassFileTransformer {
         SINK_METHODS.put("javax/script/ScriptEngine/eval/(Ljava/lang/String;)Ljava/lang/Object;", "script_exec");
         SINK_METHODS.put("javax/script/ScriptEngine/eval/(Ljava/io/Reader;)Ljava/lang/Object;", "script_exec");
 
-        // Thread creation
-        SINK_METHODS.put("java/lang/Thread/start/()V", "thread_spawn");
+        // Thread creation — disabled for live server agents (Thread.start
+        // instrumentation interferes with server thread pool management).
+        // SINK_METHODS.put("java/lang/Thread/start/()V", "thread_spawn");
     }
 
     // ── Reflective sink lookup ──────────────────────────────────
@@ -103,15 +106,18 @@ public class DeserAgent implements ClassFileTransformer {
 
     // Categories where execution is BLOCKED (record + return default)
     // reflection and class_load are NOT blocked — needed for normal JVM operation
+    // network, file_read, file_write are NOT blocked for live server agents:
+    //   URL.openConnection is used by URLClassLoader internally — blocking it
+    //   causes NPE in LauncherHelper.checkAndLoadMain. These are record-only.
     private static final Set<String> BLOCKED_CATEGORIES = new HashSet<>();
     static {
         BLOCKED_CATEGORIES.add("cmd_exec");
         BLOCKED_CATEGORIES.add("jndi_lookup");
         BLOCKED_CATEGORIES.add("script_exec");
-        BLOCKED_CATEGORIES.add("network");
-        BLOCKED_CATEGORIES.add("file_write");
-        BLOCKED_CATEGORIES.add("file_read");
-        BLOCKED_CATEGORIES.add("thread_spawn");
+        // BLOCKED_CATEGORIES.add("network");    // record-only (URLClassLoader needs URL.openConnection)
+        // BLOCKED_CATEGORIES.add("file_write");  // record-only (JVM reads config files)
+        // BLOCKED_CATEGORIES.add("file_read");   // record-only
+        // BLOCKED_CATEGORIES.add("thread_spawn"); // already removed from SINK_METHODS
     }
 
     // ── Thread-local sink tracking ──────────────────────────────
@@ -150,8 +156,8 @@ public class DeserAgent implements ClassFileTransformer {
             java.lang.Runtime.class,
             java.lang.ProcessBuilder.class,
             java.lang.reflect.Method.class,
-            java.lang.ClassLoader.class,
-            java.lang.Thread.class,
+            // java.lang.ClassLoader.class,  // disabled for live server
+            // java.lang.Thread.class,       // disabled for live server
             java.net.InetAddress.class,
             java.net.URL.class,
         };
@@ -176,8 +182,8 @@ public class DeserAgent implements ClassFileTransformer {
         TARGET_CLASSES.add("java/lang/ProcessBuilder");
         TARGET_CLASSES.add("javax/naming/InitialContext");
         TARGET_CLASSES.add("java/lang/reflect/Method");
-        TARGET_CLASSES.add("java/lang/ClassLoader");
-        TARGET_CLASSES.add("java/net/URLClassLoader");
+        // TARGET_CLASSES.add("java/lang/ClassLoader");  // disabled for live server
+        // TARGET_CLASSES.add("java/net/URLClassLoader"); // disabled for live server
         TARGET_CLASSES.add("java/net/URL");
         TARGET_CLASSES.add("java/net/Socket");
         TARGET_CLASSES.add("java/net/InetAddress");
@@ -186,7 +192,7 @@ public class DeserAgent implements ClassFileTransformer {
         TARGET_CLASSES.add("java/io/FileInputStream");
         TARGET_CLASSES.add("java/io/FileReader");
         TARGET_CLASSES.add("javax/script/ScriptEngine");
-        TARGET_CLASSES.add("java/lang/Thread");
+        // TARGET_CLASSES.add("java/lang/Thread");  // disabled for live server
     }
 
     @Override

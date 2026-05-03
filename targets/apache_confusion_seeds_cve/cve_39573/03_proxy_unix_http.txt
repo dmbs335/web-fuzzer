@@ -1,1 +1,0 @@
-/brokenproxy:unix:/tmp/sock|http://localhost/

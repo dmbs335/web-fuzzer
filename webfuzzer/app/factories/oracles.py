@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import sys
 
 
-def _make_confused_deputy():
-    from ...fuzzer.oracles.confused_deputy_strategy import ConfusedDeputyStrategy
-
-    return ConfusedDeputyStrategy()
-
-
-def _make_cve_scanner():
-    from ...fuzzer.oracles.cve_detector_strategy import CVEScannerStrategy
-
-    return CVEScannerStrategy()
+def _oob_dir() -> str:
+    return os.environ.get("WEBFUZZER_OOB_DIR", "artifacts/oob")
 
 
 def build_oracles(names: str) -> list:
@@ -29,6 +22,7 @@ def build_oracles(names: str) -> list:
     from ...fuzzer.oracles.jndi_oracle import JndiOracle
     from ...fuzzer.oracles.jwt_oracle import JwtOracle
     from ...fuzzer.oracles.mxss_oracle import MxssOracle
+    from ...fuzzer.oracles.oob_file_oracle import OobFileOracle
     from ...fuzzer.oracles.oauth_oracle import OAuthOracle
     from ...fuzzer.oracles.response_oracle import ResponseOracle
     from ...fuzzer.oracles.saml_oracle import (
@@ -63,10 +57,11 @@ def build_oracles(names: str) -> list:
         "class_pollution": lambda: ClassPollutionOracle(),
         "domclobber": lambda: DomClobberOracle(),
         "domclobber_diff": lambda: None,
-        "apache_confusion": lambda: None,
         "sandbox": lambda: None,
-        "confused_deputy": lambda: _make_confused_deputy(),
-        "cve_scanner": lambda: _make_cve_scanner(),
+        "oob_file": lambda: OobFileOracle(oob_dir=_oob_dir()),
+        "oob_file_http": lambda: OobFileOracle(
+            oob_dir=_oob_dir(), http_port=18080,
+        ),
     }
 
     oracles = []

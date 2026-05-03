@@ -30,6 +30,7 @@ class CheckpointService:
         rng,
         dedup_exporter,
         dedup_importer,
+        adaptive_coverage=None,
     ) -> None:
         self.output_dir = output_dir
         self.corpus = corpus
@@ -37,6 +38,7 @@ class CheckpointService:
         self.rng = rng
         self.dedup_exporter = dedup_exporter
         self.dedup_importer = dedup_importer
+        self.adaptive_coverage = adaptive_coverage
 
     def checkpoint_dir(self) -> Path | None:
         if self.output_dir is None:

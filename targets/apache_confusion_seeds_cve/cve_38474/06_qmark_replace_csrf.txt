@@ -1,1 +1,0 @@
-/api/v1/transfer%3Famount=10000?csrf_token=valid

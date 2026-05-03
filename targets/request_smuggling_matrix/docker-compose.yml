@@ -1,0 +1,216 @@
+services:
+  # ============================================================
+  # BACKENDS
+  # ============================================================
+
+  backend:
+    image: python:3.11-slim
+    working_dir: /srv
+    command: python /srv/marker_backend.py --port 8081
+    volumes:
+      - ./marker_backend.py:/srv/marker_backend.py:ro
+    ports:
+      - "19081:8081"
+
+  node_backend:
+    image: node:22-slim
+    working_dir: /srv
+    command: node /srv/node_marker_backend.js 8081
+    volumes:
+      - ./node_marker_backend.js:/srv/node_marker_backend.js:ro
+    ports:
+      - "19082:8081"
+
+  gunicorn_backend:
+    image: python:3.11-slim
+    working_dir: /srv
+    command: ["sh", "-c", "pip install -q gunicorn && gunicorn -b 0.0.0.0:8081 -w 2 --keep-alive 30 --access-logfile - gunicorn_marker_app:application"]
+    volumes:
+      - ./gunicorn_marker_app.py:/srv/gunicorn_marker_app.py:ro
+    ports:
+      - "19083:8081"
+
+  # ============================================================
+  # NEW PAIRS: Frontend → Real Backend
+  # ============================================================
+
+  # Pair 1a: Nginx → Node.js (port 18091)
+  nginx_to_node:
+    image: nginx:latest
+    depends_on:
+      - node_backend
+    volumes:
+      - ./nginx_to_node.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "18091:8080"
+
+  # Pair 1b: Nginx → Gunicorn (port 18092)
+  nginx_to_gunicorn:
+    image: nginx:latest
+    depends_on:
+      - gunicorn_backend
+    volumes:
+      - ./nginx_to_gunicorn.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "18092:8080"
+
+  # Pair 2: HAProxy → Node.js (port 18093)
+  haproxy_to_node:
+    image: haproxy:latest
+    depends_on:
+      - node_backend
+    volumes:
+      - ./haproxy_to_node.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "18093:8080"
+
+  # Pair 3: Caddy → Node.js (port 18094)
+  caddy_to_node:
+    image: caddy:latest
+    depends_on:
+      - node_backend
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "18094:8080"
+
+  # Pair 4: Traefik → Gunicorn (port 18095)
+  traefik_to_gunicorn:
+    image: traefik:v3.4
+    depends_on:
+      - gunicorn_backend
+    volumes:
+      - ./traefik_to_gunicorn_static.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik_to_gunicorn_dynamic.yml:/etc/traefik/dynamic.yml:ro
+    ports:
+      - "18095:8000"
+
+  # ============================================================
+  # LEGACY (kept for reference/direct testing)
+  # ============================================================
+
+  nginx_confusion:
+    image: nginx:latest
+    depends_on:
+      - backend
+    volumes:
+      - ./nginx_rs.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "18081:8080"
+
+  haproxy_confusion:
+    image: haproxy:latest
+    depends_on:
+      - backend
+    volumes:
+      - ./haproxy_rs.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "18082:8080"
+
+  apache_confusion:
+    image: httpd:2.4
+    depends_on:
+      - nginx_origin
+    volumes:
+      - ./apache_rs.conf:/usr/local/apache2/conf/httpd.conf:ro
+    ports:
+      - "18085:8080"
+
+  traefik_confusion:
+    image: traefik:v3.4
+    depends_on:
+      - backend
+    volumes:
+      - ./traefik_static.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik_dynamic.yml:/etc/traefik/dynamic.yml:ro
+    ports:
+      - "18086:8000"
+      - "19086:8080"
+
+  varnish_confusion:
+    image: varnish:7.6
+    depends_on:
+      - backend
+    command:
+      - varnishd
+      - -F
+      - -f
+      - /etc/varnish/default.vcl
+      - -a
+      - :8080
+      - -s
+      - malloc,128m
+    volumes:
+      - ./default.vcl:/etc/varnish/default.vcl:ro
+    ports:
+      - "18087:8080"
+
+  lenient_frontend:
+    image: python:3.11-slim
+    depends_on:
+      - backend
+    working_dir: /srv
+    command: python /srv/lenient_frontend.py --listen 8080 --backend-host backend --backend-port 8081
+    volumes:
+      - ./lenient_frontend.py:/srv/lenient_frontend.py:ro
+    ports:
+      - "18083:8080"
+
+  h2_downgrade_frontend:
+    image: python:3.11-slim
+    depends_on:
+      - backend
+    working_dir: /srv
+    command: python /srv/h2_downgrade_frontend.py --listen 8080 --backend-host backend --backend-port 8081
+    volumes:
+      - ./h2_downgrade_frontend.py:/srv/h2_downgrade_frontend.py:ro
+    ports:
+      - "18443:8080"
+
+  envoy_h2_frontend:
+    image: envoyproxy/envoy:v1.31-latest
+    depends_on:
+      - backend
+    command: /usr/local/bin/envoy -c /etc/envoy/envoy.yaml --log-level warning
+    volumes:
+      - ./envoy_rs.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "18084:8080"
+      - "19901:9901"
+
+  nginx_origin:
+    image: nginx:latest
+    depends_on:
+      - backend
+    volumes:
+      - ./nginx_origin.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "18089:8080"
+
+  envoy_nginx_chain_frontend:
+    image: envoyproxy/envoy:v1.31-latest
+    depends_on:
+      - nginx_origin
+    command: /usr/local/bin/envoy -c /etc/envoy/envoy.yaml --log-level warning
+    volumes:
+      - ./envoy_rs_chain.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "18088:8080"
+      - "19902:9901"
+
+  # TR.PSEUDO.MRG: intentionally lenient H2→H1 bridge (no §8.1.2.1 validation)
+  h2_lenient_bridge:
+    image: python:3.11-slim
+    depends_on:
+      - backend
+    working_dir: /srv
+    command: >
+      sh -c "pip install -q hpack &&
+             python /srv/h2_lenient_bridge.py
+               --listen 8080
+               --backend-host backend
+               --backend-port 8081"
+    volumes:
+      - ./h2_lenient_bridge.py:/srv/h2_lenient_bridge.py:ro
+    ports:
+      - "18446:8080"

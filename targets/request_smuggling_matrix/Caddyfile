@@ -1,0 +1,8 @@
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	reverse_proxy node_backend:8081
+}

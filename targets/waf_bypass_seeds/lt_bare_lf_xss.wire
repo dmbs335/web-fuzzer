@@ -1,0 +1,17 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-lt-lf-01
+X-WF-Family: lt_bare_lf
+X-WF-Tags: LT.lf,line_terminator,bare_lf
+X-WF-Canary-Marker: WF-CANARY-ltblf00001
+X-WF-Payload-Type: xss
+X-WF-Payload: PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+X-WF-Axis-Evasion: line_terminator
+X-WF-Axis-Payload: xss
+X-WF-Axis-Depth: surface
+X-WF-Axis-Parser: header_parse
+X-WF-Axis-Variant: terminator
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 62
+
+param=WF-CANARY-ltblf00001&data=<script>alert(1)</script>&x=1

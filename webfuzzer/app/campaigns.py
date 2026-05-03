@@ -4,30 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
-CAMPAIGN_PRESETS = {
-    "cve_detect": {
-        "oracle": "cve_scanner",
-        "mutators": "apache_confusion,grammar,havoc",
-        "seeds_dir": "targets/apache_confusion_seeds_cve",
-        "grammar": "apache_confusion",
-        "campaign_mode": "cve_detect",
-    },
-    "patch_bypass": {
-        "oracle": "cve_scanner",
-        "mutators": "apache_confusion,havoc",
-        "seeds_dir": "targets/apache_confusion_seeds_cve/patch_bypass",
-        "grammar": "apache_confusion",
-        "campaign_mode": "patch_bypass",
-    },
-    "novel": {
-        "oracle": "apache_confusion",
-        "mutators": "apache_confusion,grammar,havoc",
-        "seeds_dir": "targets/apache_confusion_seeds",
-        "grammar": "apache_confusion",
-        "campaign_mode": "novel",
-    },
-}
+CAMPAIGN_PRESETS = {}
 
 
 def apply_campaign_preset(args) -> str:

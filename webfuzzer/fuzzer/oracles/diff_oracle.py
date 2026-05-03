@@ -32,6 +32,7 @@ from ..domain import (
     get_profile,
     DomainProfile,
 )
+from ..diff_fields import get_diff_fields
 from ..protocols import ExecutionResult, Finding, Input, Severity, Target
 
 
@@ -615,7 +616,7 @@ class DiffOracle:
             pattern_parts: list[str] = []
             for ref_idx, finding in sorted(members, key=lambda x: x[0]):
                 meta = finding.metadata or {}
-                diff_fields = sorted(meta.get("diff_fields", []))
+                diff_fields = sorted(get_diff_fields(meta))
                 # Include accepting_side to distinguish "primary accepts" vs
                 # "ref accepts" — these are fundamentally different bugs
                 aside = meta.get("accepting_side", "")

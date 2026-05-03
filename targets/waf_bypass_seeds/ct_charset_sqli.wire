@@ -1,0 +1,17 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-ct-charset-01
+X-WF-Family: ct_charset_trick
+X-WF-Tags: CT.charset,content_type,encoding_confusion
+X-WF-Canary-Marker: WF-CANARY-ctchr00001
+X-WF-Payload-Type: sqli
+X-WF-Payload: JyBPUiAxPTEtLQ==
+X-WF-Axis-Evasion: content_type
+X-WF-Axis-Payload: sqli
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: body_parse
+X-WF-Axis-Variant: mismatch
+Content-Type: application/x-www-form-urlencoded; charset=ibm037
+Content-Length: 44
+
+param=WF-CANARY-ctchr00001&q=' OR 1=1--&x=1

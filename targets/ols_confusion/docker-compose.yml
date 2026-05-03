@@ -1,4 +1,0 @@
-services:
-  ols:
-    image: litespeedtech/openlitespeed:latest
-    ports: ["9700:8088"]

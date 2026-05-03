@@ -1,0 +1,18 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-enc-chunk-01
+X-WF-Family: enc_chunked_hide
+X-WF-Tags: TE.hide,transfer_encoding,chunk_hiding
+X-WF-Canary-Marker: WF-CANARY-enchk00001
+X-WF-Payload-Type: xss
+X-WF-Payload: PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+X-WF-Axis-Evasion: encoding
+X-WF-Axis-Payload: xss
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: body_parse
+X-WF-Axis-Variant: mismatch
+Transfer-Encoding: chunked
+
+1a;ext=<script>alert(1)</script>
+WF-CANARY-enchk00001safe=1
+0

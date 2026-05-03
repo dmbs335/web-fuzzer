@@ -93,10 +93,9 @@ class Finding:
 class StoppingSignal:
     """Offline PAC stopping signal from diffspace-geometry lint (DG018).
 
-    Produced by running
-    ``python -m experiments.diffspace_geometry.lint --json`` on a prior
-    session and extracting the ``DG018`` observed fields (or constructed
-    by hand for tests). The signal tells the scheduler whether the
+    Produced by the external diffspace research workspace on a prior session
+    and extracting the ``DG018`` observed fields (or constructed by hand for
+    tests). The signal tells the scheduler whether the
     previous campaign's Good-Turing missing-mass upper bound already
     cleared the PAC stopping threshold ε.
 
@@ -242,8 +241,8 @@ class LearnedWeightMutator(Protocol):
 class LatticeAtomMutator(Protocol):
     """Accepts offline Birkhoff-atom coverage weights (E4 FCA output).
 
-    The input is a ``{strategy_name: weight in [0,1]}`` dict derived from
-    ``experiments/diffspace_geometry/e4_fca/strategy_atoms.py``. Higher
+    The input is a ``{strategy_name: weight in [0,1]}`` dict derived from the
+    external diffspace research workspace. Higher
     weights correspond to strategies whose historical findings cover a
     larger subset of the meet-irreducible diff-field atoms of the
     observed concept lattice. Implementations should treat this as a
@@ -262,8 +261,7 @@ class AutomatonWitnessMutator(Protocol):
 
     Input is ``{strategy_name: score in [0, 1]}`` produced offline from
     the E7 pairwise symmetric-difference surfaces plus the feature dump
-    (see
-    ``experiments/diffspace_geometry/e7_automata/strategy_witnesses.py``).
+    (see the external diffspace research workspace).
     Higher scores mean the strategy historically contributed more to
     diff-field coordinates that witness observed library-pair
     disagreements. Implementations should treat this as a startup-time

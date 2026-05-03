@@ -6,9 +6,11 @@ Every component is injected via Protocol interfaces — swap any part freely.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import random
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -19,7 +21,14 @@ from .checkpointing import CheckpointService
 from .command_channel import CommandChannel
 from .coverage.diff_coverage import DiffCoverageCollector
 from .coverage.adaptive_coverage import AdaptiveDiffCoverage
+from .diff_fields import get_diff_fields
 from .finding_pipeline import FindingProcessor, extract_lib_name
+from .heuristic_policy import (
+    ShortWafEvidence,
+    cap_priority,
+    short_waf_priority_cap,
+    should_skip_short_waf_execution,
+)
 from .maintenance import RuntimeMaintenanceService
 from .runtime_reporting import RuntimeReportingService
 from .seeding import SeedingService
@@ -384,6 +393,16 @@ class FuzzEngine:
             _vsink = make_jsonl_violation_sink(
                 self.output_dir / "violations.jsonl"
             )
+        _selection_drop_sink = None
+        _selection_shadow_sink = None
+        if self.output_dir is not None:
+            from .finding_pipeline import make_jsonl_selection_drop_sink
+            _selection_drop_sink = make_jsonl_selection_drop_sink(
+                self.output_dir / "selection_drops.jsonl"
+            )
+            _selection_shadow_sink = make_jsonl_selection_drop_sink(
+                self.output_dir / "selection_shadow_queue.jsonl"
+            )
         self._finding_processor = FindingProcessor(
             oracles=self.oracles,
             deduplicator=self.deduplicator,
@@ -393,6 +412,8 @@ class FuzzEngine:
             all_targets=self.all_targets,
             target_lib_names=self._target_lib_names,
             violation_sink=_vsink,
+            selection_drop_sink=_selection_drop_sink,
+            selection_shadow_sink=_selection_shadow_sink,
         )
         self._runtime_reporting = RuntimeReportingService(
             stats=self.stats,
@@ -447,6 +468,8 @@ class FuzzEngine:
             publisher=self._publisher,
             guidance_hooks=self._guidance,
             initial_seed_count=self.initial_seed_count,
+            max_time_seconds=self.max_time_seconds,
+            output_dir=self.output_dir,
             seeds_dir=self.seeds_dir,
             import_findings=self.import_findings,
             rotate_primary=self._rotate_primary,
@@ -486,6 +509,22 @@ class FuzzEngine:
             # 3. Mutate
             mutated_input = mutator.mutate(seed.input, self.corpus.seeds)
 
+            short_waf_evidence = ShortWafEvidence.from_input(
+                input_data=mutated_input.data,
+                mutator_name=mutator_name,
+                max_time_seconds=self.max_time_seconds,
+            )
+            if short_waf_evidence.skip_witness:
+                mutated_input.metadata["preexec_skip_reason"] = "short_waf_large_wire_guard"
+                mutated_input.metadata["preexec_skip_policy"] = {
+                    "policy": "short_waf_resource_guard",
+                    "evidence": short_waf_evidence.to_metadata(),
+                    "contract_ok": short_waf_evidence.skip_witness,
+                }
+                seed.priority_boost = cap_priority(seed.priority_boost, 0.5)
+                self._publisher.publish_priority_update(seed.id, seed.priority_boost)
+                continue
+
             # 4. Execute with rotated primary
             primary, refs = self._rotate_primary()
             result, ref_results = self._execute_primary_and_refs(
@@ -523,6 +562,25 @@ class FuzzEngine:
                         # sufficient for compaction/scheduling and
                         # FeatureStore holds raw data for CEGAR re-hash.
                         new_seed.coverage = None
+                        demotion = _short_waf_priority_demote(
+                            input_data=mutated_input.data,
+                            mutator_name=mutator_name,
+                            max_time_seconds=self.max_time_seconds,
+                        )
+                        if demotion is not None:
+                            cap_evidence = ShortWafEvidence.from_input(
+                                input_data=mutated_input.data,
+                                mutator_name=mutator_name,
+                                max_time_seconds=self.max_time_seconds,
+                            )
+                            new_seed.priority_boost = cap_priority(
+                                new_seed.priority_boost,
+                                demotion,
+                            )
+                            new_seed.input.metadata["size_priority_policy"] = "short_waf_large_wire"
+                            new_seed.input.metadata["size_priority_boost"] = demotion
+                            new_seed.input.metadata["size_priority_evidence"] = cap_evidence.to_metadata()
+                            self._publisher.publish_priority_update(new_seed.id, new_seed.priority_boost)
                         new_edges = new_seed.feature_set
                         self.stats.record_new_coverage(
                             self.corpus.global_coverage.edge_count, mutator_name
@@ -570,6 +628,25 @@ class FuzzEngine:
                 )
                 if finding_seed:
                     finding_seed.coverage = None
+                    demotion = _short_waf_priority_demote(
+                        input_data=mutated_input.data,
+                        mutator_name=mutator_name,
+                        max_time_seconds=self.max_time_seconds,
+                    )
+                    if demotion is not None:
+                        cap_evidence = ShortWafEvidence.from_input(
+                            input_data=mutated_input.data,
+                            mutator_name=mutator_name,
+                            max_time_seconds=self.max_time_seconds,
+                        )
+                        finding_seed.priority_boost = cap_priority(
+                            finding_seed.priority_boost,
+                            demotion,
+                        )
+                        finding_seed.input.metadata["size_priority_policy"] = "short_waf_large_wire"
+                        finding_seed.input.metadata["size_priority_boost"] = demotion
+                        finding_seed.input.metadata["size_priority_evidence"] = cap_evidence.to_metadata()
+                        self._publisher.publish_priority_update(finding_seed.id, finding_seed.priority_boost)
                     self.stats.update_corpus(
                         len(self.corpus),
                         self.corpus.total_bytes,
@@ -860,9 +937,12 @@ class FuzzEngine:
 
         Slow path: normal execute_on + _execute_on_refs (unchanged behaviour).
         """
-        from .targets.persistent_target import MultiDiffPersistentTarget
+        try:
+            from .targets.persistent_target import MultiDiffPersistentTarget
+        except ImportError:
+            MultiDiffPersistentTarget = None
 
-        if isinstance(primary, MultiDiffPersistentTarget):
+        if MultiDiffPersistentTarget is not None and isinstance(primary, MultiDiffPersistentTarget):
             try:
                 return primary.execute_all(inp)
             except Exception as e:
@@ -1135,6 +1215,34 @@ class _DefaultMutatorScheduler:
         pass
 
 
+def _short_waf_priority_demote(
+    *,
+    input_data: bytes,
+    mutator_name: str,
+    max_time_seconds: float,
+) -> float | None:
+    """Return a priority cap for large mutated WAF requests in short runs."""
+    return short_waf_priority_cap(
+        input_data=input_data,
+        mutator_name=mutator_name,
+        max_time_seconds=max_time_seconds,
+    )
+
+
+def _should_skip_short_waf_execution(
+    *,
+    input_data: bytes,
+    mutator_name: str,
+    max_time_seconds: float,
+) -> bool:
+    """Skip obviously timeout-prone large WAF requests before execution."""
+    return should_skip_short_waf_execution(
+        input_data=input_data,
+        mutator_name=mutator_name,
+        max_time_seconds=max_time_seconds,
+    )
+
+
 class _DefaultDeduplicator:
     """Metadata-aware hash-based deduplication.
 
@@ -1192,6 +1300,154 @@ class _DefaultDeduplicator:
                 return tag
         return "_other_"
 
+    @staticmethod
+    def _is_waf_differential(meta: dict[str, object]) -> bool:
+        """Detect WAF-style differentials that deserve fine-grained preservation."""
+        diff_fields = {str(field) for field in get_diff_fields(meta)}
+        if {
+            "waf_block_status",
+            "waf_blocked",
+            "response_status",
+            "response_headers",
+            "response_body_prefix",
+            "response_body_length",
+            "duration_ms",
+        } & diff_fields:
+            return True
+        return any(
+            key in meta
+            for key in (
+                "waf_block_status",
+                "waf_blocked",
+                "response_status",
+                "response_headers",
+                "response_body_prefix",
+                "response_body_length",
+                "duration_ms",
+            )
+        )
+
+    @staticmethod
+    def _duration_bucket(raw: object) -> str:
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return ""
+        if value < 10.0:
+            return "lt10"
+        if value < 50.0:
+            return "lt50"
+        if value < 200.0:
+            return "lt200"
+        if value < 1000.0:
+            return "lt1000"
+        return "gte1000"
+
+    def _waf_fine_fingerprint(
+        self,
+        meta: dict[str, object],
+    ) -> tuple[str, dict[str, object]]:
+        """Build a stable witness for semantically distinct WAF differentials."""
+        witness_family = self._waf_witness_family(meta)
+        signature_parts: dict[str, object] = {
+            "diff_fields": tuple(sorted(str(field) for field in get_diff_fields(meta))),
+            "witness_family": witness_family,
+            "category": str(meta.get("category", "") or ""),
+            "response_status": meta.get("response_status"),
+            "waf_block_status": meta.get("waf_block_status"),
+            "waf_blocked": (
+                bool(meta.get("waf_blocked")) if "waf_blocked" in meta else None
+            ),
+            "duration_bucket": self._duration_bucket(meta.get("duration_ms")),
+            "response_body_length": meta.get("response_body_length"),
+            "response_headers": str(meta.get("response_headers", "") or "")[:160],
+            "waf_headers": str(meta.get("waf_headers", "") or "")[:160],
+            "path_signature": str(
+                meta.get("path_raw", "") or meta.get("url_path_raw", "") or ""
+            ),
+        }
+        digest = hashlib.sha256(repr(signature_parts).encode("utf-8")).hexdigest()[:16]
+        return digest, signature_parts
+
+    @staticmethod
+    def _waf_witness_family(meta: dict[str, object]) -> str:
+        """Classify a WAF differential into a small witness-family language."""
+        diff_fields = {str(field) for field in get_diff_fields(meta)}
+        families: list[str] = []
+        if "duration_ms" in diff_fields:
+            families.append("timing")
+        if diff_fields & {
+            "response_body_crc32",
+            "response_body_length",
+            "response_body_prefix",
+            "response_headers",
+            "waf_headers",
+        }:
+            families.append("body_headers")
+        if diff_fields & {
+            "response_status",
+            "waf_block_status",
+            "waf_blocked",
+        }:
+            families.append("block_status")
+        if diff_fields & {
+            "path_raw",
+            "url_path_raw",
+            "path_normalized",
+        }:
+            families.append("path")
+        if diff_fields & {
+            "backend_marker",
+            "backend_reached",
+            "backend_status",
+        }:
+            families.append("backend")
+        if not families:
+            families.append("other")
+        return "+".join(families)
+
+    @staticmethod
+    def _extract_error_signature(finding: Finding) -> str:
+        """Normalize crash/error text into a stable skeleton-friendly signature."""
+        meta = finding.result.metadata or {}
+        error_type = str(meta.get("error_type", "") or finding.metadata.get("error_type", "") or "")
+        stderr = finding.result.stderr or b""
+        if stderr:
+            first_line = stderr.split(b"\n")[0].decode("utf-8", errors="replace")
+        else:
+            first_line = str(
+                finding.metadata.get("error_message", "")
+                or meta.get("error", "")
+                or finding.result.exit_code
+            )
+        normalized = re.sub(r"0x[0-9a-fA-F]+", "0xADDR", first_line)
+        normalized = re.sub(r"line \d+", "line N", normalized)
+        normalized = re.sub(r"/[\w/.\-]+", "/PATH", normalized)
+        normalized = re.sub(r"\d+", "N", normalized)
+        if error_type:
+            return f"{error_type}:{normalized[:96]}"
+        return normalized[:128]
+
+    @staticmethod
+    def _input_skeleton(finding: Finding) -> str:
+        """Coarsen byte-level input shape for noisy crash-loop dedup."""
+        data = finding.input.data[:256]
+        skeleton: list[str] = []
+        prev_class = ""
+        for b in data:
+            if 65 <= b <= 90 or 97 <= b <= 122:
+                cls = "A"
+            elif 48 <= b <= 57:
+                cls = "0"
+            elif b in (32, 9, 10, 13):
+                cls = "S"
+            else:
+                cls = chr(b) if 33 <= b <= 126 else "X"
+            if cls != prev_class:
+                skeleton.append(cls)
+                prev_class = cls
+        return "".join(skeleton)[:96]
+
     def fingerprint(self, finding: Finding) -> str:
         meta = finding.metadata or {}
 
@@ -1203,6 +1459,10 @@ class _DefaultDeduplicator:
         # regardless of how many metadata labels exist.
         dph = meta.get("diff_pattern_hash")
         if dph:
+            components: dict[str, object] = {
+                "mode": "diff_pattern_hash",
+                "diff_pattern_hash": str(dph),
+            }
             # Strategy/category are omitted: the diff_pattern_hash
             # captures the behavioral signature.  Including strategy
             # caused 3-5x inflation where the same input triggered
@@ -1221,14 +1481,41 @@ class _DefaultDeduplicator:
                 or ""
             )
             if raw_name:
-                parts.append(f"nc={self._name_class(str(raw_name))}")
+                name_class = self._name_class(str(raw_name))
+                parts.append(f"nc={name_class}")
+                components["name_class"] = name_class
             # Bypass signal for mXSS (has_script vs has_event_handler)
             sig = meta.get("signal")
             if sig:
                 parts.append(f"sig={sig}")
+                components["signal"] = sig
+            if self._is_waf_differential(meta):
+                fine_fingerprint, fine_signature = self._waf_fine_fingerprint(meta)
+                meta.setdefault("fine_fingerprint", fine_fingerprint)
+                meta.setdefault(
+                    "waf_witness_family",
+                    str(fine_signature.get("witness_family", "") or ""),
+                )
+                components["fine_variant"] = "waf_differential"
+                components["fine_signature"] = fine_signature
+            meta["fingerprint_components"] = components
             return "|".join(parts)
 
         # ── Fallback: non-differential oracles (mXSS, SSRF, etc.) ──
+        if finding.oracle_name == "crash" and (
+            finding.result.stderr
+            or meta.get("error_type")
+            or meta.get("timeout")
+        ):
+            error_sig = self._extract_error_signature(finding)
+            skeleton = self._input_skeleton(finding)
+            meta["fingerprint_components"] = {
+                "mode": "fallback_error_skeleton",
+                "error_signature": error_sig,
+                "input_skeleton": skeleton,
+            }
+            return f"{finding.oracle_name}|fallback|{error_sig}|{skeleton}"
+
         parts = [
             finding.oracle_name,
             finding.severity.value,
@@ -1263,7 +1550,7 @@ class _DefaultDeduplicator:
         if diff_sig:
             parts.append(";".join(diff_sig))
 
-        df = meta.get("diff_fields")
+        df = get_diff_fields(meta)
         if df:
             parts.append(",".join(sorted(df)))
 
@@ -1290,6 +1577,14 @@ class _DefaultDeduplicator:
         if pe is not None and re_ is not None:
             parts.append(f"p={pe},r={re_}")
 
+        meta["fingerprint_components"] = {
+            "mode": "metadata_signature",
+            "oracle_name": finding.oracle_name,
+            "severity": finding.severity.value,
+            "exit_code": finding.result.exit_code,
+            "strategy": meta.get("strategy", ""),
+            "category": meta.get("category", ""),
+        }
         return "|".join(parts)
 
     def is_duplicate(self, finding: Finding) -> bool:

@@ -1508,7 +1508,7 @@ class WafBypassMutator:
         """Apply startup-time family boosts from E4 FCA atom coverage.
 
         The ``atom_weights`` dict comes from
-        ``experiments/diffspace_geometry/e4_fca/strategy_atoms.py`` and
+        the external diffspace research workspace and
         maps each family name (e.g. ``"ct_duplicate"``) to a coverage
         score in ``[0, 1]``: the fraction of the concept lattice's
         meet-irreducible atoms the family's historical findings
@@ -1547,7 +1547,7 @@ class WafBypassMutator:
 
         ``witness_weights`` is a ``{family_name: score in [0, 1]}`` map
         from
-        ``experiments/diffspace_geometry/e7_automata/strategy_witnesses.py``.
+        its E7 automata witness analysis.
         The score is the family's cumulative contribution to the
         diff-field coordinates that appear in the E7 disagreement trie's
         witness prefixes, normalized across the family set.

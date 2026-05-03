@@ -20,7 +20,6 @@ def build_mutators(
     campaign_mode: str = "novel",
 ) -> list:
     """Instantiate mutators from comma-separated names."""
-    from ...fuzzer.mutators.apache_confusion_mutator import ApacheConfusionMutator
     from ...fuzzer.mutators.class_pollution_mutator import ClassPollutionMutator
     from ...fuzzer.mutators.cookie_mutator import CookieMutator
     from ...fuzzer.mutators.deser_binary_mutator import DeserBinaryMutator
@@ -41,6 +40,7 @@ def build_mutators(
     from ...fuzzer.mutators.splice_mutator import SpliceMutator
     from ...fuzzer.mutators.structural_havoc_mutator import StructuralHavocMutator
     from ...fuzzer.mutators.token_mutator import TokenMutator
+    from ...fuzzer.mutators.waf_bypass_mutator import WafBypassMutator
     from ...fuzzer.mutators.xml_havoc_mutator import XmlHavocMutator
 
     mutator_map = {
@@ -67,10 +67,8 @@ def build_mutators(
         "jdbc": lambda: JdbcMutator(seed=seed),
         "class_pollution": lambda: ClassPollutionMutator(seed=seed),
         "domclobber": lambda: DomClobberMutator(seed=seed),
-        "apache_confusion": lambda: ApacheConfusionMutator(
-            seed=seed, campaign_mode=campaign_mode,
-        ),
         "sandbox": lambda: SandboxMutator(seed=seed),
+        "waf_bypass": lambda: WafBypassMutator(seed=seed),
     }
 
     mutators = []
