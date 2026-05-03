@@ -131,6 +131,7 @@ def main():
     coverage_enabled = False
     lines_only = False  # --coverage-lines-only: inject _covered_lines but no bitmap
     extra_trace_dirs = []  # --trace-dir <path>: additional dirs to trace
+    module_args = []
     args_iter = iter(sys.argv[1:])
     for arg in args_iter:
         if arg == "--coverage":
@@ -145,6 +146,8 @@ def main():
                 pass
         elif module_path is None:
             module_path = arg
+        else:
+            module_args.append(arg)
 
     if not module_path:
         sys.stderr.write("Usage: python persistent_wrapper.py <module_path> [--coverage]\n")
@@ -158,6 +161,8 @@ def main():
         sys.exit(1)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    if hasattr(mod, "configure") and callable(mod.configure):
+        mod.configure(module_args)
 
     use_process = hasattr(mod, "process") and callable(mod.process)
     use_sanitize = hasattr(mod, "sanitize") and callable(mod.sanitize)

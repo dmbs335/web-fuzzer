@@ -1,0 +1,14 @@
+http:
+  routers:
+    hrs:
+      rule: "PathPrefix(`/`)"
+      service: backend
+      entryPoints:
+        - web
+
+  services:
+    backend:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: "http://backend:8081"

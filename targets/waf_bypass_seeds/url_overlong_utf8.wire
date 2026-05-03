@@ -1,0 +1,13 @@
+GET /reflect?q=%C0%BCscript%C0%BEalert(1)%C0%BC%C0%AFscript%C0%BE&c=WF-CANARY-urlovr00001 HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-url-overlong-01
+X-WF-Family: url_overlong_utf8
+X-WF-Tags: URL.overlong,url,overlong_utf8
+X-WF-Canary-Marker: WF-CANARY-urlovr00001
+X-WF-Payload-Type: xss
+X-WF-Payload: PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+X-WF-Axis-Evasion: url
+X-WF-Axis-Payload: xss
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: url_parse
+X-WF-Axis-Variant: normalization

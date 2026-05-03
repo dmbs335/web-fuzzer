@@ -1,8 +1,8 @@
 """Mutation XSS (mXSS) taxonomy-driven mutator — DOMPurify bypass edition.
 
-Encodes structural attack patterns from the DOMPurify bypass taxonomy
-and 1-day analysis report into a semantic-level mutator. Each strategy
-targets a specific bypass category proven effective against DOMPurify.
+Encodes structural attack patterns from sanitizer bypass research and local
+analysis into a semantic-level mutator. Each strategy targets a bypass category
+that should be verified against the selected sanitizer/browser context.
 
 Taxonomy sections mapped to strategies (updated from full taxonomy):
   §1-1 MathML integration point   → namespace_wrap, mathml_integration_point
@@ -434,7 +434,7 @@ class MxssMutator:
             3, 2,           # §5 config
             5, 3,           # §6 context
             3,              # §7 gadgets
-            10,             # CDATA attr injection (proven effective)
+            10,             # CDATA attr injection (high-priority heuristic)
             2, 1,           # encoding/coercion
             8,              # corpus splice (cross-pollination)
         ]

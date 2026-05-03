@@ -1,0 +1,16 @@
+POST /queue/append HTTP/1.1
+Host: victim.local
+X-WF-Request-ID: seedh2end1
+X-WF-Family: h2_end_stream_gap
+X-WF-Tags: H2.CL,end_stream_gap,downgrade
+X-WF-Transport: h2_raw
+X-WF-Delivery: h2_raw
+X-WF-Probe: none
+X-WF-Pause-MS: 0
+X-WF-Chunk-Shape: none
+X-WF-H2-Mode: end_stream_gap
+X-WF-H2-End-Stream: headers_early
+X-WF-Impact: /queue/append
+Content-Length: 8
+
+abcdefgh

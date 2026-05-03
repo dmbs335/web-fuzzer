@@ -86,6 +86,12 @@ class RedisPublisher:
         corpus_size: int,
         total_edges: int,
         unique_findings: int,
+        observed_findings: int = 0,
+        selection_drops_total: int = 0,
+        selection_summary: dict[str, Any] | None = None,
+        orbit_downgrades_total: int = 0,
+        shadow_replay_summary: dict[str, Any] | None = None,
+        interface_progress: dict[str, Any] | None = None,
     ) -> None:
         self._publish("stats", {
             "elapsed_seconds": round(elapsed_seconds, 1),
@@ -94,6 +100,12 @@ class RedisPublisher:
             "corpus_size": corpus_size,
             "total_edges": total_edges,
             "unique_findings": unique_findings,
+            "observed_findings": observed_findings,
+            "selection_drops_total": selection_drops_total,
+            "selection_summary": selection_summary or {},
+            "orbit_downgrades_total": orbit_downgrades_total,
+            "shadow_replay_summary": shadow_replay_summary or {},
+            "interface_progress": interface_progress or {},
         })
 
     def publish_finding(

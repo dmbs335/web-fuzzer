@@ -8,6 +8,13 @@ import os
 import sys
 import time
 
+from .selection_drop_analysis import (
+    write_selection_drop_summary_artifacts,
+    write_selection_shadow_replay_artifacts,
+    write_selection_shadow_summary_artifacts,
+)
+from .campaign_manifest import write_campaign_manifest
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +34,7 @@ class RuntimeReportingService:
         all_targets,
         running_getter,
         sync_deser_diag,
+        campaign_manifest=None,
     ) -> None:
         self.stats = stats
         self.publisher = publisher
@@ -38,6 +46,7 @@ class RuntimeReportingService:
         self.all_targets = all_targets
         self.running_getter = running_getter
         self.sync_deser_diag = sync_deser_diag
+        self.campaign_manifest = campaign_manifest
 
     def maybe_print_status(
         self,
@@ -75,6 +84,12 @@ class RuntimeReportingService:
             corpus_size=self.stats.corpus_size,
             total_edges=self.stats.total_edges,
             unique_findings=self.stats.unique_findings,
+            observed_findings=self.stats.observed_findings,
+            selection_drops_total=self.stats.selection_drops_total,
+            selection_summary=self.stats.selection_summary(),
+            orbit_downgrades_total=self.stats.orbit_downgrades_total,
+            shadow_replay_summary=self.stats.shadow_replay_summary(),
+            interface_progress=self.stats.interface_progress_summary(),
         )
 
         if self.output_dir and now - last_save_time >= 30.0:
@@ -103,7 +118,11 @@ class RuntimeReportingService:
         if self.output_dir:
             try:
                 self.stats.save(self.output_dir)
+                self._rewrite_selection_drop_summary()
+                self._rewrite_selection_shadow_summary()
+                self._rewrite_selection_shadow_replay()
                 self._rewrite_final_report()
+                self._write_campaign_manifest()
             except Exception as exc:
                 logger.error("Failed to save stats: %s", exc)
             try:
@@ -143,8 +162,6 @@ class RuntimeReportingService:
     def _rewrite_final_report(self) -> None:
         if not self.output_dir:
             return
-        if not self.guidance_hooks or not self.guidance_hooks.active:
-            return
 
         report_path = self.output_dir / "report.json"
         if not report_path.exists():
@@ -152,12 +169,95 @@ class RuntimeReportingService:
 
         try:
             report_data = json.loads(report_path.read_text(encoding="utf-8"))
-            guidance_report = self.guidance_hooks.get_report_section()
-            if guidance_report:
-                report_data["guidance"] = guidance_report
-                report_path.write_text(
-                    json.dumps(report_data, indent=2),
-                    encoding="utf-8",
-                )
+            if self.guidance_hooks and self.guidance_hooks.active:
+                guidance_report = self.guidance_hooks.get_report_section()
+                if guidance_report:
+                    report_data["guidance"] = guidance_report
+            self._attach_selection_policy_reports(report_data)
+            report_path.write_text(
+                json.dumps(report_data, indent=2),
+                encoding="utf-8",
+            )
         except Exception:
             pass
+
+    def _attach_selection_policy_reports(self, report_data: dict) -> None:
+        if not self.output_dir:
+            return
+
+        drop_summary_path = self.output_dir / "selection_drop_summary.json"
+        if drop_summary_path.exists():
+            try:
+                report_data["selection_drop_analysis"] = json.loads(
+                    drop_summary_path.read_text(encoding="utf-8"),
+                )
+            except Exception:
+                logger.debug("Failed to attach selection drop summary", exc_info=True)
+
+        shadow_summary_path = self.output_dir / "selection_shadow_summary.json"
+        if shadow_summary_path.exists():
+            try:
+                report_data["selection_shadow_analysis"] = json.loads(
+                    shadow_summary_path.read_text(encoding="utf-8"),
+                )
+            except Exception:
+                logger.debug("Failed to attach selection shadow summary", exc_info=True)
+
+        triage_path = self.output_dir / "selection_shadow_triage.json"
+        if triage_path.exists():
+            try:
+                report_data["selection_shadow_triage"] = json.loads(
+                    triage_path.read_text(encoding="utf-8"),
+                )
+            except Exception:
+                logger.debug("Failed to attach selection shadow triage", exc_info=True)
+
+        replay_manifest_path = self.output_dir / "selection_shadow_replay" / "manifest.json"
+        if replay_manifest_path.exists():
+            try:
+                report_data["selection_shadow_replay"] = json.loads(
+                    replay_manifest_path.read_text(encoding="utf-8"),
+                )
+            except Exception:
+                logger.debug("Failed to attach selection shadow replay", exc_info=True)
+
+    def _rewrite_selection_drop_summary(self) -> None:
+        if not self.output_dir:
+            return
+        try:
+            write_selection_drop_summary_artifacts(
+                self.output_dir / "selection_drops.jsonl",
+            )
+        except Exception:
+            logger.debug("Failed to rewrite selection drop summary", exc_info=True)
+
+    def _rewrite_selection_shadow_summary(self) -> None:
+        if not self.output_dir:
+            return
+        try:
+            write_selection_shadow_summary_artifacts(
+                self.output_dir / "selection_shadow_queue.jsonl",
+            )
+        except Exception:
+            logger.debug("Failed to rewrite selection shadow summary", exc_info=True)
+
+    def _rewrite_selection_shadow_replay(self) -> None:
+        if not self.output_dir:
+            return
+        try:
+            write_selection_shadow_replay_artifacts(
+                self.output_dir / "selection_shadow_queue.jsonl",
+            )
+        except Exception:
+            logger.debug("Failed to rewrite selection shadow replay artifacts", exc_info=True)
+
+    def _write_campaign_manifest(self) -> None:
+        if not self.output_dir or not self.campaign_manifest:
+            return
+        try:
+            write_campaign_manifest(
+                self.output_dir / "campaign_manifest.json",
+                self.campaign_manifest,
+            )
+        except Exception:
+            logger.debug("Failed to write campaign manifest", exc_info=True)

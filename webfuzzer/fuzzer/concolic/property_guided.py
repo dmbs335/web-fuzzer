@@ -1,8 +1,8 @@
-"""Property-learning concolic coordinator.
+"""Experimental property-correlation targeted mutation coordinator.
 
-Replaces the hardcoded expert-system ConcolicCoordinator with a
-learning-based system that discovers which structural XML properties
-predict behavioral divergence across library pairs.
+Replaces the hardcoded expert-system ConcolicCoordinator with a heuristic
+learning system that estimates which structural properties correlate with
+behavioral divergence across library pairs.
 
 Same API as ConcolicCoordinator: ``on_differential_result() -> list[Input]``.
 """

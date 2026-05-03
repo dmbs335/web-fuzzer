@@ -1,0 +1,11 @@
+entryPoints:
+  web:
+    address: ":8000"
+
+providers:
+  file:
+    filename: /etc/traefik/dynamic.yml
+
+api:
+  dashboard: false
+  insecure: false

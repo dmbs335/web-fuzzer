@@ -1,0 +1,17 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-lt-mixed-01
+X-WF-Family: lt_mixed_crlf
+X-WF-Tags: LT.mixed,line_terminator,mixed_crlf
+X-WF-Canary-Marker: WF-CANARY-ltmxd00001
+X-WF-Payload-Type: sqli
+X-WF-Payload: JyBPUiAxPTEtLQ==
+X-WF-Axis-Evasion: line_terminator
+X-WF-Axis-Payload: sqli
+X-WF-Axis-Depth: surface
+X-WF-Axis-Parser: header_parse
+X-WF-Axis-Variant: terminator
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 44
+
+param=WF-CANARY-ltmxd00001&q=' OR 1=1--&x=1

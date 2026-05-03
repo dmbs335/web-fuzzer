@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 import shlex
 import struct
 import subprocess
@@ -106,10 +107,12 @@ class PersistentTarget:
         command: str,
         timeout_seconds: float = 10.0,
         working_dir: Path | None = None,
+        env: dict[str, str] | None = None,
     ) -> None:
         self.command = command
         self.timeout_seconds = timeout_seconds
         self.working_dir = working_dir
+        self.env = env
         self._proc: subprocess.Popen | None = None
         self._exec_count: int = 0
         self._consecutive_crashes: int = 0
@@ -140,6 +143,8 @@ class PersistentTarget:
             bufsize=0,  # Unbuffered: prevents Python BufferedReader readahead
                         # that steals pipe data from Rust parallel_pipe_execute.
         )
+        if self.env:
+            popen_kwargs["env"] = {**os.environ, **self.env}
 
         # Unix: create new process group for clean tree kill
         if sys.platform != "win32":

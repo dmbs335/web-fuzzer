@@ -1,4 +1,4 @@
-"""Differential coverage â€” uses output divergence as coverage signal.
+"""Differential coverage ??uses output divergence as coverage signal.
 
 Inspired by Nezha (IEEE S&P'17) delta-diversity:
   Instead of code coverage, track *behavioral* diversity across
@@ -7,7 +7,7 @@ Inspired by Nezha (IEEE S&P'17) delta-diversity:
 
 Features hashed into the bitmap (coarse-grained to prevent corpus explosion):
   1. Exit code class vector: (primary_class, ref0_class, ref1_class, ...)
-  2. Per-pair divergence signature: frozenset of differing components â†’ single hash
+  2. Per-pair divergence signature: frozenset of differing components ??single hash
   3. Status code vector (for HTTP targets)
   4. Error pattern divergence
   5. Divergence count bucket (0, 1, 2-3, 4+)
@@ -16,7 +16,7 @@ Features hashed into the bitmap (coarse-grained to prevent corpus explosion):
      6b. Raw element/attribute set divergence (L3+): full set hash
 
 This guides the fuzzer toward inputs that trigger *differential*
-behavior â€” exactly what differential fuzzing needs.
+behavior ??exactly what differential fuzzing needs.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ def _detect_domain(
     """Identify the domain and return (comparison_keys, matched_profile).
 
     Strategy:
-      1. Check registered domain profiles â€” pick the one with highest
+      1. Check registered domain profiles ??pick the one with highest
          overlap ratio between its comparison_keys and the sample output.
       2. Fallback: union of all string-valued keys (no matched profile).
     """
@@ -153,7 +153,7 @@ class DiffCoverageCollector:
         self.default_level = default_level
 
     def collect(self, result: ExecutionResult) -> CoverageMap:
-        """Standard collect â€” only uses primary result features.
+        """Standard collect ??only uses primary result features.
 
         For full differential coverage, use collect_diff() instead.
         This exists to satisfy the CoverageCollector Protocol.
@@ -180,9 +180,9 @@ class DiffCoverageCollector:
 
         Args:
             ref_results: Pre-computed reference results (skips re-execution).
-            level: Refinement level (0â€“4) for CEGAR adaptive coverage.
+            level: Refinement level (0??) for CEGAR adaptive coverage.
                 0 = minimal (exit_vec + div_bucket only)
-                1 = coarse (+ per-pair cdiff hash) â€” default
+                1 = coarse (+ per-pair cdiff hash) ??default
                 2 = component (+ per-component individual bits)
                 3 = values (+ actual differing value hashes)
                 4 = full (+ status_vec + error patterns)
@@ -247,7 +247,7 @@ class DiffCoverageCollector:
                     k for k in cmp_keys if p_norm[k] != r_norm[k]
                 )
                 if diff_keys:
-                    # L1+: cdiff hash (sorted key set â†’ single feature)
+                    # L1+: cdiff hash (sorted key set ??single feature)
                     ns_cdiff = f"cdiff_0_{i}"
                     val_cdiff = ",".join(diff_keys)
                     if level >= 1:
@@ -327,7 +327,7 @@ class DiffCoverageCollector:
                 if r_parsed_i is None or "signature_valid" not in r_parsed_i:
                     continue
 
-                # Critical field divergence â†’ individual bits (L2+)
+                # Critical field divergence ??individual bits (L2+)
                 for field in _jwt_critical:
                     pv = p_parsed_jwt.get(field)
                     rv = r_parsed_i.get(field)
@@ -338,7 +338,7 @@ class DiffCoverageCollector:
                         if raw_record is not None:
                             raw_record.features.append((ns, f"{pv}|{rv}"))
 
-                # Temporal field divergence â†’ bucketed (L2+)
+                # Temporal field divergence ??bucketed (L2+)
                 for field in _jwt_temporal:
                     pv = p_parsed_jwt.get(field)
                     rv = r_parsed_i.get(field)
@@ -349,7 +349,7 @@ class DiffCoverageCollector:
                         if raw_record is not None:
                             raw_record.features.append((ns, "1"))
 
-                # Structural field divergence â†’ individual bits (L2+)
+                # Structural field divergence ??individual bits (L2+)
                 for field in _jwt_structural:
                     pv = p_parsed_jwt.get(field)
                     rv = r_parsed_i.get(field)
@@ -374,65 +374,6 @@ class DiffCoverageCollector:
                         _set(bitmap, f"jwt_ctype_{i}", ",".join(ctype_diff))
                         if raw_record is not None:
                             raw_record.features.append((f"jwt_ctype_{i}", ",".join(ctype_diff)))
-
-        # Feature 2.7: Apache confusion phase trace (L2+)
-        # Per-phase request_rec hashes provide gradient toward confusion.
-        # Cross-phase pairs (access_check vs handler) detect intra-target
-        # confusion â€” the core signal for Apache module interaction bugs.
-        _apache_phase_fields = (
-            "uri_at_translate", "uri_at_access_check",
-            "uri_at_fixup", "uri_at_handler",
-            "filename_at_access_check", "filename_at_handler",
-            "handler_at_access_check", "handler_at_handler",
-        )
-        p_parsed_ac = parsed[0]
-        if p_parsed_ac is not None and "uri_at_translate" in p_parsed_ac:
-            # Per-phase value hashes (single-target features)
-            for field in _apache_phase_fields:
-                val = str(p_parsed_ac.get(field, "")).strip()
-                if val:
-                    ns = f"phase_{field}"
-                    if level >= 2:
-                        _set(bitmap, ns, val)
-                    if raw_record is not None:
-                        raw_record.features.append((ns, val))
-
-            # Cross-phase confusion pairs (the gradient signal)
-            uri_ac = str(p_parsed_ac.get("uri_at_access_check", ""))
-            uri_h = str(p_parsed_ac.get("uri_at_handler", ""))
-            if uri_ac and uri_h and uri_ac != uri_h:
-                sig = f"{uri_ac}|{uri_h}"
-                if level >= 2:
-                    _set(bitmap, "uri_confusion", sig)
-                if raw_record is not None:
-                    raw_record.features.append(("uri_confusion", sig))
-
-            fn_ac = str(p_parsed_ac.get("filename_at_access_check", ""))
-            fn_h = str(p_parsed_ac.get("filename_at_handler", ""))
-            if fn_ac and fn_h and fn_ac != fn_h:
-                sig = f"{fn_ac}|{fn_h}"
-                if level >= 2:
-                    _set(bitmap, "fn_confusion", sig)
-                if raw_record is not None:
-                    raw_record.features.append(("fn_confusion", sig))
-
-            handler_ac = str(p_parsed_ac.get("handler_at_access_check", ""))
-            handler_h = str(p_parsed_ac.get("handler_at_handler", ""))
-            if handler_ac and handler_h and handler_ac != handler_h:
-                sig = f"{handler_ac}|{handler_h}"
-                if level >= 2:
-                    _set(bitmap, "handler_confusion", sig)
-                if raw_record is not None:
-                    raw_record.features.append(("handler_confusion", sig))
-
-            # Status code as coverage feature (L1+)
-            sc = p_parsed_ac.get("status_code")
-            if sc is not None:
-                sc_bucket = str(sc // 100)  # 2xxâ†’"2", 4xxâ†’"4"
-                if level >= 1:
-                    _set(bitmap, "phase_status", sc_bucket)
-                if raw_record is not None:
-                    raw_record.features.append(("phase_status", sc_bucket))
 
         # Feature 3: Status code vector (L4+ only)
         status_codes = [primary_result.metadata.get("status_code")]
@@ -461,10 +402,10 @@ class DiffCoverageCollector:
         # boolean comparison_keys saturate quickly.
         #
         # Two tiers:
-        #   L2 â€” ecat (element-class divergence): groups elements into
+        #   L2 ??ecat (element-class divergence): groups elements into
         #         security-relevant categories, yielding ~6 stable bits
         #         per pair instead of a unique hash per element set.
-        #   L3 â€” elem_div / attr_div (raw set hash): full SHA256 of the
+        #   L3 ??elem_div / attr_div (raw set hash): full SHA256 of the
         #         exact element/attribute sets for maximum resolution.
         p_parsed = parsed[0]
         if p_parsed is not None and "elements_kept" in p_parsed:
@@ -480,7 +421,7 @@ class DiffCoverageCollector:
                     str(e).lower() for e in r_parsed_i.get("elements_kept", [])
                 )
 
-                # â”€â”€ Feature 6a: Element-class divergence (L2+) â”€â”€
+                # ?€?€ Feature 6a: Element-class divergence (L2+) ?€?€
                 # Hash per security category: does one sanitizer keep
                 # elements in this class while the other strips them?
                 if p_elems != r_elems:
@@ -495,7 +436,7 @@ class DiffCoverageCollector:
                             if raw_record is not None:
                                 raw_record.features.append((ns_ecat, val_ecat))
 
-                # â”€â”€ Feature 6b: Raw element set divergence (L3+) â”€â”€
+                # ?€?€ Feature 6b: Raw element set divergence (L3+) ?€?€
                 if p_elems != r_elems:
                     elem_sig = hashlib.sha256(
                         f"{sorted(p_elems)}|{sorted(r_elems)}".encode()
@@ -506,7 +447,7 @@ class DiffCoverageCollector:
                         raw_record.features.append(
                             (f"elem_div_0_{i}", elem_sig)
                         )
-                # â”€â”€ Feature 6c: Raw attribute set divergence (L3+) â”€â”€
+                # ?€?€ Feature 6c: Raw attribute set divergence (L3+) ?€?€
                 p_attrs = frozenset(
                     str(a).lower() for a in p_parsed.get("attributes_kept", [])
                 )
@@ -526,7 +467,7 @@ class DiffCoverageCollector:
 
         # Feature 7: Namespace transition divergence (L2+)
         # Tracks per-pair differences in namespace transition count and
-        # max DOM depth â€” inputs that cause different namespace handling
+        # max DOM depth ??inputs that cause different namespace handling
         # across sanitizers are mXSS-relevant.
         if p_parsed is not None and "ns_transitions" in p_parsed:
             for i in range(n):
@@ -566,9 +507,9 @@ class DiffCoverageCollector:
         # Encodes security-relevant milestones from sanitizer output,
         # providing gradient reward toward exploit-capable inputs.
         # Key insight: reward based on REPARSED output danger, not just
-        # sanitized output â€” benign entity diffs don't generate reward.
+        # sanitized output ??benign entity diffs don't generate reward.
         if p_parsed is not None:
-            # â”€â”€ Survived element categories (sanitized output) â”€â”€
+            # ?€?€ Survived element categories (sanitized output) ?€?€
             p_elems = frozenset(
                 str(e).lower() for e in p_parsed.get("elements_kept", [])
             )
@@ -580,7 +521,7 @@ class DiffCoverageCollector:
                     if raw_record is not None:
                         raw_record.features.append((ns_surv, "1"))
 
-            # â”€â”€ Security signal vector (sanitized) â”€â”€
+            # ?€?€ Security signal vector (sanitized) ?€?€
             sig_fields = [
                 "has_script", "has_event_handler", "has_javascript_uri",
                 "has_data_uri", "has_svg", "has_math", "has_style",
@@ -594,7 +535,7 @@ class DiffCoverageCollector:
             if raw_record is not None:
                 raw_record.features.append(("sig_vec", sig_vec))
 
-            # â”€â”€ Reparsed security signal vector â”€â”€
+            # ?€?€ Reparsed security signal vector ?€?€
             r_sig_fields = [
                 "r_has_script", "r_has_event_handler", "r_has_javascript_uri",
                 "r_has_data_uri", "r_has_svg", "r_has_math", "r_has_style",
@@ -608,7 +549,7 @@ class DiffCoverageCollector:
             if raw_record is not None:
                 raw_record.features.append(("r_sig_vec", r_sig_vec))
 
-            # â”€â”€ Danger level (based on REPARSED output, not sanitized) â”€â”€
+            # ?€?€ Danger level (based on REPARSED output, not sanitized) ?€?€
             danger = 0
             if not p_parsed.get("empty_output"):
                 danger = 1  # something survived sanitization
@@ -632,7 +573,7 @@ class DiffCoverageCollector:
             if raw_record is not None:
                 raw_record.features.append(("danger_lvl", str(danger)))
 
-            # â”€â”€ Near-miss signals (L2+): guide toward dangerous variations â”€â”€
+            # ?€?€ Near-miss signals (L2+): guide toward dangerous variations ?€?€
             near_miss_fields = [
                 "near_miss_img", "near_miss_a_href", "near_miss_style",
                 "near_miss_form", "near_miss_svg", "near_miss_math",
@@ -644,7 +585,7 @@ class DiffCoverageCollector:
                     if raw_record is not None:
                         raw_record.features.append((nm, "1"))
 
-            # â”€â”€ New elements after reparse (L2+) â”€â”€
+            # ?€?€ New elements after reparse (L2+) ?€?€
             new_elems = p_parsed.get("new_elements_after_reparse", [])
             if new_elems:
                 ne_sig = ",".join(sorted(str(e) for e in new_elems[:5]))
@@ -653,14 +594,14 @@ class DiffCoverageCollector:
                 if raw_record is not None:
                     raw_record.features.append(("new_elems", ne_sig))
 
-            # â”€â”€ Danger escalation flag (L1+, highest priority) â”€â”€
+            # ?€?€ Danger escalation flag (L1+, highest priority) ?€?€
             if p_parsed.get("danger_escalation"):
                 if level >= 1:
                     _set(bitmap, "escalation", "1")
                 if raw_record is not None:
                     raw_record.features.append(("escalation", "1"))
 
-            # â”€â”€ Cross-product: danger Ã— categories (L2+) â”€â”€
+            # ?€?€ Cross-product: danger Ã— categories (L2+) ?€?€
             if danger >= 2 and level >= 2:
                 for cat_name, cat_elems in _ELEMENT_CLASSES.items():
                     if p_elems & cat_elems:
@@ -670,7 +611,7 @@ class DiffCoverageCollector:
                         if raw_record is not None:
                             raw_record.features.append((ns_dc, val_dc))
 
-            # â”€â”€ Namespace transitions (single-target, L2+) â”€â”€
+            # ?€?€ Namespace transitions (single-target, L2+) ?€?€
             nst = p_parsed.get("ns_transitions", 0)
             if nst > 0:
                 nst_b = "1" if nst == 1 else "2" if nst == 2 else "3+"
@@ -679,7 +620,7 @@ class DiffCoverageCollector:
                 if raw_record is not None:
                     raw_record.features.append(("p_nst", nst_b))
 
-            # â”€â”€ Max depth bucket (single-target, L2+) â”€â”€
+            # ?€?€ Max depth bucket (single-target, L2+) ?€?€
             depth = p_parsed.get("max_depth", 0)
             if depth > 0:
                 d_b = "1-3" if depth <= 3 else "4-7" if depth <= 7 else "8-15" if depth <= 15 else "16+"
@@ -688,7 +629,7 @@ class DiffCoverageCollector:
                 if raw_record is not None:
                     raw_record.features.append(("p_depth", d_b))
 
-        # â”€â”€ Generic danger ladder fallback (non-sanitizer domains) â”€â”€
+        # ?€?€ Generic danger ladder fallback (non-sanitizer domains) ?€?€
         # If the mXSS-specific block above didn't set a danger level,
         # evaluate the matched domain's declarative danger ladder.
         if _danger_lvl == 0 and _matched_profile is not None and _matched_profile.danger_ladder:
@@ -740,7 +681,7 @@ class DiffCoverageCollector:
                 result.add(i)
         return result
 
-    # â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ?€?€ Helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 
     @staticmethod
     def _exit_class(result: ExecutionResult) -> int:

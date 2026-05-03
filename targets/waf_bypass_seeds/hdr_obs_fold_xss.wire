@@ -1,0 +1,19 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-hdr-fold-01
+X-WF-Family: hdr_obs_fold
+X-WF-Tags: HDR.fold,header,obs_fold
+X-WF-Canary-Marker: WF-CANARY-hdrfd00001
+X-WF-Payload-Type: xss
+X-WF-Payload: PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+X-WF-Axis-Evasion: header
+X-WF-Axis-Payload: xss
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: header_parse
+X-WF-Axis-Variant: injection
+X-Custom-Header: safe-value
+ <script>alert(1)</script>
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 36
+
+param=WF-CANARY-hdrfd00001&safe=value

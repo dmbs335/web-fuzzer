@@ -4,28 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 CAMPAIGN_PRESETS = {
-    "cve_detect": {
-        "oracle": "cve_scanner",
-        "mutators": "apache_confusion,grammar,havoc",
-        "seeds_dir": "targets/apache_confusion_seeds_cve",
-        "grammar": "apache_confusion",
-        "campaign_mode": "cve_detect",
-    },
-    "patch_bypass": {
-        "oracle": "cve_scanner",
-        "mutators": "apache_confusion,havoc",
-        "seeds_dir": "targets/apache_confusion_seeds_cve/patch_bypass",
-        "grammar": "apache_confusion",
-        "campaign_mode": "patch_bypass",
-    },
-    "novel": {
-        "oracle": "apache_confusion",
-        "mutators": "apache_confusion,grammar,havoc",
-        "seeds_dir": "targets/apache_confusion_seeds",
-        "grammar": "apache_confusion",
-        "campaign_mode": "novel",
+    "hrs_deep": {
+        "campaign_mode": "hrs_deep",
+        "oracle": "request_smuggling",
+        "mutators": "request_smuggling,grammar,havoc",
+        "seeds_dir": "seeds/request_smuggling",
+        "grammar": "request_smuggling_stream",
+        "adaptive_coverage": True,
+        "adaptive_level": 2,
     },
 }
 

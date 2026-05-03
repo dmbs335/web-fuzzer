@@ -1,9 +1,9 @@
 """Cookie parsing taxonomy-driven mutator — differential parsing edition.
 
-Encodes structural attack patterns from the cookie vulnerability taxonomy
-(the-map) into a semantic-level mutator.  Each strategy targets a specific
-parsing differential or bypass category proven to cause divergence across
-real-world cookie implementations.
+Encodes structural attack patterns from cookie parsing research and local
+campaign experience into a semantic-level mutator. Each strategy targets a
+specific parsing differential or bypass category that should be validated
+against the selected target set.
 
 Taxonomy sections mapped to strategies:
   C1   Attribute & Flag Manipulation  -> samesite_*, httponly_bypass, prefix_*

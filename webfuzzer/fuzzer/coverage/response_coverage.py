@@ -160,14 +160,16 @@ class ResponseCoverageCollector:
 
         # F7b: Chain classes hash — each unique class combination = new coverage
         chain_classes = parsed.get("chain_classes")
-        if chain_classes and isinstance(chain_classes, list):
-            # Sort for determinism, hash to single feature
-            cc_sig = ",".join(sorted(str(c) for c in chain_classes))
-            _sf(bitmap, "chain_hash", hashlib.sha256(cc_sig.encode()).hexdigest()[:8])
-            # Also track chain length bucket
-            cc_len = len(chain_classes)
-            cc_bucket = "1-5" if cc_len <= 5 else "6-10" if cc_len <= 10 else "11-20" if cc_len <= 20 else "20+"
-            _sf(bitmap, "chain_len", cc_bucket)
+        if chain_classes:
+            # Accept both list and string (blackbox bridges return a string)
+            if isinstance(chain_classes, str):
+                chain_classes = [chain_classes]
+            if isinstance(chain_classes, list):
+                cc_sig = ",".join(sorted(str(c) for c in chain_classes))
+                _sf(bitmap, "chain_hash", hashlib.sha256(cc_sig.encode()).hexdigest()[:8])
+                cc_len = len(chain_classes)
+                cc_bucket = "1-5" if cc_len <= 5 else "6-10" if cc_len <= 10 else "11-20" if cc_len <= 20 else "20+"
+                _sf(bitmap, "chain_len", cc_bucket)
 
         # F7c: Sink reached — each sink type is a distinct coverage feature
         sink = parsed.get("sink_reached")
@@ -210,14 +212,21 @@ class ResponseCoverageCollector:
         ):
             val = parsed.get(indicator)
             if val is None:
-                # Check nested danger_indicators dict
+                # Check nested danger_indicators (dict or list)
                 di = parsed.get("danger_indicators")
                 if isinstance(di, dict):
                     val = di.get(indicator)
+                elif isinstance(di, list):
+                    val = indicator in di
             if val:
                 _sf(bitmap, f"di_{indicator}", "1")
-                # Escalate danger for critical indicators
+                # Escalate danger for critical indicators.
+                # file_accessed and network_connected are RCE-equivalent:
+                # arbitrary file read/write → credential theft / webshell,
+                # arbitrary network connect → SSRF / lateral movement.
                 if indicator == "process_spawned":
+                    danger = max(danger, 6)
+                elif indicator in ("file_accessed", "network_connected"):
                     danger = max(danger, 6)
                 elif indicator == "jndi_lookup":
                     danger = max(danger, 5)

@@ -1,10 +1,13 @@
-"""GuidanceEngine: bidirectional bridge between static analysis and fuzzer.
+"""Experimental guidance bridge between lightweight analysis and fuzzer.
 
 Forward path:  analysis → mutation weights, targeted seeds, focus selection
 Feedback path: fuzzer → gap hit counts, plateau detection, focus rotation
 
 The engine maintains a priority queue of "gaps" (missing/weak checkpoints)
 and rotates focus as each gap saturates.
+
+The current profiles are built from regex/AST heuristics. Treat the output as
+mutation guidance, not as authoritative static-analysis proof.
 """
 
 from __future__ import annotations
@@ -50,7 +53,7 @@ class GapInfo:
 
 
 class GuidanceEngine:
-    """Bidirectional guidance engine for static-analysis-guided fuzzing.
+    """Bidirectional guidance engine for heuristic-analysis-guided fuzzing.
 
     Usage:
         spec = ProtocolSpec.load_builtin("jwt")
@@ -324,7 +327,7 @@ class GuidanceEngine:
             score = 0.0
             cp_name = gap.checkpoint_name
 
-            # 1) Library overlap — strong signal (now available from engine)
+            # 1) Library overlap - useful attribution signal from engine metadata
             affected_n = {_norm(x) for x in gap.affected_libraries}
             safe_n = {_norm(x) for x in gap.safe_libraries}
 

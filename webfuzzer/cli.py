@@ -16,6 +16,10 @@ import sys
 from pathlib import Path
 
 from .app.campaigns import apply_campaign_preset
+from .app.experimental_features import (
+    build_guidance_hooks,
+    build_targeted_mutation_coordinator,
+)
 from .app.factories import (
     build_coverage,
     build_mutator_scheduler,
@@ -28,6 +32,13 @@ from .app.factories import (
 from .core.generator import Generator, GenerationError
 from .core.registry import GrammarRegistry
 from .app.persistent_targets import persistent_timeout_for_cmd, to_persistent_cmd
+from .app.research_hooks import (
+    apply_mutator_research_hooks,
+    apply_stopping_signal_hook,
+    build_research_deduplicator,
+    load_stopping_signal as _load_stopping_signal,
+    wrap_implication_oracles,
+)
 
 
 def _build_oracles(names: str) -> list:
@@ -119,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--mutators", default="grammar,havoc",
-        help="Comma-separated mutator list (grammar,havoc,token,splice,dictionary,mxss,structural,saml,cookie,jwt,oauth,domclobber)",
+        help="Comma-separated mutator list (grammar,havoc,token,splice,dictionary,mxss,structural,saml,cookie,jwt,oauth,pgwire,request_smuggling,domclobber)",
     )
     fuz.add_argument(
         "--scheduler", default="entropic",
@@ -127,7 +138,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--oracle", default="crash,sanitizer",
-        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml,saml_sigtrue,saml_validator,cookie,jwt,oauth,graphql,graphql_exec,sanitizer_diff,deser,jndi,jdbc,domclobber,domclobber_diff)",
+        help="Comma-separated oracle list (crash,response,sanitizer,xss,mxss,ssrf,saml,saml_sigtrue,saml_validator,cookie,jwt,oauth,pgwire,request_smuggling,graphql,graphql_exec,sanitizer_diff,deser,jndi,jdbc,domclobber,domclobber_diff)",
     )
     fuz.add_argument(
         "--initial-seeds", type=int, default=100,
@@ -136,6 +147,17 @@ def build_parser() -> argparse.ArgumentParser:
     fuz.add_argument(
         "-o", "--output-dir", type=Path, default=None,
         help="Directory for findings and corpus",
+    )
+    fuz.add_argument(
+        "--manifest-method",
+        default=None,
+        help="Override campaign_manifest.json method label for validation runs",
+    )
+    fuz.add_argument(
+        "--manifest-condition",
+        default=None,
+        choices=["baseline", "candidate", "artifact-only", "feedback-only", "negative-control"],
+        help="Override campaign_manifest.json validation condition",
     )
     fuz.add_argument(
         "--grammar-dir", type=Path, default=None,
@@ -148,6 +170,46 @@ def build_parser() -> argparse.ArgumentParser:
     fuz.add_argument(
         "--diff-cmd", action="append", default=[],
         help="Reference target for differential fuzzing (repeatable)",
+    )
+    fuz.add_argument(
+        "--diff-trace", type=Path, default=None,
+        help="Append one JSONL row per differential oracle invocation. "
+             "This is an experimental pre-dedup stream for offline analysis.",
+    )
+    fuz.add_argument(
+        "--feature-dump", type=Path, default=None,
+        help="Append one JSONL row per differential execution with input-side "
+             "features (sha1, length, applied mutator strategies, divergence, "
+             "diff_fields). This is an experimental offline-analysis feed.",
+    )
+    fuz.add_argument(
+        "--lattice-atoms", type=Path, default=None,
+        help="Experimental external-research hook: path to strategy atom "
+             "weights. Matching mutator strategies get startup weight boosts.",
+    )
+    fuz.add_argument(
+        "--automaton-witnesses", type=Path, default=None,
+        help="Experimental external-research hook: path to disagreement "
+             "witness weights. Matching mutator strategies get startup boosts.",
+    )
+    fuz.add_argument(
+        "--stopping-signal", type=Path, default=None,
+        help="Experimental external-research hook: path to a stopping-signal "
+             "JSON file. Accepted payloads include either the full external "
+             "analysis JSON or {phase, missing_mass_upper, n_samples}.",
+    )
+    fuz.add_argument(
+        "--dedup-atoms", type=Path, default=None,
+        help="Experimental external-research hook: path to a JSON file with "
+             "an atoms list. Differential findings that hit the same atom "
+             "subset share a coarse dedup key; non-overlapping findings fall "
+             "back to the normal dedup path.",
+    )
+    fuz.add_argument(
+        "--implication-base", type=Path, default=None,
+        help="Experimental external-research hook: path to an implication "
+             "base. Matching implication violations are written as INFO "
+             "diagnostics to violations.jsonl.",
     )
     fuz.add_argument(
         "--dict-file", type=Path, default=None,
@@ -172,7 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--persistent", action="store_true",
-        help="Use persistent target mode (keep subprocess alive, ~50x faster)",
+        help="Use persistent target mode when the target wrapper supports it",
     )
     fuz.add_argument(
         "--resume", action="store_true",
@@ -185,18 +247,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     fuz.add_argument(
         "--campaign", default=None,
-        help="Campaign preset (cve_detect, patch_bypass, novel). "
+        help="Campaign preset (cve_detect, patch_bypass, novel, hrs_stable, hrs_research, hrs_hybrid, pgwire_stable, pgwire_research, pgwire_hybrid). "
              "Pre-configures oracle/mutators/seeds for the campaign goal.",
     )
 
-    # ── Exploration strategy flags ─────────────────────────────
+    # Exploration strategy flags. Several are research-oriented heuristics;
+    # see docs/methodology-status.md before making methodology claims.
     fuz.add_argument(
         "--mcts", action="store_true",
-        help="Use MCTS-guided grammar derivation (UCB1 production selection)",
+        help="Use experimental UCB1-guided grammar production selection",
     )
     fuz.add_argument(
         "--mcts-exploration", type=float, default=1.41,
-        help="MCTS exploration weight (UCB1 c parameter, default: 1.41)",
+        help="UCB1 exploration weight for --mcts (default: 1.41)",
     )
     fuz.add_argument(
         "--mutator-scheduler", default="random",
@@ -209,7 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--linucb-alpha", type=float, default=1.0,
-        help="LinUCB exploration parameter (default: 1.0)",
+        help="LinUCB exploration parameter for the experimental mutator scheduler (default: 1.0)",
     )
     fuz.add_argument(
         "--danger-boost", action="store_true", default=True,
@@ -221,7 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--adaptive-coverage", action="store_true",
-        help="Enable CEGAR-inspired adaptive coverage abstraction",
+        help="Enable experimental adaptive differential feature granularity",
     )
     fuz.add_argument(
         "--adaptive-level", type=int, default=1, choices=range(5),
@@ -229,7 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--adaptive-upper-pct", type=float, default=5.0,
-        help="Coarsen when corpus%% exceeds this threshold (default: 5.0)",
+        help="Refine when corpus%% exceeds this threshold (default: 5.0)",
     )
     fuz.add_argument(
         "--adaptive-check-interval", type=int, default=5000,
@@ -245,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--guidance", default=None, choices=["jwt", "saml"],
-        help="Enable static-analysis guidance for mutation bias and finding attribution",
+        help="Enable experimental regex/AST guidance for mutation bias and finding attribution",
     )
     fuz.add_argument(
         "--guidance-profiles", type=Path, default=None,
@@ -253,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fuz.add_argument(
         "--concolic", action="store_true", default=False,
-        help="Enable concolic constraint extraction and solving (SAML only)",
+        help="Enable experimental targeted mutation from constraints/properties/source hints",
     )
     fuz.add_argument(
         "--concolic-budget", type=float, default=0.10,
@@ -262,7 +325,7 @@ def build_parser() -> argparse.ArgumentParser:
     fuz.add_argument(
         "--concolic-mode", choices=["expert", "learned", "hybrid", "whitebox"],
         default="hybrid",
-        help="Concolic mode: 'hybrid' (default), 'whitebox' (coverage-guided, no expert), 'expert' (v1), 'learned' (v2)",
+        help="Targeted-mutation mode: hybrid (default), whitebox, expert, or learned",
     )
 
     # ── verify-browser subcommand ──────────────────────────────
@@ -324,7 +387,8 @@ def cmd_generate(args: argparse.Namespace) -> int:
     text = args.separator.join(outputs)
 
     if args.output:
-        args.output.write_text(text, encoding="utf-8")
+        # Preserve exact line endings for raw-wire grammars such as HRS streams.
+        args.output.write_bytes(text.encode("utf-8"))
         print(f"Wrote {args.count} output(s) to {args.output}", file=sys.stderr)
     else:
         print(text)
@@ -375,6 +439,11 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_fuzz(args: argparse.Namespace) -> int:
     """Handle the 'fuzz' command."""
+    from .fuzzer.campaign_manifest import (
+        CampaignManifestInput,
+        argv_to_cli,
+        build_campaign_manifest,
+    )
     from .fuzzer.engine import FuzzEngine
     from .fuzzer.grammar_source import GrammarInputSource
 
@@ -431,7 +500,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
 
-    # MCTS UCB table (shared between input source and grammar mutator)
+    # UCB table for experimental grammar production selection.
     ucb_table = None
     if getattr(args, "mcts", False):
         from .fuzzer.mcts import UCBTable
@@ -455,8 +524,19 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         campaign_mode=_campaign_mode,
     )
 
+    apply_mutator_research_hooks(
+        mutators=mutators,
+        lattice_atoms_path=getattr(args, "lattice_atoms", None),
+        automaton_witnesses_path=getattr(args, "automaton_witnesses", None),
+    )
+
     # Scheduler
     scheduler = build_seed_scheduler(args.scheduler, args.seed)
+
+    apply_stopping_signal_hook(
+        scheduler=scheduler,
+        stopping_signal_path=getattr(args, "stopping_signal", None),
+    )
 
     # Mutator scheduler
     mutator_scheduler = build_mutator_scheduler(
@@ -467,7 +547,7 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
     )
 
     # Oracles — auto-add DiffOracle in differential mode
-    _DIFF_ONLY_ORACLES = {"sanitizer_diff", "markdown", "domclobber_diff", "sandbox"}
+    _DIFF_ONLY_ORACLES = {"sanitizer_diff", "markdown", "domclobber_diff", "sandbox", "request_smuggling", "waf_bypass", "pgwire"}
     diff_only_requested = requested_oracle_names & _DIFF_ONLY_ORACLES
     if diff_only_requested and not is_diff_mode:
         names = ", ".join(sorted(diff_only_requested))
@@ -480,14 +560,32 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
 
     oracles = build_oracles(args.oracle)
     has_sanitizer_diff = False
+    diff_trace_sink: object | None = None
+    feature_dump_sink: object | None = None
     if is_diff_mode:
         diff_setup = configure_differential_oracles(
             oracles=oracles,
             oracle_csv=args.oracle,
             reference_targets=reference_targets,
+            trace_path=getattr(args, "diff_trace", None),
+            feature_dump_path=getattr(args, "feature_dump", None),
         )
         oracles = diff_setup.oracles
         has_sanitizer_diff = diff_setup.has_sanitizer_diff
+        diff_trace_sink = diff_setup.trace_sink
+        feature_dump_sink = diff_setup.feature_sink
+        if diff_trace_sink is not None:
+            print(
+                f"  Diff trace: appending pre-dedup JSONL to "
+                f"{getattr(diff_trace_sink, 'path', '(unknown)')}",
+                file=sys.stderr,
+            )
+        if feature_dump_sink is not None:
+            print(
+                f"  Feature dump: appending per-input JSONL to "
+                f"{getattr(feature_dump_sink, 'path', '(unknown)')}",
+                file=sys.stderr,
+            )
 
     coverage = build_coverage(
         args,
@@ -496,75 +594,69 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         has_sanitizer_diff=has_sanitizer_diff,
     )
 
+    manifest_artifacts: dict[str, str] = {}
+    if getattr(args, "diff_trace", None):
+        manifest_artifacts["diff_trace"] = str(args.diff_trace)
+    if getattr(args, "feature_dump", None):
+        manifest_artifacts["feature_dump"] = str(args.feature_dump)
+    manifest_options = {
+        "scheduler": getattr(args, "scheduler", ""),
+        "mutator_scheduler": getattr(args, "mutator_scheduler", "random"),
+        "mcts": getattr(args, "mcts", False),
+        "adaptive_coverage": getattr(args, "adaptive_coverage", False),
+        "target_coverage": getattr(args, "target_coverage", False),
+        "guidance": getattr(args, "guidance", None),
+        "concolic": getattr(args, "concolic", False),
+        "danger_boost": getattr(args, "danger_boost", True),
+        "lattice_atoms": str(getattr(args, "lattice_atoms", "") or ""),
+        "automaton_witnesses": str(getattr(args, "automaton_witnesses", "") or ""),
+        "stopping_signal": str(getattr(args, "stopping_signal", "") or ""),
+        "dedup_atoms": str(getattr(args, "dedup_atoms", "") or ""),
+        "implication_base": str(getattr(args, "implication_base", "") or ""),
+        "initial_seed_count": getattr(args, "initial_seeds", 0),
+        "campaign": getattr(args, "campaign", None),
+        "method": getattr(args, "manifest_method", None),
+        "condition": getattr(args, "manifest_condition", None),
+    }
+    campaign_manifest = build_campaign_manifest(
+        CampaignManifestInput(
+            grammar=args.grammar,
+            target_cmd=args.target_cmd,
+            diff_cmds=tuple(diff_cmds),
+            output_dir=args.output_dir,
+            seed=args.seed,
+            count=args.count,
+            timeout=args.timeout,
+            cli=argv_to_cli(),
+            seeds_dir=getattr(args, "seeds_dir", None),
+            artifacts=manifest_artifacts,
+            options=manifest_options,
+        )
+    )
+
     # Danger-weighted seed scheduling
     from .fuzzer.schedulers.danger_booster import DangerBooster
     danger_booster = DangerBooster() if getattr(args, "danger_boost", True) else None
 
-    # Static-analysis guidance (optional)
-    guidance_hooks = None
-    if getattr(args, "guidance", None):
-        from .guidance.integration import build_guidance_engine, GuidanceFuzzHooks
-        guidance_engine = build_guidance_engine(
-            protocol=args.guidance,
-            profile_dir=getattr(args, "guidance_profiles", None),
-        )
-        if guidance_engine:
-            guidance_hooks = GuidanceFuzzHooks(guidance_engine)
-            print(f"  Guidance: {args.guidance} — "
-                  f"{guidance_engine.metrics.gaps_identified} gaps, "
-                  f"{guidance_engine.metrics.targeted_seeds_generated} seeds",
-                  file=sys.stderr)
-        else:
-            print(f"  Guidance: {args.guidance} — no libraries found, disabled",
-                  file=sys.stderr)
-
-    # Concolic constraint extraction + solving (optional, domain-agnostic)
-    concolic_coordinator = None
-    if getattr(args, "concolic", False):
-        concolic_mode = getattr(args, "concolic_mode", "hybrid")
-        budget = getattr(args, "concolic_budget", 0.10)
-
-        # Auto-detect domain plugin from oracle/grammar
-        domain_plugin = None
-        from .fuzzer.concolic.plugins.registry import get_plugin
-        oracle_name = getattr(args, "oracle", None)
-        grammar_name = getattr(args, "grammar", None)
-        domain_plugin = get_plugin(oracle=oracle_name, grammar=grammar_name)
-        plugin_name = type(domain_plugin).__name__ if domain_plugin else "default(SAML)"
-
-        if concolic_mode == "expert":
-            from .fuzzer.concolic.coordinator import ConcolicCoordinator
-            from .fuzzer.concolic.constraint_extractor import ConstraintExtractor
-            from .fuzzer.concolic.solver import ConstraintSolver
-            concolic_coordinator = ConcolicCoordinator(
-                extractor=ConstraintExtractor(),
-                solver=ConstraintSolver(seed=args.seed),
-                budget_pct=budget,
-            )
-        elif concolic_mode == "learned":
-            from .fuzzer.concolic.property_guided import PropertyGuidedCoordinator
-            concolic_coordinator = PropertyGuidedCoordinator(
-                budget_pct=budget,
-                seed=args.seed,
-            )
-        elif concolic_mode == "whitebox":
-            from .fuzzer.concolic.hybrid_coordinator import HybridCoordinator
-            concolic_coordinator = HybridCoordinator(
-                budget_pct=budget,
-                seed=args.seed,
-                use_expert=False,
-                use_coverage=True,
-                domain_plugin=domain_plugin,
-            )
-        else:  # hybrid (default)
-            from .fuzzer.concolic.hybrid_coordinator import HybridCoordinator
-            concolic_coordinator = HybridCoordinator(
-                budget_pct=budget,
-                seed=args.seed,
-                domain_plugin=domain_plugin,
-            )
-        print(f"  Concolic: enabled (mode={concolic_mode}, plugin={plugin_name}, budget={budget:.0%})",
-              file=sys.stderr)
+    guidance_hooks = build_guidance_hooks(
+        protocol=getattr(args, "guidance", None),
+        profile_dir=getattr(args, "guidance_profiles", None),
+    )
+    concolic_coordinator = build_targeted_mutation_coordinator(
+        enabled=getattr(args, "concolic", False),
+        mode=getattr(args, "concolic_mode", "hybrid"),
+        budget=getattr(args, "concolic_budget", 0.10),
+        seed=args.seed,
+        oracle=getattr(args, "oracle", None),
+        grammar=getattr(args, "grammar", None),
+    )
+    deduplicator = build_research_deduplicator(
+        getattr(args, "dedup_atoms", None),
+    )
+    oracles = wrap_implication_oracles(
+        oracles,
+        getattr(args, "implication_base", None),
+    )
 
     # Build and run engine
     engine = FuzzEngine(
@@ -591,6 +683,9 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         target_coverage=getattr(args, "target_coverage", False),
         guidance_hooks=guidance_hooks,
         concolic=concolic_coordinator,
+        fixed_primary=_campaign_mode.startswith("waf_"),
+        deduplicator=deduplicator,
+        campaign_manifest=campaign_manifest,
     )
 
     print(f"Starting fuzzer: grammar={args.grammar}, target={args.target_cmd}",
@@ -608,15 +703,15 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
         print(f"  Danger boost: enabled", file=sys.stderr)
     if getattr(args, "mcts", False):
         expl = getattr(args, "mcts_exploration", 1.41)
-        print(f"  MCTS: enabled (c={expl})", file=sys.stderr)
+        print(f"  UCB grammar selection: enabled (c={expl})", file=sys.stderr)
     if getattr(args, "target_coverage", False):
         print(f"  Target coverage: enabled (V8/settrace)", file=sys.stderr)
     if getattr(args, "adaptive_coverage", False):
         lvl = getattr(args, "adaptive_level", 1)
-        print(f"  Adaptive coverage: L{lvl} (CEGAR)", file=sys.stderr)
+        print(f"  Adaptive coverage: L{lvl} (experimental)", file=sys.stderr)
     print(f"  Initial seeds: {args.initial_seeds}", file=sys.stderr)
     if guidance_hooks and guidance_hooks.active:
-        print(f"  Guidance: {args.guidance} (static analysis → mutation bias)", file=sys.stderr)
+        print(f"  Guidance: {args.guidance} (experimental mutation bias)", file=sys.stderr)
     if getattr(args, "seeds_dir", None):
         print(f"  Seeds dir: {args.seeds_dir}", file=sys.stderr)
     if getattr(args, "import_findings", None):
@@ -660,6 +755,19 @@ def cmd_fuzz(args: argparse.Namespace) -> int:
 
     # Print final report
     print(stats.report(), file=sys.stderr)
+
+    # Close the diff trace sink, if any, so the JSONL file is fully flushed.
+    if diff_trace_sink is not None:
+        try:
+            diff_trace_sink.close()
+        except Exception:
+            pass
+    if feature_dump_sink is not None:
+        try:
+            feature_dump_sink.close()
+        except Exception:
+            pass
+
     return 0
 
 
@@ -696,6 +804,20 @@ def cmd_verify_browser(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
+    import atexit
+
+    def _exit_diagnostics():
+        """Log when the process exits — helps diagnose silent crashes."""
+        try:
+            import time as _time
+            msg = f"[EXIT] Process exiting at {_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            sys.stderr.write(msg)
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+    atexit.register(_exit_diagnostics)
+
     parser = build_parser()
     args = parser.parse_args()
 
@@ -720,4 +842,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Enable faulthandler so native crashes (e.g., Rust extension segfault)
+    # dump a traceback to stderr instead of dying silently.
+    import faulthandler
+    faulthandler.enable()
     main()

@@ -1,0 +1,17 @@
+<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol"
+                xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion"
+                xmlns:saml1="urn:oasis:names:tc:SAML:1.0:assertion"
+                ID="_resp_python_strict_ns_001"
+                Version="2.0"
+                IssueInstant="2026-03-21T10:40:00Z"
+                Destination="https://sp.example.com/acs">
+  <saml1:Issuer>https://idp.example.com</saml1:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+  </samlp:Status>
+  <saml1:Assertion ID="_assert_python_strict_ns_001" IssueInstant="2026-03-21T10:40:00Z">
+    <saml1:Subject>
+      <saml1:NameIdentifier>strict-ns@example.com</saml1:NameIdentifier>
+    </saml1:Subject>
+  </saml1:Assertion>
+</samlp:Response>

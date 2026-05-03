@@ -1,0 +1,233 @@
+version: "3.8"
+
+services:
+  # ============================================================
+  # BACKEND (shared echo server, no WAF)
+  # ============================================================
+  waf_backend:
+    image: python:3.11-slim
+    working_dir: /srv
+    command: python /srv/waf_marker_backend.py --port 8081
+    volumes:
+      - ./waf_marker_backend.py:/srv/waf_marker_backend.py:ro
+    ports:
+      - "19100:8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('127.0.0.1',8081)); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ============================================================
+  # WAF 1: Coraza + Caddy (port 19101)
+  # ============================================================
+  coraza_caddy:
+    build:
+      context: ./coraza-caddy
+      dockerfile: Dockerfile
+    depends_on:
+      waf_backend:
+        condition: service_healthy
+    ports:
+      - "19101:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================
+  # WAF 2: ModSecurity + Nginx (port 19102)
+  # ============================================================
+  modsec_nginx:
+    image: owasp/modsecurity-crs:nginx-alpine
+    depends_on:
+      waf_backend:
+        condition: service_healthy
+    environment:
+      - BACKEND=http://waf_backend:8081
+      - MODSEC_RULE_ENGINE=On
+      - PARANOIA=1
+      - ANOMALY_INBOUND=5
+      - ANOMALY_OUTBOUND=4
+      - PROXY_SSL=off
+    ports:
+      - "19102:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================
+  # WAF 3: ModSecurity + Apache (port 19103)
+  # ============================================================
+  modsec_apache:
+    image: owasp/modsecurity-crs:apache-alpine
+    depends_on:
+      waf_backend:
+        condition: service_healthy
+    environment:
+      - BACKEND=http://waf_backend:8081
+      - MODSEC_RULE_ENGINE=On
+      - PARANOIA=1
+      - ANOMALY_INBOUND=5
+      - ANOMALY_OUTBOUND=4
+      - PROXY_SSL=off
+    ports:
+      - "19103:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================
+  # WAF 4: NAXSI + Nginx (port 19105)
+  # Whitelist-based WAF with libinjection — different engine from CRS
+  # ============================================================
+  naxsi:
+    image: ghcr.io/wargio/naxsi:main
+    depends_on:
+      waf_backend:
+        condition: service_healthy
+    volumes:
+      - ./naxsi/nginx.conf:/nginx/conf/nginx.conf:ro
+    ports:
+      - "19105:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================
+  # WAF 5: lua-resty-waf + OpenResty (port 19106)
+  # Lua-based anomaly scoring WAF — distinct rule engine from CRS/NAXSI
+  # ============================================================
+  lua_resty_waf:
+    build:
+      context: ./lua-resty-waf
+      dockerfile: Dockerfile
+    depends_on:
+      waf_backend:
+        condition: service_healthy
+    ports:
+      - "19106:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ============================================================
+  # PARSE ECHO BACKENDS (no WAF — direct application-level parse validation)
+  # ============================================================
+
+  # 19110: Python stdlib (urllib.parse + custom multipart)
+  waf_parse_stdlib:
+    image: python:3.11-slim
+    working_dir: /srv
+    command: python /srv/waf_parse_echo_backend.py --port 8082
+    volumes:
+      - ./waf_parse_echo_backend.py:/srv/waf_parse_echo_backend.py:ro
+    ports:
+      - "19110:8082"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('127.0.0.1',8082)); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 19111: Flask/Werkzeug
+  waf_parse_flask:
+    image: python:3.11-slim
+    working_dir: /srv
+    command: >
+      sh -c "pip install flask --quiet --no-cache-dir &&
+             python /srv/flask_parse_backend.py --port 5000"
+    volumes:
+      - ./flask_parse_backend.py:/srv/flask_parse_backend.py:ro
+    ports:
+      - "19111:5000"
+    mem_limit: 512m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.connect(('127.0.0.1',5000)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # 19112: Express.js / busboy (Node 20)
+  waf_parse_express:
+    image: node:20-slim
+    working_dir: /srv
+    command: >
+      sh -c "npm install express multer body-parser --quiet &&
+             node /srv/express_parse_backend.js"
+    volumes:
+      - ./express_parse_backend.js:/srv/express_parse_backend.js:ro
+    environment:
+      - PORT=3000
+    ports:
+      - "19112:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # 19113: PHP 8.2 built-in server
+  waf_parse_php:
+    image: php:8.2-cli
+    working_dir: /srv
+    command: php -S 0.0.0.0:8084 /srv/php_parse_backend.php
+    volumes:
+      - ./php_parse_backend.php:/srv/php_parse_backend.php:ro
+    ports:
+      - "19113:8084"
+    mem_limit: 512m
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "php", "-r", "$c=@fsockopen('127.0.0.1',8084,$e,$m,2); exit($c?0:1);"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # 19114: Spring Boot (multi-stage build)
+  waf_parse_spring:
+    build:
+      context: ./spring_parse_backend
+      dockerfile: Dockerfile
+    ports:
+      - "19114:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  # ============================================================
+  # H2c frontend: Caddy with HTTP/2 Prior Knowledge (port 19104)
+  # Receives H2c requests, reverse-proxies to waf_backend over H1.
+  # Used for H2 → H1 downgrade smuggling research.
+  # ============================================================
+  h2c_caddy:
+    build:
+      context: ./coraza-caddy
+      dockerfile: Dockerfile
+    depends_on:
+      waf_backend:
+        condition: service_healthy
+    volumes:
+      - ./caddy_h2c.conf:/etc/caddy/Caddyfile:ro
+    ports:
+      - "19104:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5

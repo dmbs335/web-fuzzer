@@ -1,0 +1,17 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-hdr-null-01
+X-WF-Family: hdr_null_byte
+X-WF-Tags: HDR.null,header,null_byte
+X-WF-Canary-Marker: WF-CANARY-hdrnl00001
+X-WF-Payload-Type: sqli
+X-WF-Payload: JyBPUiAxPTEtLQ==
+X-WF-Axis-Evasion: header
+X-WF-Axis-Payload: sqli
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: header_parse
+X-WF-Axis-Variant: injection
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 44
+
+param=WF-CANARY-hdrnl00001&q=' OR 1=1--&x=1

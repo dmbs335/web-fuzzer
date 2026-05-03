@@ -1,0 +1,18 @@
+POST /reflect HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-ct-dup-01
+X-WF-Family: ct_duplicate
+X-WF-Tags: CT.dup,content_type,header_ambiguity
+X-WF-Canary-Marker: WF-CANARY-ctdup00001
+X-WF-Payload-Type: xss
+X-WF-Payload: PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+X-WF-Axis-Evasion: content_type
+X-WF-Axis-Payload: xss
+X-WF-Axis-Depth: surface
+X-WF-Axis-Parser: header_parse
+X-WF-Axis-Variant: duplicate
+Content-Type: text/plain
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 68
+
+param=WF-CANARY-ctdup00001&data=<script>alert(1)</script>&safe=value

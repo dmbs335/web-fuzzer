@@ -110,7 +110,7 @@ class TreeGenerator:
     """Generates strings while building a DerivationTree.
 
     Same algorithm as core/generator.py but records the derivation path.
-    Optionally uses a :class:`UCBTable` for MCTS-guided production
+    Optionally uses a :class:`UCBTable` for UCB-guided production
     selection (UCB1 instead of weighted random).
     """
 
@@ -209,7 +209,7 @@ class TreeGenerator:
 
         weights = [p.weight for p in productions]
 
-        # MCTS-guided selection when UCB table is available.
+        # UCB-guided selection when the experimental table is available.
         if self.ucb_table is not None and rule.name:
             sub_idx = self.ucb_table.select_production(
                 rule.name, len(productions), weights,
@@ -298,7 +298,7 @@ class GrammarInputSource:
     Generated inputs include the DerivationTree in metadata for
     grammar-aware mutation.
 
-    When a :class:`UCBTable` is provided, the generator uses MCTS-guided
+    When a :class:`UCBTable` is provided, the generator uses UCB-guided
     production selection and supports ``update()`` for reward backpropagation.
     """
 
@@ -328,7 +328,7 @@ class GrammarInputSource:
         )
 
     def update(self, inp: Input, result: "ScheduleResult") -> None:
-        """Backpropagate execution feedback to the MCTS UCB1 table.
+        """Backpropagate execution feedback to the UCB1 table.
 
         Duck-typed — called by the engine only when this method exists.
         No-op when no UCBTable is attached.

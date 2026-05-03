@@ -1,0 +1,18 @@
+POST /api/submit HTTP/1.1
+Host: target.local
+X-WF-Request-ID: seed-expect-01
+X-WF-Family: hdr_expect_continue
+X-WF-Tags: HDR.expect,header,100_continue,desync
+X-WF-Canary-Marker: WF-CANARY-expect0001
+X-WF-Payload-Type: sqli
+X-WF-Payload: JyBPUiAxPTEtLQ==
+X-WF-Axis-Evasion: header_leniency
+X-WF-Axis-Payload: sqli
+X-WF-Axis-Depth: single_layer
+X-WF-Axis-Parser: body_framing
+X-WF-Axis-Variant: expect_continue
+Expect: 100-continue
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 47
+
+param=WF-CANARY-expect0001&data=' OR 1=1--&x=1

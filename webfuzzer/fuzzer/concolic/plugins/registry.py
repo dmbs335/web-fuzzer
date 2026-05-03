@@ -12,6 +12,8 @@ _PLUGIN_MAP: dict[str, str] = {
     "saml_validator": "saml_plugin.SamlPlugin",
     "jwt": "jwt_plugin.JwtPlugin",
     "cookie": "cookie_plugin.CookiePlugin",
+    "deser": "deser_plugin.DeserPlugin",
+    "crash": "deser_plugin.DeserPlugin",
 }
 
 # Grammar names that map to domains
@@ -19,6 +21,7 @@ _GRAMMAR_MAP: dict[str, str] = {
     "saml": "saml",
     "jwt": "jwt",
     "cookie": "cookie",
+    "deser": "deser",
 }
 
 

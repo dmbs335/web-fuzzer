@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -11,12 +13,16 @@ class DifferentialSetup:
 
     oracles: list
     has_sanitizer_diff: bool = False
+    trace_sink: Any = None
+    feature_sink: Any = None
 
 
 def configure_differential_oracles(
     oracles: list,
     oracle_csv: str,
     reference_targets: list,
+    trace_path: str | Path | None = None,
+    feature_dump_path: str | Path | None = None,
 ) -> DifferentialSetup:
     """Attach the differential oracle with the right domain strategies."""
     from ...fuzzer.oracles.diff_oracle import DiffOracle
@@ -44,25 +50,25 @@ def configure_differential_oracles(
     has_domclobber = any(
         getattr(o, "name", "") == "domclobber" for o in oracles
     )
-    has_apache_confusion = "apache_confusion" in oracle_names
     has_graphql_exec = "graphql_exec" in oracle_names
     has_markdown = "markdown" in oracle_names
     has_sanitizer_diff = "sanitizer_diff" in oracle_names
     has_domclobber_diff = "domclobber_diff" in oracle_names
     has_sandbox = "sandbox" in oracle_names
+    has_request_smuggling = "request_smuggling" in oracle_names
 
-    if has_sandbox:
+    if has_request_smuggling:
+        from ...fuzzer.oracles.request_smuggling_diff_strategy import (
+            get_request_smuggling_strategies,
+        )
+
+        strategies = get_request_smuggling_strategies()
+    elif has_sandbox:
         from ...fuzzer.oracles.sandbox_diff_strategy import (
             SandboxEscapeDiffStrategy,
         )
 
         strategies = [SandboxEscapeDiffStrategy()]
-    elif has_apache_confusion:
-        from ...fuzzer.oracles.apache_confusion_diff_strategy import (
-            get_apache_confusion_strategies,
-        )
-
-        strategies = get_apache_confusion_strategies()
     elif has_markdown:
         from ...fuzzer.oracles.markdown_diff_strategy import get_markdown_strategies
 
@@ -153,7 +159,22 @@ def configure_differential_oracles(
     diff_oracles.append(
         DiffOracle(reference_targets=reference_targets, strategies=strategies),
     )
+
+    # Build optional JSONL sinks for fuzzing-formal-research analysis.
+    trace_sink = None
+    feature_sink = None
+    if trace_path is not None:
+        from ...fuzzer.oracles.diff_trace import DiffTraceSink
+
+        trace_sink = DiffTraceSink(Path(trace_path))
+    if feature_dump_path is not None:
+        from ...fuzzer.oracles.feature_dump import FeatureDumpSink
+
+        feature_sink = FeatureDumpSink(Path(feature_dump_path))
+
     return DifferentialSetup(
         oracles=diff_oracles,
         has_sanitizer_diff=has_sanitizer_diff,
+        trace_sink=trace_sink,
+        feature_sink=feature_sink,
     )

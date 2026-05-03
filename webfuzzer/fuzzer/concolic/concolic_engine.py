@@ -4,8 +4,8 @@ Uses actual code coverage from Python sys.settrace / Node V8 Profiler
 to identify uncovered branches, looks up the source-level condition in
 BranchConditionDB, and generates inputs that target those specific branches.
 
-This is true concolic execution: concrete execution provides coverage,
-source analysis provides constraints, targeted mutation provides new inputs.
+Treat this as a targeted mutation strategy. It uses concrete execution and
+source hints, but it is not a full symbolic/concolic executor.
 """
 
 from __future__ import annotations

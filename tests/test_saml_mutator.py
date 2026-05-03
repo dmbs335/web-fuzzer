@@ -113,8 +113,8 @@ class TestSamlMutator:
             assert len(result.data) <= MAX_OUTPUT_SIZE
 
     def test_strategy_count(self, mutator):
-        assert len(mutator._strategies) == 101
-        assert len(mutator._weights) == 101
+        assert len(mutator._strategies) == 102
+        assert len(mutator._weights) == 102
 
     def test_weights_positive(self, mutator):
         for w in mutator._weights:
